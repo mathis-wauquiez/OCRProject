@@ -1,0 +1,6 @@
+
+/data/extracted
+*.pyc
+/data/datasets/databases
+*.pkl
+*.gz
