@@ -1,0 +1,33 @@
+
+
+_target_: src.registration.multiscale_registration.MultiscaleIC
+
+
+singleScaleIC:
+  _target_: src.registration.single_scale.InverseCompositional
+
+  transform_type: 'homography' # 'translation', 'euclidean', 'similarity', 'affinity', 'homography'
+
+  gradient_method:
+    _target_: src.registration.gradients.Gradients
+    method: 'farid5'
+    C: 1
+    device: 'cuda'
+
+  error_function: 'lorentzian' # 'l2', 'lorentzian', 'geman_mcclure', 'charbonnier'
+  delta: 5                     # Boundary margin for discarding pixels
+  epsilon: 1e-3                # Convergence threshold ||Δp|| ≤ ε
+  max_iter: 120                # Maximum iterations
+  lambda_init: 80.0            # Initial λ for robust error functions
+  lambda_min: 5.0              # Minimum λ
+  lambda_decay: 0.9            # λ multiplier per iteration (0.9 in paper)
+
+
+gaussianPyramid:
+  _target_: src.registration.gaussian_pyramid.GaussianPyramid
+  eta:      0.5   # downsampling factor
+  sigma_0:  0.6   # initial std
+  ksize_factor: 8 # kernel size = 2 * sigma * ksize_factor | 1
+  min_size: 32
+
+  

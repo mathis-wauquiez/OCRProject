@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -fopenmp -rdynamic CMakeFiles/main.dir/curv.cpp.o CMakeFiles/main.dir/gass.cpp.o CMakeFiles/main.dir/image.cpp.o CMakeFiles/main.dir/io_png.c.o CMakeFiles/main.dir/levelLine.cpp.o CMakeFiles/main.dir/lltree.cpp.o CMakeFiles/main.dir/utility.cpp.o CMakeFiles/main.dir/affine_sp_vectorization.cpp.o CMakeFiles/main.dir/main.cpp.o -o main  -lpng -lz 

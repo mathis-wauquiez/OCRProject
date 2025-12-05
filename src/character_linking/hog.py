@@ -10,72 +10,8 @@ import cv2
 import numpy as np
 
 from einops import rearrange
-from .utils import connectedComponent
-
-@dataclass
-class HOGParameters:
-
-    device: str = "cuda" if torch.cuda.is_available() else 'cpu'
-    C: int      = 1
-    partial_output: bool = True
-
-    #! Gradients computation
-    method: str         = 'gaussian'
-    """ Either gaussian, farid_3x3, farid_5x5, hypomode or central differences """
-    grdt_sigma: float   = 3.5
-    ksize_factor: float = 8
-
-
-    #! HOG Parameters
-    cell_height: int    = 16
-    """ Height of the cells used to compute histograms """
-    cell_width: int     = 16
-    """ Width of the cells used to compute histograms """
-    psize:      int     = 128
-    """ The size of the patches """
-    num_bins: int       = 8
-    """ Number of bins in the histogram """
-    sigma: float | None = 1
-    """ Parameter for the gaussian kernel """
-
-    threshold: float | None = 0.2
-    """ Threshold the values of the normalized histograms to 0.2 """
-
-@dataclass
-class fullHOGOutput:
-    dx: Tensor          # C, H, W
-    dy: Tensor          # C, H, W
-    patches_grdt_magnitude: Tensor   # N, C, h, w
-    patches_grdt_orientation: Tensor # N, C, h, w
-    patches_image           : Tensor # N, C, h, w
-    histograms: Tensor               # N, C, N_cells, N_bins tensor with the normalized histograms
-
-
-
-@dataclass
-class featureMatchingParameters:
-    #! Feature matching
-    metric: str = "CEMD"
-    """ Metric used for the matching. Either CEMD, L1, L2 or EMD """
-    epsilon: float = 0.005
-    """ Expectancy of false positives on all the dataset under the normality hypothesis """
-    reciprocal_only: bool = True
-    """ Wether or not the matches should be reciprocal. When true, the distances have to be computed twice. """
-    partial_output: bool = True
-    """ Return everything or only the matches """
-
-@dataclass
-class featureMatchingOutputs:
-    match_indices: Tensor
-    """ (N_matches, 2) Tensor matching queries (match_indices[:, 0]) to their keys (match_indices[:, 1])"""
-    deltas: Tensor
-    """ The threshold values. If the distances are inferior to this, we reject the feature independance hypothesis and match the patches. """
-    total_dissimilarities: Tensor
-    """ (N1, N2) aggregated dissimilarities for forward matching """
-    deltas2: Optional[Tensor] = None
-    """ The threshold values for backward matching (when reciprocal_only=True) """
-    total_dissimilarities2: Optional[Tensor] = None
-    """ (N2, N1) aggregated dissimilarities for backward matching (when reciprocal_only=True) """
+from ..utils import connectedComponent
+from .params import HOGParameters, fullHOGOutput
 
 kernels = {
     'central_differences':{
@@ -99,8 +35,9 @@ kernels = {
 
 class HOG:
 
-    def __init__(self, params: HOGParameters):
+    def __init__(self, params: HOGParameters, custom_preprocess_fn = None):
         self._params = params
+        self.custom_preprocess_fn = custom_preprocess_fn
 
         self._instantiate_kernels()
 
@@ -173,6 +110,10 @@ class HOG:
         Returns:
             Histograms of shape (..., num_patches, num_bins)
         """
+        
+        # magn_patches = self.normalize(magn_patches)
+        # ori_patches = self.normalize(ori_patches)
+
         device = self._params.device
         dtype = magn_patches.dtype
 
@@ -195,14 +136,19 @@ class HOG:
         # Normalize orientations to [0, num_bins) range
         ori_normalized = ori_patches * num_bins
         
-        # Spatial distance weighting from cell center
-        y = torch.linspace(-1, 1, cell_height, device=device, dtype=dtype)
-        x = torch.linspace(-1, 1, cell_width, device=device, dtype=dtype)
-        yy, xx = torch.meshgrid(y, x, indexing='ij')
-        spatial_weight = torch.exp(-(yy**2 + xx**2) / 2 / sigma)
+
+        if sigma is not None:        
+            # Spatial distance weighting from cell center
+            y = torch.linspace(-1, 1, cell_height, device=device, dtype=dtype)
+            x = torch.linspace(-1, 1, cell_width, device=device, dtype=dtype)
+            yy, xx = torch.meshgrid(y, x, indexing='ij')
+            spatial_weight = torch.exp(-(yy**2 + xx**2) / 2 / sigma)
         
-        # Apply spatial weights to magnitudes
-        weighted_magnitudes = magn_patches * spatial_weight
+            # Apply spatial weights to magnitudes
+            weighted_magnitudes = magn_patches * spatial_weight
+        
+        else:
+            weighted_magnitudes = magn_patches
         
         # Flatten for bin assignment
         weighted_mag_flat = rearrange(weighted_magnitudes, '... h w -> ... (h w)')
@@ -228,9 +174,18 @@ class HOG:
         return histograms
     
     def normalize_histograms(self, histograms):
-        histograms = histograms / torch.norm(histograms)
-        histograms.clip_(-0.2, 0.2)
-        histograms /= torch.norm(histograms)
+        if self._params.normalize is True or self._params.normalize == "patch":
+            norm_dims = [-2, -1]
+        elif self._params.normalize == 'cell':
+            norm_dims = [-1]
+        elif self._params.normalize is None or self._params.normalize is False:
+            return histograms
+        else:
+            raise ValueError(f"Normalization must be a boolean, 'patch' or 'cell'. Received {self._params.normalize}.")
+        
+        histograms = histograms / torch.norm(histograms, dim=norm_dims, keepdim=True)
+        histograms.clip_(-self._params.threshold, self._params.threshold)
+        histograms /= torch.norm(histograms, dim=norm_dims, keepdim=True)
         return histograms
     
 
@@ -246,12 +201,17 @@ class HOG:
             magn_patches, ori_patches, img_patches = extract_patches(
                 comps, (magn, angle, image)
             )
+
+
+            sizes = [p.shape[-1] for p in magn_patches]
+
             magn_patches = self.normalize(magn_patches)
             ori_patches = self.normalize(ori_patches)
             img_patches = self.normalize(img_patches)
             
             histograms = self.compute_hog_histograms_trilinear(magn_patches, ori_patches)
-            histograms = self.normalize_histograms(histograms)
+            if self._params.normalize:
+                histograms = self.normalize_histograms(histograms)
             
             if self._params.partial_output:
                 del dx, dy 
@@ -265,148 +225,6 @@ class HOG:
                 patches_image=img_patches,
                 histograms=histograms
             )
-
-
-class featureMatching:
-
-    def __init__(self, params: featureMatchingParameters):
-
-        self._params = params
-
-    def match(self, query_histograms, key_histograms):
-        from torch.distributions import Normal
-        import psutil
-
-        device = query_histograms.device
-        epsilon = self._params.epsilon  # Expected number of false detections over the dataset
-
-        N1, Nh, Nbins = query_histograms.shape
-        N2, Nh, Nbins = key_histograms.shape
-
-        standard_normal = Normal(0, 1)
-
-        if not self._params.partial_output:
-            deltas = torch.zeros((N1,), device=device)
-            total_dissimilarities = torch.zeros((N1, N2))
-
-        available_memory = torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_reserved(0) if device == 'cuda' else psutil.virtual_memory().available
-        available_memory -= 100 * 2**20 # remove 100 MB to be sure everything fits in memory
-        element_size = query_histograms.element_size()
-
-        slice_memory = N2 * Nh * Nbins * element_size * 2
-
-        # Compute the batch size as the maximum amount of (N2, Nh, Nbins) slices we can fit in memory
-        batch_size = max(1, available_memory // slice_memory)
-
-        matches_list = []
-
-        for idx_start in range(0, N1, batch_size):
-            queries = query_histograms[idx_start:idx_start+batch_size]
-
-            # Compute the N_cells dissimilarities for the batch of queries
-            dissimilarities = self.compute_dissimilarities(queries, key_histograms) # N1, N2, N_cells
-
-            # Compute the sum of their mean/std
-            mu_tot   = dissimilarities.mean(dim=1).sum(-1)  # (N1,)
-            var_tot  = dissimilarities.var(dim=1).sum(-1)   # (N1,)
-            
-            # Compute the threshold and store it
-            delta = mu_tot + var_tot**.5 * standard_normal.icdf(torch.tensor(epsilon / (N1 * N2)))
-
-
-            # Compute total dissimilarities D(a^i, b^j) for all pairs
-            D = dissimilarities.sum(dim=-1)  # (N1, N2)
-
-            if not self._params.partial_output:
-                deltas[idx_start:idx_start+batch_size] = delta
-                total_dissimilarities[idx_start:idx_start+batch_size] = D
-
-            # Find eps-meaningful matches: D(a^i, b^j) <= delta_i(eps)
-            matches = D <= delta.unsqueeze(1)  # (N1, N2) boolean mask
-
-            # Get match indices (query_idx, candidate_idx)
-            match_indices = torch.nonzero(matches, as_tuple=False)  # (num_matches, 2)
-            matches_list.append(match_indices)
-
-        matches = torch.cat(matches_list, dim=0)
-
-        if self._params.partial_output:
-            return matches
-        
-        return matches, deltas, total_dissimilarities
-    
-    def keep_reciprocal(self, matches1, matches2):
-        matches2 = matches2[:, [1, 0]]
-        
-        # Use hashing approach: combine indices into unique keys
-        # key = query_idx * max_key_idx + key_idx
-        max_idx = max(matches1[:, 1].max(), matches2[:, 1].max()) + 1
-        
-        keys1 = matches1[:, 0] * max_idx + matches1[:, 1]
-        keys2 = matches2[:, 0] * max_idx + matches2[:, 1]
-        
-        # Find which keys from matches1 are also in matches2
-        mask = torch.isin(keys1, keys2)
-        
-        # Get reciprocal matches
-        reciprocal_matches = matches1[mask]
-        
-        return reciprocal_matches
-
-    def __call__(self, query_histograms, key_histograms):
-        # Forward matching
-        match1_output = self.match(query_histograms, key_histograms)
-        
-        # Handle partial output mode
-        if self._params.partial_output:
-            match1 = match1_output
-            
-            if self._params.reciprocal_only:
-                match2 = self.match(key_histograms, query_histograms)
-                return self.keep_reciprocal(match1, match2)
-            
-            return match1
-        
-        # Full output mode
-        match1, deltas1, dissim1 = match1_output
-        
-        if self._params.reciprocal_only:
-            match2, deltas2, dissim2 = self.match(key_histograms, query_histograms)
-            matches = self.keep_reciprocal(match1, match2)
-            
-            return featureMatchingOutputs(
-                match_indices=matches,
-                deltas=deltas1,
-                total_dissimilarities=dissim1,
-                deltas2=deltas2,
-                total_dissimilarities2=dissim2
-            )
-        
-        return featureMatchingOutputs(
-            match_indices=match1,
-            deltas=deltas1,
-            total_dissimilarities=dissim1
-        )
-    
-    def compute_dissimilarities(self, queries, keys):
-        if self._params.metric == "L2":
-            return torch.pow(queries[None, :] - keys[:, None], 2).sum(-1)
-        elif self._params.metric == 'CEMD':
-            X = queries.cumsum(-1)[:, None] - keys.cumsum(-1)[None, :] # (n_q, n_k, Nh, Nbins)
-
-            # Compute ||X_k||_1 for each k
-            X_padded = torch.cat([torch.zeros_like(X[..., :1]), X], dim=-1)  # ..., N+1
-
-            
-            l1_norms = []
-            for starting_bin in range(X.shape[-1]):
-                X_k = X - X_padded[..., starting_bin:starting_bin+1]  # Subtract X[k-1] from all positions
-                l1_norm = X_k.abs().sum(dim=-1) / X.shape[-1]
-                l1_norms.append(l1_norm)    
-
-            cemd = torch.stack(l1_norms, dim=-1).min(dim=-1).values
-            return cemd
-
 
 
 
@@ -440,4 +258,62 @@ def extract_patches(characterComponents: connectedComponent, images, border = No
     
     return patches_list
 
+
+
+
+
+# =========================
+# ==== Caching utility ====
+# =========================
+import pickle
+import hashlib
+import json
+from dataclasses import asdict
+from PIL import Image
+
+def get_params_hash(params):
+    """Create hash from HOG parameters, excluding device."""
+    params_dict = {k: v for k, v in asdict(params).items() if k != 'device'}
+    return hashlib.md5(json.dumps(params_dict, sort_keys=True).encode()).hexdigest()
+
+def setup_cache(cache_folder, params):
+    """Setup cache folder and check if params changed."""
+    cache_folder.mkdir(exist_ok=True)
+    params_file = cache_folder / 'params.json'
+    current_hash = get_params_hash(params)
+    
+    # Check and clear cache if params changed
+    if params_file.exists():
+        with open(params_file, 'r') as f:
+            if json.load(f).get('hash') != current_hash:
+                print("Parameters changed - clearing cache")
+                for f in cache_folder.glob('*.pkl'):
+                    f.unlink()
+    
+    # Save current params
+    with open(params_file, 'w') as f:
+        json.dump({'hash': current_hash}, f)
+
+def load_or_compute_hog(file, cache_folder, hog, image_folder, comps_folder):
+    """Load cached HOG output or compute if not available."""
+    cache_file = cache_folder / f"{file}.pkl"
+    
+    # if cache_file.exists():
+    #     with open(cache_file, 'rb') as f:
+    #         return pickle.load(f)
+    
+    # Compute HOG
+    img_np = np.array(Image.open(image_folder / file))
+    img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)[..., None]
+    img_torch = torch.tensor(img_np, device="cuda").permute(2,0,1).float() / 255
+    img_torch.requires_grad = False
+    img_comp = connectedComponent.load(comps_folder / (str(file) + '.npz'))
+    
+    hog_output = hog(img_torch, img_comp)
+    
+    # Cache result
+    # with open(cache_file, 'wb') as f:
+    #     pickle.dump(hog_output, f)
+    
+    return hog_output
 

@@ -1,0 +1,30 @@
+_target_: src.vectorization.BinaryShapeVectorizer
+
+config:
+  _target_: src.vectorization.VectorizerConfig
+
+  executable_path: ./build/main
+  
+  # Vectorization
+  threshold: null  # null = auto Otsu
+  smoothing_scale: 0.05
+  accuracy_threshold: 0.1
+  refinement_iterations: 0
+  output_type: shape_merged # outline, shape, outline_merged, shape_merged
+  
+  # Output
+  return_svg: false
+  return_rendered: true
+  save_dir: ./outputs
+  
+  # Rendering (if return_rendered=true)
+  output_size: [256, 256]
+  background_color: [255, 255, 255, 255]
+  dpi: 96
+  scale: 1.0
+  output_format: L  # PIL format
+  
+  # Batch
+  n_jobs: -1  # all CPUs
+  show_progress: true
+  chunk_size: 100

@@ -36,8 +36,9 @@ class HOGParameters:
     """ The size of the patches """
     num_bins: int       = 8
     """ Number of bins in the histogram """
-    sigma: float | None = 1
+    sigma: float | None = None
     """ Parameter for the gaussian kernel """
+    normalize: bool = False
 
     threshold: float | None = 0.2
     """ Threshold the values of the normalized histograms to 0.2 """
@@ -64,16 +65,21 @@ class featureMatchingParameters:
     """ Wether or not the matches should be reciprocal. When true, the distances have to be computed twice. """
     partial_output: bool = True
     """ Return everything or only the matches """
+    distribution: str = 'normal'
+    """ Distribution of the total distance. Either normal or gamma """
+    two_pass: bool = False
+    """ If true, two passes will be done - one using epsilon with L2, another using epsilon_2 using the specified metric"""
+    epsilon_2: Optional[float] = None
 
 @dataclass
 class featureMatchingOutputs:
     match_indices: Tensor
     """ (N_matches, 2) Tensor matching queries (match_indices[:, 0]) to their keys (match_indices[:, 1])"""
-    deltas: Tensor
+    nlfa: Tensor
     """ The threshold values. If the distances are inferior to this, we reject the feature independance hypothesis and match the patches. """
-    total_dissimilarities: Tensor
+    dissimilarities: Tensor
     """ (N1, N2) aggregated dissimilarities for forward matching """
-    deltas2: Optional[Tensor] = None
+    nlfa_threshold: float
+
+    nlfa2: Optional[Tensor] = None
     """ The threshold values for backward matching (when reciprocal_only=True) """
-    total_dissimilarities2: Optional[Tensor] = None
-    """ (N2, N1) aggregated dissimilarities for backward matching (when reciprocal_only=True) """

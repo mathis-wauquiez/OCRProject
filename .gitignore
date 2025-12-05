@@ -4,3 +4,9 @@
 /data/datasets/databases
 *.pkl
 *.gz
+caches/hog_cache/params.json
+/code_tests
+/outputs
+/saved figures
+/saved_figures
+OCR_Pipeline_Results.pptx
