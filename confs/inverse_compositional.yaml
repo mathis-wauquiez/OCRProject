@@ -12,7 +12,7 @@ singleScaleIC:
     _target_: src.registration.gradients.Gradients
     method: 'farid5'
     C: 1
-    device: 'cuda'
+    device: 'cpu'
 
   error_function: 'lorentzian' # 'l2', 'lorentzian', 'geman_mcclure', 'charbonnier'
   delta: 5                     # Boundary margin for discarding pixels
