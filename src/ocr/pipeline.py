@@ -67,9 +67,18 @@ class GlobalPipeline:
         self._report_progress('Detecting connected components from CRAFT score...')
         score_text_bin = score_text.squeeze(0).cpu().numpy() > self.craftComponentAnalysisParams.text_threshold
 
-        components = connectedComponent.from_image(score_text_bin.astype(np.uint8), 
-                                                 connectivity=self.craftComponentAnalysisParams.connectivity)
+        # components = connectedComponent.from_image(score_text_bin.astype(np.uint8), 
+        #                                          connectivity=self.craftComponentAnalysisParams.connectivity)
         
+        components = connectedComponent.from_image_watershed(
+            score_text.squeeze(0).cpu().numpy(),
+            min_distance=self.craftComponentAnalysisParams.min_dist,
+            connectivity=1,
+            use_intensity=True,
+            compute_stats=True,
+            binary_threshold=self.craftComponentAnalysisParams.text_threshold
+        )
+
         # Report initial components found
         self._report_progress(f'Found {components.nLabels - 1} initial text components', 
                             components, "components")
@@ -89,7 +98,7 @@ class GlobalPipeline:
                             merged_components, "components")
 
         self._report_progress('Processing image components and binarization...')
-        binary_img, img_components, filtered_img_components, character_components, filteredCharacters = self.imageComponentsPipeline.forward(img_pil, merged_components)
+        binary_img, img_components, filtered_img_components, character_components, cc_filtered, filteredCharacters = self.imageComponentsPipeline.forward(img_pil, merged_components)
 
         # Report binary image
         self._report_progress('Image binarization completed', binary_img, "binary_image")
@@ -110,12 +119,14 @@ class GlobalPipeline:
 
         return PipelineOutput(
             img_pil=img_pil,
+            preprocessed=preprocessed,
             binary_img=binary_img,
             score_text=score_text,
             score_text_components=components,
             filtered_text_components=filtered_components,
             merged_text_components=merged_components,
             image_components=img_components,
+            cc_filtered=cc_filtered,
             filtered_image_components=filtered_img_components,
             character_components=character_components,
             filteredCharacters=filteredCharacters

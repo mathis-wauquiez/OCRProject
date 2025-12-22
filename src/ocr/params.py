@@ -55,6 +55,9 @@ class craftComponentsParams(Updateable):
                                         # influence region of components 
     neighborhood_radius: int = 50       # outside, potential is null
 
+    method: str = "watershed" # | 'cc'
+
+
 @dataclass
 class imageComponentsParams(Updateable):
 
@@ -87,6 +90,12 @@ class imageComponentsParams(Updateable):
 
     max_filled_area_portion: float = 0.9
 
+    min_area: float = 700
+
+    cc_filtering:          bool  = True
+    cc_distance_threshold: float = 50
+    cc_min_comp_size:      float = 10000
+
 from PIL import Image
 from ..utils import connectedComponent
 
@@ -96,6 +105,9 @@ class PipelineOutput:
     img_pil:    Image
     "PIL input image"
     
+    preprocessed:   Any
+    "Image preprocessed to be fed to CRAFT"
+
     binary_img: np.ndarray
     "Binarized image, background = 0, foreground = 1"
 
@@ -119,6 +131,9 @@ class PipelineOutput:
 
     character_components: connectedComponent
     "The characters' components"
+
+    cc_filtered: connectedComponent
+    "The components filtered not to touch the borders etc"
 
     filteredCharacters: connectedComponent
     "Characters after filtering"

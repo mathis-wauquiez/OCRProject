@@ -45,6 +45,7 @@ class HOG:
 
         device = self._params.device
         C = self._params.C
+        padding_mode = self._params.padding_mode
 
         if self._params.method == 'gaussian':
             ksize = int(self._params.grdt_sigma*self._params.ksize_factor) //2 * 2 + 1
@@ -59,18 +60,18 @@ class HOG:
 
 
         dx_conv = nn.Sequential(
-            nn.Conv2d(C, C, kernel_size=(1, ksize), padding=(0, ksize//2), bias=False, groups=C, padding_mode='reflect'),
-            nn.Conv2d(C, C, kernel_size=(ksize, 1), padding=(ksize//2, 0), bias=False, groups=C, padding_mode='reflect')
+            nn.Conv2d(C, C, kernel_size=(1, ksize), padding=(0, ksize//2), bias=False, groups=C, padding_mode=padding_mode),
+            nn.Conv2d(C, C, kernel_size=(ksize, 1), padding=(ksize//2, 0), bias=False, groups=C, padding_mode=padding_mode)
         ).to(device).eval()
 
         dy_conv = nn.Sequential(
-            nn.Conv2d(C, C, kernel_size=(ksize, 1), padding=(ksize//2, 0), bias=False, groups=C, padding_mode='reflect'),
-            nn.Conv2d(C, C, kernel_size=(1, ksize), padding=(0, ksize//2), bias=False, groups=C, padding_mode='reflect')
+            nn.Conv2d(C, C, kernel_size=(ksize, 1), padding=(ksize//2, 0), bias=False, groups=C, padding_mode=padding_mode),
+            nn.Conv2d(C, C, kernel_size=(1, ksize), padding=(0, ksize//2), bias=False, groups=C, padding_mode=padding_mode)
         ).to(device).eval()
 
         pre_gradient_conv = nn.Sequential(
-            nn.Conv2d(C, C, kernel_size=(ksize, 1), padding=(ksize//2, 0), bias=False, groups=C, padding_mode='reflect'),
-            nn.Conv2d(C, C, kernel_size=(1, ksize), padding=(0, ksize//2), bias=False, groups=C, padding_mode='reflect')
+            nn.Conv2d(C, C, kernel_size=(ksize, 1), padding=(ksize//2, 0), bias=False, groups=C, padding_mode=padding_mode),
+            nn.Conv2d(C, C, kernel_size=(1, ksize), padding=(0, ksize//2), bias=False, groups=C, padding_mode=padding_mode)
         ).to(device).eval()
 
         with torch.no_grad():
@@ -93,6 +94,8 @@ class HOG:
         return self.dx_conv(preprocessed), self.dy_conv(preprocessed)
 
     def normalize(self, patches):
+         # === UNUSED AT THE MOMENT ===
+        raise NotImplementedError
         f = lambda patch: nn.functional.interpolate(patch, (self._params.psize, self._params.psize), mode='bilinear')
 
         patches = [f(patch.unsqueeze(0)).squeeze(0) for patch in patches]
@@ -189,75 +192,30 @@ class HOG:
         return histograms
     
 
-    def __call__(self, image: Tensor, comps: connectedComponent):
+    def __call__(self, patches: Tensor):
         with torch.no_grad():
-            dx, dy = self.preprocess(image)
+            dx, dy = self.preprocess(patches) # B, C, H, W
             magn = torch.sqrt(dx**2 + dy**2)
             # angle = torch.arctan2(dy, dx) / np.pi / 2 + .5
 
             # USE UNSIGNED GRADIENTS
             angle = (torch.atan2(dy, dx) % np.pi) / np.pi
             
-            magn_patches, ori_patches, img_patches = extract_patches(
-                comps, (magn, angle, image)
-            )
-
-
-            sizes = [p.shape[-1] for p in magn_patches]
-
-            magn_patches = self.normalize(magn_patches)
-            ori_patches = self.normalize(ori_patches)
-            img_patches = self.normalize(img_patches)
-            
-            histograms = self.compute_hog_histograms_trilinear(magn_patches, ori_patches)
+            histograms = self.compute_hog_histograms_trilinear(magn, angle)
             if self._params.normalize:
                 histograms = self.normalize_histograms(histograms)
             
             if self._params.partial_output:
                 del dx, dy 
-                return histograms, img_patches
+                return histograms
             
             return fullHOGOutput(
                 dx=dx,
                 dy=dy,
-                patches_grdt_magnitude=magn_patches,
-                patches_grdt_orientation=ori_patches,
-                patches_image=img_patches,
+                patches_grdt_magnitude=magn,
+                patches_grdt_orientation=angle,
                 histograms=histograms
             )
-
-
-
-
-def extract_patches(characterComponents: connectedComponent, images, border = None):
-    """
-    Extracts patches arround each character in characterComponents.
-    """
-
-    patches_list = []
-
-    for image in images:
-        if border is not None:
-            if type(image) == np.ndarray:
-                image = np.pad(image, border, mode='constant', constant_values=0)
-            else:
-                image = nn.functional.pad(image, (border, border), mode='constant', value=0)
-        else:
-            border = 0
-
-        patches = []
-
-        for region in characterComponents.regions:
-            h1, w1, h2, w2 = region.bbox
-            h2+=2*border; w2+=2*border
-
-            patch = image[h1:h2, w1:w2] if type(image) == np.ndarray else image[..., h1:h2, w1:w2]
-            patches.append(patch)
-
-        patches_list.append(patches)
-    
-    return patches_list
-
 
 
 

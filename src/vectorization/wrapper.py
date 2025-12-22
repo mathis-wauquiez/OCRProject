@@ -7,10 +7,8 @@ from PIL import Image
 import shutil
 import io
 import gc
-import traceback
 import logging
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from functools import partial
 from dataclasses import dataclass, asdict
 
 # Setup logging
@@ -19,18 +17,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except ImportError:
-    CV2_AVAILABLE = False
-
-try:
-    import cairosvg
-    CAIROSVG_AVAILABLE = True
-except ImportError:
-    CAIROSVG_AVAILABLE = False
 
 try:
     from tqdm import tqdm
@@ -43,6 +29,8 @@ try:
     OMEGACONF_AVAILABLE = True
 except ImportError:
     OMEGACONF_AVAILABLE = False
+
+from ..patch_processing.svg import SVG
 
 
 def _convert_to_tuple(value):
@@ -62,12 +50,13 @@ def _convert_to_tuple(value):
 class VectorizerConfig:
     """Configuration for vectorizer. Hydra-friendly."""
     executable_path: str = "./build/main"
-    threshold: Optional[float] = None
+    threshold: Optional[float] = None  # Optional threshold; None for binarized images
     smoothing_scale: float = 0.1
     accuracy_threshold: float = 0.5
     refinement_iterations: int = 0
     output_type: str = "shape_merged"
-    return_svg: bool = True
+    return_svg: bool = True  # Returns SVG objects
+    return_svg_string: bool = False  # Returns SVG as strings instead of objects
     return_rendered: bool = False
     save_dir: Optional[str] = None
     output_size: Optional[Tuple[int, int]] = None
@@ -79,6 +68,7 @@ class VectorizerConfig:
     show_progress: bool = False
     chunk_size: int = 10
     stream_results: bool = False
+    stream_parallel: bool = False  # NEW: Enable parallel streaming
     
     def __post_init__(self):
         """Convert lists to tuples for PIL compatibility."""
@@ -87,7 +77,7 @@ class VectorizerConfig:
 
 
 class BinaryShapeVectorizer:
-    """Memory-efficient vectorizer."""
+    """Memory-efficient vectorizer for binarized images."""
     
     def __init__(self, config: Union[VectorizerConfig, dict, 'DictConfig']):
         # Handle OmegaConf DictConfig
@@ -100,6 +90,7 @@ class BinaryShapeVectorizer:
         
         self.config = config
         
+        # Resolve executable path
         exec_path = Path(config.executable_path)
         if not exec_path.is_absolute():
             exec_path = (Path(__file__).parent.resolve() / exec_path).resolve()
@@ -107,6 +98,7 @@ class BinaryShapeVectorizer:
             raise FileNotFoundError(f"Executable not found: {exec_path}")
         self.executable_path = exec_path
         
+        # Setup save directory
         if config.save_dir:
             self.save_dir = Path(config.save_dir)
             self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -125,144 +117,69 @@ class BinaryShapeVectorizer:
         cfg = self.config
         if not cfg.return_svg and not cfg.return_rendered and not cfg.save_dir:
             raise ValueError("Must return or save something!")
-        if cfg.return_rendered and not CAIROSVG_AVAILABLE:
-            raise ImportError("Install cairosvg: pip install cairosvg")
     
     def __call__(self, images, **overrides):
         return self.process(images, **overrides)
     
     def process(self, images, **overrides):
-        """Process images with memory management."""
+        """Process binarized images with memory management."""
         cfg = self._get_runtime_config(overrides)
         images_list = self._normalize_input(images)
         n_images = len(images_list)
         
-        logger.info(f"Processing {n_images} images")
+        logger.info(f"Processing {n_images} binarized images")
         logger.info(f"First image shape: {images_list[0].shape}, dtype: {images_list[0].dtype}")
-        
-        # For large batches, process in chunks
-        if n_images > cfg.chunk_size and cfg.n_jobs != 1:
-            return self._process_chunked(images_list, cfg)
         
         # Stream results for memory efficiency
         if cfg.stream_results:
             return self._process_stream(images_list, cfg)
         
-        # Standard processing with unified progress bar
-        results = self._process_batch(images_list, cfg)
+        # For large batches, process in chunks
+        if n_images > cfg.chunk_size and cfg.n_jobs != 1:
+            results = self._process_chunked(images_list, cfg)
+        else:
+            results = self._process_batch(images_list, cfg)
         
         return results[0] if n_images == 1 else results
-    
-    def _process_batch(self, images_list, cfg):
-        """Process batch with unified progress bar."""
-        n_images = len(images_list)
-        
-        # Prepare thresholds and paths without progress bars
-        thresholds = self._prepare_thresholds(images_list, cfg, show_progress=False)
-        save_paths = self._prepare_save_paths(n_images, cfg)
-        
-        # Single unified progress bar
-        if n_images > 1 and cfg.n_jobs != 1:
-            results = self._process_parallel(images_list, thresholds, save_paths, cfg)
-        else:
-            results = self._process_sequential(images_list, thresholds, save_paths, cfg)
-        
-        return results
-    
-    def _process_chunked(self, images_list, cfg):
-        """Process in chunks to limit memory usage."""
-        n_images = len(images_list)
-        chunk_size = cfg.chunk_size
-        results = []
-        
-        # Single progress bar for all chunks
-        pbar = None
-        if cfg.show_progress and TQDM_AVAILABLE:
-            pbar = tqdm(total=n_images, desc="Vectorizing", unit="img")
-        
-        try:
-            for start_idx in range(0, n_images, chunk_size):
-                end_idx = min(start_idx + chunk_size, n_images)
-                chunk = images_list[start_idx:end_idx]
-                
-                # Process chunk without internal progress bars
-                chunk_thresholds = self._prepare_thresholds(chunk, cfg, show_progress=False)
-                chunk_paths = self._prepare_save_paths(len(chunk), cfg)
-                
-                if cfg.n_jobs != 1:
-                    chunk_results = self._process_parallel(
-                        chunk, chunk_thresholds, chunk_paths, cfg, 
-                        pbar=pbar, show_internal_progress=False
-                    )
-                else:
-                    chunk_results = self._process_sequential(
-                        chunk, chunk_thresholds, chunk_paths, cfg,
-                        pbar=pbar, show_internal_progress=False
-                    )
-                
-                results.extend(chunk_results)
-                
-                # Force garbage collection after each chunk
-                del chunk, chunk_results, chunk_thresholds, chunk_paths
-                gc.collect()
-        finally:
-            if pbar:
-                pbar.close()
-        
-        return results
-    
-    def _process_stream(self, images_list, cfg) -> Iterator:
-        """Stream results one at a time (generator)."""
-        n_images = len(images_list)
-        thresholds = self._prepare_thresholds(images_list, cfg, show_progress=False)
-        save_paths = self._prepare_save_paths(n_images, cfg)
-        
-        iterator = zip(enumerate(images_list), thresholds, save_paths)
-        
-        if cfg.show_progress and TQDM_AVAILABLE:
-            iterator = tqdm(iterator, total=n_images, desc="Vectorizing", unit="img")
-        
-        for (idx, img), thresh, save_path in iterator:
-            try:
-                result = _process_single_image(
-                    img, thresh, save_path, str(self.executable_path), cfg, idx
-                )
-                yield result
-                
-                # Clean up after yielding
-                del result
-                gc.collect()
-            except Exception as e:
-                logger.error(f"Error on image {idx}: {e}")
-                yield None
     
     def _get_runtime_config(self, overrides):
         if not overrides:
             return self.config
         cfg_dict = asdict(self.config)
         cfg_dict.update(overrides)
-        new_cfg = VectorizerConfig(**cfg_dict)
-        return new_cfg
+        return VectorizerConfig(**cfg_dict)
     
-    def _prepare_thresholds(self, images_list, cfg, show_progress=True):
-        """Calculate thresholds (optionally with progress)."""
-        if cfg.threshold is not None:
-            return [cfg.threshold] * len(images_list)
+    def _normalize_input(self, images):
+        """Normalize input and squeeze single-channel dimensions."""
+        if isinstance(images, list):
+            return [self._squeeze_image(img) for img in images]
         
-        # Calculate Otsu thresholds
-        thresholds = []
+        if not isinstance(images, np.ndarray):
+            raise TypeError(f"Unsupported type: {type(images)}")
         
-        for idx, img in enumerate(images_list):
-            try:
-                thresh = _otsu_threshold(img)
-                thresholds.append(thresh)
-            except Exception as e:
-                logger.error(f"Otsu failed on image {idx}, shape {img.shape}: {e}")
-                thresholds.append(127.5)  # Fallback
+        ndim = images.ndim
+        logger.info(f"Input shape: {images.shape}, ndim: {ndim}")
         
-        return thresholds
+        if ndim == 2:
+            return [images]
+        elif ndim == 3:
+            if images.shape[2] in [1, 3, 4]:
+                return [self._squeeze_image(images)]
+            else:
+                return [self._squeeze_image(images[i]) for i in range(images.shape[0])]
+        elif ndim == 4:
+            return [self._squeeze_image(images[i]) for i in range(images.shape[0])]
+        else:
+            raise ValueError(f"Unsupported shape: {images.shape}")
     
-    def _prepare_save_paths(self, n_images, cfg):
+    def _squeeze_image(self, img):
+        """Squeeze single-channel dimensions (H, W, 1) -> (H, W)."""
+        if img.ndim == 3 and img.shape[2] == 1:
+            return np.ascontiguousarray(img[:, :, 0])
+        return np.ascontiguousarray(img)
+    
+    def _prepare_save_paths(self, n_images):
+        """Generate save paths for images."""
         if not self.save_dir:
             return [None] * n_images
         
@@ -274,26 +191,118 @@ class BinaryShapeVectorizer:
         
         return paths
     
-    def _process_sequential(self, images_list, thresholds, save_paths, cfg, 
+    def _process_batch(self, images_list, cfg):
+        """Process batch with unified progress bar."""
+        save_paths = self._prepare_save_paths(len(images_list))
+        
+        if len(images_list) > 1 and cfg.n_jobs != 1:
+            return self._process_parallel(images_list, save_paths, cfg)
+        else:
+            return self._process_sequential(images_list, save_paths, cfg)
+    
+    def _process_chunked(self, images_list, cfg):
+        """Process in chunks to limit memory usage."""
+        n_images = len(images_list)
+        chunk_size = cfg.chunk_size
+        results = []
+        
+        pbar = self._create_progress_bar(n_images, cfg)
+        
+        try:
+            for start_idx in range(0, n_images, chunk_size):
+                end_idx = min(start_idx + chunk_size, n_images)
+                chunk = images_list[start_idx:end_idx]
+                chunk_paths = self._prepare_save_paths(len(chunk))
+                
+                # Process chunk
+                if cfg.n_jobs != 1:
+                    chunk_results = self._process_parallel(
+                        chunk, chunk_paths, cfg, pbar=pbar, show_internal_progress=False
+                    )
+                else:
+                    chunk_results = self._process_sequential(
+                        chunk, chunk_paths, cfg, pbar=pbar, show_internal_progress=False
+                    )
+                
+                results.extend(chunk_results)
+                
+                # Force garbage collection after each chunk
+                del chunk, chunk_results, chunk_paths
+                gc.collect()
+        finally:
+            self._close_progress_bar(pbar)
+        
+        return results
+    
+    def _process_stream_parallel(self, images_list, cfg) -> Iterator:
+        """Stream results with parallel processing."""
+        import os
+        n_workers = min(cfg.n_jobs if cfg.n_jobs > 0 else os.cpu_count(), 4)
+        save_paths = self._prepare_save_paths(len(images_list))
+        
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            # Submit all tasks
+            futures = {
+                executor.submit(_process_single_image, img, path, 
+                            str(self.executable_path), cfg, idx): idx
+                for idx, (img, path) in enumerate(zip(images_list, save_paths))
+            }
+            
+            # Yield as they complete with index
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    result = future.result()
+                    yield (idx, result)
+                except Exception as e:
+                    logger.error(f"Error on image {idx}: {e}")
+                    yield (idx, None)
+    
+    def _process_stream(self, images_list, cfg) -> Iterator:
+        """Stream results one at a time (generator)."""
+        # Use parallel streaming if enabled and n_jobs > 1
+        if cfg.stream_parallel and cfg.n_jobs != 1:
+            yield from self._process_stream_parallel(images_list, cfg)
+            return
+        
+        # Sequential streaming
+        save_paths = self._prepare_save_paths(len(images_list))
+        iterator = zip(enumerate(images_list), save_paths)
+        
+        if cfg.show_progress and TQDM_AVAILABLE:
+            iterator = tqdm(iterator, total=len(images_list), desc="Vectorizing", unit="img")
+        
+        for (idx, img), save_path in iterator:
+            try:
+                result = _process_single_image(
+                    img, save_path, str(self.executable_path), cfg, idx
+                )
+                yield (idx, result)
+                
+                del result
+                gc.collect()
+            except Exception as e:
+                logger.error(f"Error on image {idx}: {e}")
+                yield (idx, None)
+
+    def _process_sequential(self, images_list, save_paths, cfg, 
                            pbar=None, show_internal_progress=True):
         """Sequential processing with unified progress bar."""
         results = []
-        
-        # Create progress bar if needed and not provided
         close_pbar = False
-        if pbar is None and cfg.show_progress and show_internal_progress and TQDM_AVAILABLE:
-            pbar = tqdm(total=len(images_list), desc="Vectorizing", unit="img")
+        
+        if pbar is None and show_internal_progress:
+            pbar = self._create_progress_bar(len(images_list), cfg)
             close_pbar = True
         
         try:
-            for idx, (img, thresh, save_path) in enumerate(zip(images_list, thresholds, save_paths)):
+            for idx, (img, save_path) in enumerate(zip(images_list, save_paths)):
                 try:
                     result = _process_single_image(
-                        img, thresh, save_path, str(self.executable_path), cfg, idx
+                        img, save_path, str(self.executable_path), cfg, idx
                     )
                     results.append(result)
                     
-                    # Update progress bar
                     if pbar:
                         pbar.update(1)
                     
@@ -307,31 +316,26 @@ class BinaryShapeVectorizer:
                     if pbar:
                         pbar.update(1)
         finally:
-            if close_pbar and pbar:
-                pbar.close()
+            if close_pbar:
+                self._close_progress_bar(pbar)
         
         return results
     
-    def _process_parallel(self, images_list, thresholds, save_paths, cfg,
+    def _process_parallel(self, images_list, save_paths, cfg,
                          pbar=None, show_internal_progress=True):
         """Parallel processing with unified progress bar."""
         import os
         n_workers = min(cfg.n_jobs if cfg.n_jobs > 0 else os.cpu_count(), 
-                       os.cpu_count() or 1)
-        
-        # Limit workers for memory
-        n_workers = min(n_workers, 4)
+                       os.cpu_count() or 1, 4)  # Limit to 4 for memory
         
         results = [None] * len(images_list)
-        
-        # Create progress bar if needed and not provided
         close_pbar = False
-        if pbar is None and cfg.show_progress and show_internal_progress and TQDM_AVAILABLE:
-            pbar = tqdm(total=len(images_list), desc="Vectorizing", unit="img")
+        
+        if pbar is None and show_internal_progress:
+            pbar = self._create_progress_bar(len(images_list), cfg)
             close_pbar = True
         
         try:
-            # Process in smaller batches to avoid memory explosion
             batch_size = max(n_workers * 2, 10)
             
             for batch_start in range(0, len(images_list), batch_size):
@@ -343,7 +347,6 @@ class BinaryShapeVectorizer:
                         future = executor.submit(
                             _process_single_image,
                             images_list[i],
-                            thresholds[i],
                             save_paths[i],
                             str(self.executable_path),
                             cfg,
@@ -351,7 +354,6 @@ class BinaryShapeVectorizer:
                         )
                         futures[future] = i
                     
-                    # Update progress bar as futures complete
                     for future in as_completed(futures):
                         idx = futures[future]
                         try:
@@ -359,87 +361,38 @@ class BinaryShapeVectorizer:
                         except Exception as e:
                             logger.error(f"Error on image {idx}: {e}")
                         
-                        # Update progress bar
                         if pbar:
                             pbar.update(1)
                 
-                # Clean up after batch
                 gc.collect()
         finally:
-            if close_pbar and pbar:
-                pbar.close()
+            if close_pbar:
+                self._close_progress_bar(pbar)
         
         return results
     
-    def _normalize_input(self, images):
-        """Normalize input and squeeze single-channel dimensions."""
-        if isinstance(images, list):
-            return [self._squeeze_single_channel(img) for img in images]
-        
-        if not isinstance(images, np.ndarray):
-            raise TypeError(f"Unsupported type: {type(images)}")
-        
-        ndim = images.ndim
-        logger.info(f"Input shape: {images.shape}, ndim: {ndim}")
-        
-        if ndim == 2:
-            return [images]
-        elif ndim == 3:
-            if images.shape[2] in [1, 3, 4]:
-                return [self._squeeze_single_channel(images)]
-            else:
-                return [self._squeeze_single_channel(images[i]) for i in range(images.shape[0])]
-        elif ndim == 4:
-            return [self._squeeze_single_channel(images[i]) for i in range(images.shape[0])]
-        else:
-            raise ValueError(f"Unsupported shape: {images.shape}")
+    def _create_progress_bar(self, total, cfg):
+        """Create progress bar if needed."""
+        if cfg.show_progress and TQDM_AVAILABLE:
+            return tqdm(total=total, desc="Vectorizing", unit="img")
+        return None
     
-    def _squeeze_single_channel(self, img):
-        """Squeeze single-channel dimensions (H, W, 1) -> (H, W)."""
-        if img.ndim == 3 and img.shape[2] == 1:
-            return img[:, :, 0]
-        return img
+    def _close_progress_bar(self, pbar):
+        """Close progress bar if exists."""
+        if pbar:
+            pbar.close()
 
 
-def _otsu_threshold(image: np.ndarray) -> float:
-    """Calculate Otsu threshold with error handling."""
-    try:
-        if not CV2_AVAILABLE:
-            return 127.5
-        
-        # Ensure 2D grayscale
-        if image.ndim == 3:
-            if image.shape[2] == 3:
-                img_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-            elif image.shape[2] == 4:
-                img_gray = cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
-            elif image.shape[2] == 1:
-                img_gray = image[:, :, 0]
-            else:
-                raise ValueError(f"Unsupported channels: {image.shape[2]}")
-        elif image.ndim == 2:
-            img_gray = image
-        else:
-            raise ValueError(f"Unsupported ndim: {image.ndim}, shape: {image.shape}")
-        
-        # Ensure uint8
-        if img_gray.dtype != np.uint8:
-            if img_gray.max() <= 1.0:
-                img_gray = (img_gray * 255).astype(np.uint8)
-            else:
-                img_gray = img_gray.astype(np.uint8)
-        
-        # Calculate Otsu
-        thresh, _ = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        return float(thresh)
-        
-    except Exception as e:
-        logger.error(f"Otsu threshold failed for shape {image.shape}: {e}")
-        return 127.5
-
-
-def _process_single_image(image, threshold, save_path, executable_path, config, idx=None):
-    """Process single image with detailed error logging."""
+def _process_single_image(image, save_path, executable_path, config, idx=None):
+    """Process single binarized image.
+    
+    Returns:
+        - SVG object (if return_svg=True and return_svg_string=False)
+        - String (if return_svg=True and return_svg_string=True)
+        - Numpy array (if return_rendered=True)
+        - Tuple of (SVG/string, array) (if both return_svg and return_rendered=True)
+        - Save path string (if only saving to disk)
+    """
     try:
         logger.debug(f"[{idx}] Processing image shape: {image.shape}, dtype: {image.dtype}")
         
@@ -452,18 +405,25 @@ def _process_single_image(image, threshold, save_path, executable_path, config, 
             _save_image(image, input_png)
             
             # Build command
-            cmd = [
-                executable_path, str(input_png),
-                '-f', str(threshold),
+            cmd = [executable_path, str(input_png)]
+            
+            # Add threshold flag only if provided
+            if config.threshold is not None:
+                cmd.extend(['-f', str(config.threshold)])
+            
+            # Add other parameters
+            cmd.extend([
                 '-s', str(config.smoothing_scale),
                 '-T', str(config.accuracy_threshold),
                 '-R', str(config.refinement_iterations),
                 {
-                    'outline': '-v', 'shape': '-V',
-                    'outline_merged': '-o', 'shape_merged': '-O'
+                    'outline': '-v', 
+                    'shape': '-V',
+                    'outline_merged': '-o', 
+                    'shape_merged': '-O'
                 }[config.output_type],
                 str(output_svg)
-            ]
+            ])
             
             # Run subprocess
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -478,13 +438,25 @@ def _process_single_image(image, threshold, save_path, executable_path, config, 
             
             # Read SVG
             svg_content = output_svg.read_text()
+            svg_obj = SVG.load_from_string(svg_content)
+            
+            # Prepare SVG return value
+            svg_result = None
+            if config.return_svg:
+                if config.return_svg_string:
+                    svg_result = svg_content
+                else:
+                    svg_result = svg_obj
             
             # Render if needed
             rendered = None
             if config.return_rendered:
-                rendered = _render_svg(
-                    svg_content, image.shape, config.output_size,
-                    config.background_color, config.dpi, config.scale, config.output_format
+                rendered = svg_obj.render(
+                    output_size=config.output_size,
+                    background_color=config.background_color,
+                    dpi=config.dpi,
+                    scale=config.scale,
+                    output_format=config.output_format
                 )
             
             # Save if needed
@@ -492,11 +464,11 @@ def _process_single_image(image, threshold, save_path, executable_path, config, 
                 Path(save_path).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(output_svg, save_path)
             
-            # Return
+            # Return based on config
             if config.return_svg and config.return_rendered:
-                return (svg_content, rendered)
+                return (svg_result, rendered)
             elif config.return_svg:
-                return svg_content
+                return svg_result
             elif config.return_rendered:
                 return rendered
             else:
@@ -507,62 +479,9 @@ def _process_single_image(image, threshold, save_path, executable_path, config, 
         raise
 
 
-def _render_svg(svg_content, orig_shape, output_size, bg_color, dpi, scale, fmt):
-    """Render SVG with cleanup and error handling."""
-    try:
-        # Convert to tuples if needed (for Hydra compatibility)
-        output_size = _convert_to_tuple(output_size)
-        bg_color = _convert_to_tuple(bg_color)
-        
-        if output_size:
-            w, h = output_size
-        else:
-            if len(orig_shape) >= 2:
-                h, w = orig_shape[:2]
-            else:
-                raise ValueError(f"Invalid shape for rendering: {orig_shape}")
-        
-        w, h = int(w * scale), int(h * scale)
-        
-        # Render
-        png_data = cairosvg.svg2png(
-            bytestring=svg_content.encode('utf-8'),
-            output_width=w, output_height=h, dpi=dpi
-        )
-        
-        # Load and convert
-        img = Image.open(io.BytesIO(png_data))
-        
-        if bg_color:
-            if not isinstance(bg_color, tuple):
-                bg_color = tuple(bg_color) if hasattr(bg_color, '__iter__') else bg_color
-            
-            bg = Image.new('RGBA', img.size, bg_color)
-            bg.paste(img, (0, 0), img)
-            img.close()
-            img = bg
-        
-        if fmt != 'RGBA':
-            converted = img.convert(fmt)
-            img.close()
-            img = converted
-        
-        # Convert to array
-        arr = np.array(img)
-        img.close()
-        
-        del png_data
-        return arr
-        
-    except Exception as e:
-        logger.error(f"Rendering failed: {e}")
-        raise
-
-
 def _save_image(image, path):
-    """Save array as PNG with cleanup and error handling."""
+    """Save array as PNG."""
     try:
-        # Ensure 2D or 3D
         if image.ndim not in [2, 3]:
             raise ValueError(f"Cannot save image with ndim={image.ndim}, shape={image.shape}")
         
@@ -573,18 +492,17 @@ def _save_image(image, path):
             else:
                 image = image.astype(np.uint8)
         
-        # Convert to PIL
+        # Convert to PIL and save
         if image.ndim == 2:
             img = Image.fromarray(image, mode='L')
-        elif image.ndim == 3:
-            if image.shape[2] == 1:
-                img = Image.fromarray(image[:, :, 0], mode='L')
-            elif image.shape[2] == 3:
-                img = Image.fromarray(image, mode='RGB')
-            elif image.shape[2] == 4:
-                img = Image.fromarray(image, mode='RGBA')
-            else:
-                raise ValueError(f"Unsupported channels: {image.shape[2]}")
+        elif image.shape[2] == 1:
+            img = Image.fromarray(image[:, :, 0], mode='L')
+        elif image.shape[2] == 3:
+            img = Image.fromarray(image, mode='RGB')
+        elif image.shape[2] == 4:
+            img = Image.fromarray(image, mode='RGBA')
+        else:
+            raise ValueError(f"Unsupported channels: {image.shape[2]}")
         
         img.save(path)
         img.close()
@@ -598,12 +516,10 @@ if __name__ == "__main__":
     import time
     
     logger.setLevel(logging.INFO)
-    
-    print(f"OpenCV: {CV2_AVAILABLE}, Cairo: {CAIROSVG_AVAILABLE}\n")
-    
+        
     config = VectorizerConfig(
-        return_svg=False,
-        return_rendered=True,
+        return_svg=True,
+        return_rendered=False,
         save_dir="./outputs",
         n_jobs=8,
         chunk_size=10,
@@ -614,8 +530,8 @@ if __name__ == "__main__":
     
     vectorizer = BinaryShapeVectorizer(config)
     
-    # Test with simple data
-    batch = np.random.randint(0, 255, (50, 128, 128), dtype=np.uint8)
+    # Test with binarized data (binary images)
+    batch = (np.random.rand(50, 128, 128) > 0.5).astype(np.uint8) * 255
     
     print(f"Batch shape: {batch.shape}")
     print(f"Batch size: {batch.nbytes / 1024 / 1024:.1f} MB\n")
@@ -626,4 +542,6 @@ if __name__ == "__main__":
     print(f"Successful: {sum(1 for r in results if r is not None)}/{len(results)}")
     
     if results and results[0] is not None:
-        print(f"Result shape: {results[0].shape}")
+        print(f"Result type: {type(results[0])}")
+        if hasattr(results[0], 'paths'):
+            print(f"SVG has {len(results[0].paths)} paths")

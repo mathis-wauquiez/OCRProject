@@ -53,10 +53,10 @@ RM = /usr/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = "/home/mathis/Téléchargements/401-main(2)/401-main"
+CMAKE_SOURCE_DIR = /home/mathis/Bureau/OCRProject/src/vectorization
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = "/home/mathis/Téléchargements/401-main(2)/401-main/build"
+CMAKE_BINARY_DIR = /home/mathis/Bureau/OCRProject/src/vectorization/build
 
 # Include any dependencies generated for this target.
 include CMakeFiles/main.dir/depend.make
@@ -70,130 +70,130 @@ include CMakeFiles/main.dir/progress.make
 include CMakeFiles/main.dir/flags.make
 
 CMakeFiles/main.dir/curv.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/curv.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/curv.cpp
+CMakeFiles/main.dir/curv.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/curv.cpp
 CMakeFiles/main.dir/curv.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/main.dir/curv.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/curv.cpp.o -MF CMakeFiles/main.dir/curv.cpp.o.d -o CMakeFiles/main.dir/curv.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/curv.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/main.dir/curv.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/curv.cpp.o -MF CMakeFiles/main.dir/curv.cpp.o.d -o CMakeFiles/main.dir/curv.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/curv.cpp
 
 CMakeFiles/main.dir/curv.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/curv.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/curv.cpp" > CMakeFiles/main.dir/curv.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/curv.cpp > CMakeFiles/main.dir/curv.cpp.i
 
 CMakeFiles/main.dir/curv.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/curv.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/curv.cpp" -o CMakeFiles/main.dir/curv.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/curv.cpp -o CMakeFiles/main.dir/curv.cpp.s
 
 CMakeFiles/main.dir/gass.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/gass.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/gass.cpp
+CMakeFiles/main.dir/gass.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/gass.cpp
 CMakeFiles/main.dir/gass.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/main.dir/gass.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/gass.cpp.o -MF CMakeFiles/main.dir/gass.cpp.o.d -o CMakeFiles/main.dir/gass.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/gass.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/main.dir/gass.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/gass.cpp.o -MF CMakeFiles/main.dir/gass.cpp.o.d -o CMakeFiles/main.dir/gass.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/gass.cpp
 
 CMakeFiles/main.dir/gass.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/gass.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/gass.cpp" > CMakeFiles/main.dir/gass.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/gass.cpp > CMakeFiles/main.dir/gass.cpp.i
 
 CMakeFiles/main.dir/gass.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/gass.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/gass.cpp" -o CMakeFiles/main.dir/gass.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/gass.cpp -o CMakeFiles/main.dir/gass.cpp.s
 
 CMakeFiles/main.dir/image.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/image.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/image.cpp
+CMakeFiles/main.dir/image.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/image.cpp
 CMakeFiles/main.dir/image.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/main.dir/image.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/image.cpp.o -MF CMakeFiles/main.dir/image.cpp.o.d -o CMakeFiles/main.dir/image.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/image.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/main.dir/image.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/image.cpp.o -MF CMakeFiles/main.dir/image.cpp.o.d -o CMakeFiles/main.dir/image.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/image.cpp
 
 CMakeFiles/main.dir/image.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/image.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/image.cpp" > CMakeFiles/main.dir/image.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/image.cpp > CMakeFiles/main.dir/image.cpp.i
 
 CMakeFiles/main.dir/image.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/image.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/image.cpp" -o CMakeFiles/main.dir/image.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/image.cpp -o CMakeFiles/main.dir/image.cpp.s
 
 CMakeFiles/main.dir/io_png.c.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/io_png.c.o: /home/mathis/Téléchargements/401-main(2)/401-main/io_png.c
+CMakeFiles/main.dir/io_png.c.o: /home/mathis/Bureau/OCRProject/src/vectorization/io_png.c
 CMakeFiles/main.dir/io_png.c.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_4) "Building C object CMakeFiles/main.dir/io_png.c.o"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/main.dir/io_png.c.o -MF CMakeFiles/main.dir/io_png.c.o.d -o CMakeFiles/main.dir/io_png.c.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/io_png.c"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building C object CMakeFiles/main.dir/io_png.c.o"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/main.dir/io_png.c.o -MF CMakeFiles/main.dir/io_png.c.o.d -o CMakeFiles/main.dir/io_png.c.o -c /home/mathis/Bureau/OCRProject/src/vectorization/io_png.c
 
 CMakeFiles/main.dir/io_png.c.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing C source to CMakeFiles/main.dir/io_png.c.i"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/io_png.c" > CMakeFiles/main.dir/io_png.c.i
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/io_png.c > CMakeFiles/main.dir/io_png.c.i
 
 CMakeFiles/main.dir/io_png.c.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling C source to assembly CMakeFiles/main.dir/io_png.c.s"
-	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/io_png.c" -o CMakeFiles/main.dir/io_png.c.s
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/io_png.c -o CMakeFiles/main.dir/io_png.c.s
 
 CMakeFiles/main.dir/levelLine.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/levelLine.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/levelLine.cpp
+CMakeFiles/main.dir/levelLine.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/levelLine.cpp
 CMakeFiles/main.dir/levelLine.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/main.dir/levelLine.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/levelLine.cpp.o -MF CMakeFiles/main.dir/levelLine.cpp.o.d -o CMakeFiles/main.dir/levelLine.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/levelLine.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building CXX object CMakeFiles/main.dir/levelLine.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/levelLine.cpp.o -MF CMakeFiles/main.dir/levelLine.cpp.o.d -o CMakeFiles/main.dir/levelLine.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/levelLine.cpp
 
 CMakeFiles/main.dir/levelLine.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/levelLine.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/levelLine.cpp" > CMakeFiles/main.dir/levelLine.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/levelLine.cpp > CMakeFiles/main.dir/levelLine.cpp.i
 
 CMakeFiles/main.dir/levelLine.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/levelLine.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/levelLine.cpp" -o CMakeFiles/main.dir/levelLine.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/levelLine.cpp -o CMakeFiles/main.dir/levelLine.cpp.s
 
 CMakeFiles/main.dir/lltree.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/lltree.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/lltree.cpp
+CMakeFiles/main.dir/lltree.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/lltree.cpp
 CMakeFiles/main.dir/lltree.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/main.dir/lltree.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/lltree.cpp.o -MF CMakeFiles/main.dir/lltree.cpp.o.d -o CMakeFiles/main.dir/lltree.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/lltree.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Building CXX object CMakeFiles/main.dir/lltree.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/lltree.cpp.o -MF CMakeFiles/main.dir/lltree.cpp.o.d -o CMakeFiles/main.dir/lltree.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/lltree.cpp
 
 CMakeFiles/main.dir/lltree.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/lltree.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/lltree.cpp" > CMakeFiles/main.dir/lltree.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/lltree.cpp > CMakeFiles/main.dir/lltree.cpp.i
 
 CMakeFiles/main.dir/lltree.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/lltree.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/lltree.cpp" -o CMakeFiles/main.dir/lltree.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/lltree.cpp -o CMakeFiles/main.dir/lltree.cpp.s
 
 CMakeFiles/main.dir/utility.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/utility.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/utility.cpp
+CMakeFiles/main.dir/utility.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/utility.cpp
 CMakeFiles/main.dir/utility.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/main.dir/utility.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/utility.cpp.o -MF CMakeFiles/main.dir/utility.cpp.o.d -o CMakeFiles/main.dir/utility.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/utility.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "Building CXX object CMakeFiles/main.dir/utility.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/utility.cpp.o -MF CMakeFiles/main.dir/utility.cpp.o.d -o CMakeFiles/main.dir/utility.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/utility.cpp
 
 CMakeFiles/main.dir/utility.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/utility.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/utility.cpp" > CMakeFiles/main.dir/utility.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/utility.cpp > CMakeFiles/main.dir/utility.cpp.i
 
 CMakeFiles/main.dir/utility.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/utility.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/utility.cpp" -o CMakeFiles/main.dir/utility.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/utility.cpp -o CMakeFiles/main.dir/utility.cpp.s
 
 CMakeFiles/main.dir/affine_sp_vectorization.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/affine_sp_vectorization.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/affine_sp_vectorization.cpp
+CMakeFiles/main.dir/affine_sp_vectorization.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/affine_sp_vectorization.cpp
 CMakeFiles/main.dir/affine_sp_vectorization.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/main.dir/affine_sp_vectorization.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/affine_sp_vectorization.cpp.o -MF CMakeFiles/main.dir/affine_sp_vectorization.cpp.o.d -o CMakeFiles/main.dir/affine_sp_vectorization.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/affine_sp_vectorization.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "Building CXX object CMakeFiles/main.dir/affine_sp_vectorization.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/affine_sp_vectorization.cpp.o -MF CMakeFiles/main.dir/affine_sp_vectorization.cpp.o.d -o CMakeFiles/main.dir/affine_sp_vectorization.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/affine_sp_vectorization.cpp
 
 CMakeFiles/main.dir/affine_sp_vectorization.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/affine_sp_vectorization.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/affine_sp_vectorization.cpp" > CMakeFiles/main.dir/affine_sp_vectorization.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/affine_sp_vectorization.cpp > CMakeFiles/main.dir/affine_sp_vectorization.cpp.i
 
 CMakeFiles/main.dir/affine_sp_vectorization.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/affine_sp_vectorization.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/affine_sp_vectorization.cpp" -o CMakeFiles/main.dir/affine_sp_vectorization.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/affine_sp_vectorization.cpp -o CMakeFiles/main.dir/affine_sp_vectorization.cpp.s
 
 CMakeFiles/main.dir/main.cpp.o: CMakeFiles/main.dir/flags.make
-CMakeFiles/main.dir/main.cpp.o: /home/mathis/Téléchargements/401-main(2)/401-main/main.cpp
+CMakeFiles/main.dir/main.cpp.o: /home/mathis/Bureau/OCRProject/src/vectorization/main.cpp
 CMakeFiles/main.dir/main.cpp.o: CMakeFiles/main.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/main.dir/main.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/main.cpp.o -MF CMakeFiles/main.dir/main.cpp.o.d -o CMakeFiles/main.dir/main.cpp.o -c "/home/mathis/Téléchargements/401-main(2)/401-main/main.cpp"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Building CXX object CMakeFiles/main.dir/main.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/main.dir/main.cpp.o -MF CMakeFiles/main.dir/main.cpp.o.d -o CMakeFiles/main.dir/main.cpp.o -c /home/mathis/Bureau/OCRProject/src/vectorization/main.cpp
 
 CMakeFiles/main.dir/main.cpp.i: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/main.dir/main.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E "/home/mathis/Téléchargements/401-main(2)/401-main/main.cpp" > CMakeFiles/main.dir/main.cpp.i
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/mathis/Bureau/OCRProject/src/vectorization/main.cpp > CMakeFiles/main.dir/main.cpp.i
 
 CMakeFiles/main.dir/main.cpp.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/main.dir/main.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S "/home/mathis/Téléchargements/401-main(2)/401-main/main.cpp" -o CMakeFiles/main.dir/main.cpp.s
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/mathis/Bureau/OCRProject/src/vectorization/main.cpp -o CMakeFiles/main.dir/main.cpp.s
 
 # Object files for target main
 main_OBJECTS = \
@@ -223,7 +223,7 @@ main: CMakeFiles/main.dir/build.make
 main: /usr/lib/x86_64-linux-gnu/libpng.so
 main: /usr/lib/x86_64-linux-gnu/libz.so
 main: CMakeFiles/main.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir="/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles" --progress-num=$(CMAKE_PROGRESS_10) "Linking CXX executable main"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_10) "Linking CXX executable main"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/main.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.
@@ -235,6 +235,6 @@ CMakeFiles/main.dir/clean:
 .PHONY : CMakeFiles/main.dir/clean
 
 CMakeFiles/main.dir/depend:
-	cd "/home/mathis/Téléchargements/401-main(2)/401-main/build" && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" "/home/mathis/Téléchargements/401-main(2)/401-main" "/home/mathis/Téléchargements/401-main(2)/401-main" "/home/mathis/Téléchargements/401-main(2)/401-main/build" "/home/mathis/Téléchargements/401-main(2)/401-main/build" "/home/mathis/Téléchargements/401-main(2)/401-main/build/CMakeFiles/main.dir/DependInfo.cmake" "--color=$(COLOR)"
+	cd /home/mathis/Bureau/OCRProject/src/vectorization/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/mathis/Bureau/OCRProject/src/vectorization /home/mathis/Bureau/OCRProject/src/vectorization /home/mathis/Bureau/OCRProject/src/vectorization/build /home/mathis/Bureau/OCRProject/src/vectorization/build /home/mathis/Bureau/OCRProject/src/vectorization/build/CMakeFiles/main.dir/DependInfo.cmake "--color=$(COLOR)"
 .PHONY : CMakeFiles/main.dir/depend
 

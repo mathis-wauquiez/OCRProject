@@ -1,5 +1,5 @@
 CMakeFiles/main.dir/io_png.c.o: \
- /home/mathis/Téléchargements/401-main(2)/401-main/io_png.c \
+ /home/mathis/Bureau/OCRProject/src/vectorization/io_png.c \
  /usr/include/stdc-predef.h /usr/include/stdlib.h \
  /usr/include/x86_64-linux-gnu/bits/libc-header-start.h \
  /usr/include/features.h /usr/include/features-time64.h \
@@ -83,4 +83,4 @@ CMakeFiles/main.dir/io_png.c.o: \
  /usr/include/x86_64-linux-gnu/bits/time.h \
  /usr/include/x86_64-linux-gnu/bits/types/struct_tm.h \
  /usr/include/x86_64-linux-gnu/bits/types/struct_itimerspec.h \
- /home/mathis/Téléchargements/401-main(2)/401-main/io_png.h
+ /home/mathis/Bureau/OCRProject/src/vectorization/io_png.h

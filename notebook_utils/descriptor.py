@@ -50,12 +50,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import hsv_to_rgb
 
-def visualize_hog(hog_params, histograms, patches, i):
+def visualize_hog(hog_params, histograms, patches, hogOutput, i):
     # Get parameters
     cw = hog_params.cell_width
     ch = hog_params.cell_height
-    Nw = hog_params.psize // cw
-    Nh = hog_params.psize // ch 
+    Nw = patches.shape[-1] // cw
+    Nh = patches.shape[-2] // ch 
     Nbins = histograms.shape[-1]
 
     # Reshape histograms to spatial grid
@@ -73,14 +73,14 @@ def visualize_hog(hog_params, histograms, patches, i):
 
     # 1. Gradient Magnitude
     ax1 = axes[0, 0]
-    im1 = ax1.imshow(patches['magnitude'][i].cpu().detach()[0], cmap='hot')
+    im1 = ax1.imshow(hogOutput.patches_grdt_magnitude[i].cpu().detach()[0], cmap='hot')
     ax1.set_title('Gradient Magnitude', fontsize=16, fontweight='bold')
     ax1.axis('off')
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
     # 2. Gradient Orientation (unsigned)
     ax2 = axes[0, 1]
-    im2 = ax2.imshow(patches['orientation'][i].cpu().detach()[0], cmap='hsv', vmin=0, vmax=1)
+    im2 = ax2.imshow(hogOutput.patches_grdt_orientation[i].cpu().detach()[0], cmap='hsv', vmin=0, vmax=1)
     ax2.set_title('Gradient Orientation\n(Unsigned: 0-180°)', fontsize=16, fontweight='bold')
     ax2.axis('off')
     cbar2 = plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
@@ -88,8 +88,8 @@ def visualize_hog(hog_params, histograms, patches, i):
 
     # 3. HSV Composite (Hue = Orientation, Value = Magnitude)
     ax_hsv = axes[1, 0]
-    gradient_magnitude = patches['magnitude'][i].cpu().detach()[0].numpy()
-    gradient_orientation = patches['orientation'][i].cpu().detach()[0].numpy()
+    gradient_magnitude = hogOutput.patches_grdt_magnitude[i].cpu().detach()[0].numpy()
+    gradient_orientation = hogOutput.patches_grdt_orientation[i].cpu().detach()[0].numpy()
 
     # Normalize magnitude to [0, 1] for the Value channel
     magnitude_normalized = gradient_magnitude / gradient_magnitude.max() if gradient_magnitude.max() > 0 else gradient_magnitude
@@ -113,9 +113,9 @@ def visualize_hog(hog_params, histograms, patches, i):
 
     # 4. HOG Histogram Visualization
     ax3 = axes[1, 1]
-    ax3.imshow(patches['magnitude'][i].cpu().detach()[0], cmap='gray', alpha=0.3)
+    ax3.imshow(hogOutput.patches_grdt_magnitude[i].cpu().detach()[0], cmap='gray', alpha=0.3)
 
-    # UNSIGNED: angles from 0 to π
+    # UNSIGNED: angles from 0 to pi
     bin_angles = np.linspace(0, np.pi, Nbins, endpoint=False)
 
     max_magnitude = selected_histograms.max()

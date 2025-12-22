@@ -30,7 +30,9 @@ class connectedComponent:
         return self._colors
 
     @classmethod
-    def from_labels(cls, labels, stats=None, intensity_image=None):
+    def from_labels(cls, labels, stats=None, intensity_image=None, compute_stats=False):
+        if compute_stats:
+            stats = cls._compute_stats_from_labels(labels)
         return cls(
             nLabels=len(np.unique(labels)),
             labels=labels,
@@ -50,16 +52,106 @@ class connectedComponent:
         stats = stats_umat.get()
         return cls.from_labels(labels, stats, image)
 
+    @staticmethod
+    def _compute_stats_from_labels(labels):
+        from scipy import ndimage
+        
+        unique_labels = np.unique(labels)
+        stats = np.zeros((len(unique_labels), 5), dtype=np.int32)
+        
+        # Get bounding boxes for all objects at once
+        slices = ndimage.find_objects(labels)
+        
+        for i, label in enumerate(unique_labels):
+            if label == 0 or label > len(slices) or slices[label-1] is None:
+                stats[i] = [0, 0, 0, 0, 0]
+                continue
+            
+            # Get the slice for this label
+            slice_obj = slices[label-1]
+            
+            # Extract bounding box from slices
+            y_min, y_max = slice_obj[0].start, slice_obj[0].stop
+            x_min, x_max = slice_obj[1].start, slice_obj[1].stop
+            
+            # Calculate area by counting pixels in the region
+            region_mask = labels[slice_obj] == label
+            area = np.count_nonzero(region_mask)
+            
+            stats[i] = [
+                x_min,                    # CC_STAT_LEFT
+                y_min,                    # CC_STAT_TOP
+                x_max - x_min,            # CC_STAT_WIDTH
+                y_max - y_min,            # CC_STAT_HEIGHT
+                area                      # CC_STAT_AREA
+            ]
+        
+        return stats
+
+    @classmethod
+    def from_image_watershed(cls, image, min_distance=10, connectivity=1, compute_stats=False,
+                            binary_threshold=None, use_intensity=False):
+        from scipy import ndimage
+        from skimage.feature import peak_local_max
+        from skimage.segmentation import watershed
+        from skimage.filters import threshold_otsu
+                
+        # Convert to float for processing
+        if image.dtype == np.uint8:
+            image = image.astype(np.float32) / 255.0
+
+        min_distance = int(min_distance)
+        
+        # Create binary mask
+        if binary_threshold is not None:
+            binary = image > binary_threshold
+        else:
+            thresh = threshold_otsu(image)
+            binary = image > thresh
+        
+        if use_intensity:
+            elevation = -image
+            coords = peak_local_max(image, min_distance=min_distance, labels=binary)
+        else:
+            distance = ndimage.distance_transform_edt(binary)
+            elevation = -distance
+            coords = peak_local_max(distance, min_distance=min_distance, labels=binary)
+        
+        # Create markers from peaks
+        mask = np.zeros(binary.shape, dtype=bool)
+        mask[tuple(coords.T)] = True
+        markers, _ = ndimage.label(mask)
+        
+        # Apply watershed
+        labels = watershed(elevation, markers, mask=binary, connectivity=connectivity)
+        
+        return cls.from_labels(labels, intensity_image=image, compute_stats=compute_stats)
+
+
     @property
     def segm_img(self):
+        # unique_labels = np.unique(self.labels)
+        # vis = np.zeros((*self.labels.shape, 3), dtype=np.uint8)
+        # for i, lbl in enumerate(unique_labels):
+        #     if lbl == 0:
+        #         continue
+        #     color = self.colors[i]
+        #     vis[self.labels == lbl] = color
+        # return vis
         unique_labels = np.unique(self.labels)
-        vis = np.zeros((*self.labels.shape, 3), dtype=np.uint8)
-        for i, lbl in enumerate(unique_labels):
-            if lbl == 0:
-                continue
-            color = self.colors[i]
-            vis[self.labels == lbl] = color
-        return vis
+        
+        # Map label values to color indices
+        label_indices = np.searchsorted(unique_labels, self.labels)
+        
+        # Create color map (background stays black)
+        color_map = np.zeros((len(unique_labels), 3), dtype=np.uint8)
+        color_map[1:] = self.colors[1:]  # Skip background
+        
+        return color_map[label_indices]
+    
+    def __len__(self):
+        return len(np.unique(self.labels))
+
     
     def save(self, filepath):
         """Save using numpy's compressed format."""

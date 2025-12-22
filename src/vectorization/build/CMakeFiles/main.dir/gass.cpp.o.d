@@ -1,7 +1,7 @@
 CMakeFiles/main.dir/gass.cpp.o: \
- /home/mathis/Téléchargements/401-main(2)/401-main/gass.cpp \
+ /home/mathis/Bureau/OCRProject/src/vectorization/gass.cpp \
  /usr/include/stdc-predef.h \
- /home/mathis/Téléchargements/401-main(2)/401-main/gass.h \
+ /home/mathis/Bureau/OCRProject/src/vectorization/gass.h \
  /usr/include/c++/13/vector /usr/include/c++/13/bits/requires_hosted.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/os_defines.h \

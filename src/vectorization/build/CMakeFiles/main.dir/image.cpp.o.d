@@ -1,7 +1,7 @@
 CMakeFiles/main.dir/image.cpp.o: \
- /home/mathis/Téléchargements/401-main(2)/401-main/image.cpp \
+ /home/mathis/Bureau/OCRProject/src/vectorization/image.cpp \
  /usr/include/stdc-predef.h \
- /home/mathis/Téléchargements/401-main(2)/401-main/image.h \
+ /home/mathis/Bureau/OCRProject/src/vectorization/image.h \
  /usr/include/c++/13/algorithm /usr/include/c++/13/bits/stl_algobase.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/os_defines.h \

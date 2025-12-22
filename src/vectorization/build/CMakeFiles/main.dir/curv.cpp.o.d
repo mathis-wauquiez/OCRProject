@@ -1,8 +1,8 @@
 CMakeFiles/main.dir/curv.cpp.o: \
- /home/mathis/Téléchargements/401-main(2)/401-main/curv.cpp \
+ /home/mathis/Bureau/OCRProject/src/vectorization/curv.cpp \
  /usr/include/stdc-predef.h \
- /home/mathis/Téléchargements/401-main(2)/401-main/curv.h \
- /home/mathis/Téléchargements/401-main(2)/401-main/levelLine.h \
+ /home/mathis/Bureau/OCRProject/src/vectorization/curv.h \
+ /home/mathis/Bureau/OCRProject/src/vectorization/levelLine.h \
  /usr/include/c++/13/vector /usr/include/c++/13/bits/requires_hosted.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/c++config.h \
  /usr/include/x86_64-linux-gnu/c++/13/bits/os_defines.h \

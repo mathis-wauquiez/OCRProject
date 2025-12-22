@@ -158,7 +158,8 @@ class imageComponentsPipeline:
             if filled_area_portion > self.params.max_filled_area_portion or\
                h < self.params.min_box_size[1] or w < self.params.min_box_size[0] or\
                h > self.params.max_box_size[1] or w > self.params.max_box_size[0] or\
-               aspect_ratio > self.params.max_aspect_ratio:
+               aspect_ratio > self.params.max_aspect_ratio or\
+                region.area_filled < self.params.min_area:
                 pass
 
             else:
@@ -167,7 +168,7 @@ class imageComponentsPipeline:
         # Apply filter: set filtered components to background
         labels = characterComponents.labels.copy()
         labels[~np.isin(labels, list(labels_to_keep))] = 0
-        return connectedComponent.from_labels(labels, intensity_image=characterComponents.intensity_image)
+        return connectedComponent.from_labels(labels, intensity_image=characterComponents.intensity_image, compute_stats=True)
 
 
 
@@ -177,8 +178,189 @@ class imageComponentsPipeline:
         filtered_img_components = self.filter_image_components(img_components)
         similarities = self.compute_similarities(filtered_img_components, craftComponents)
         associated_components = self.merge_from_similarities(filtered_img_components, craftComponents, similarities)
+
+        cc_filtered = self.filter_centroids_by_contour_proximity(
+            centroids_components=associated_components,  # Characters to filter
+            reference_components=img_components,         # Large components to check against
+        )
+
         
-        filtered_characters = self.filter_bad_characters(associated_components)
+        filtered_characters = self.filter_bad_characters(cc_filtered)
 
 
-        return binary_img, img_components, filtered_img_components, associated_components, filtered_characters
+        return binary_img, img_components, filtered_img_components, associated_components, cc_filtered, filtered_characters
+    
+    def filter_centroids_by_contour_proximity(
+        self, 
+        centroids_components,  # connectedComponent
+        reference_components,  # connectedComponent
+        distance_threshold=None,
+        min_component_size=None
+    ):
+        """
+        Filter out centroid components that are too close to large component contours.
+        
+        Args:
+            centroids_components: Components to filter (e.g., character detections)
+            reference_components: Components whose contours to check against
+            distance_threshold: Max distance in pixels (centroids closer = excluded)
+            min_component_size: Only check components with area > this value
+        
+        Returns:
+            Filtered connectedComponent with excluded centroids set to background
+        
+        Example:
+            filtered = pipeline.filter_centroids_by_contour_proximity(
+                centroids_components=character_components,
+                reference_components=image_components,
+                distance_threshold=50,
+                min_component_size=10000
+            )
+        """
+        distance_threshold = distance_threshold or self.params.cc_distance_threshold
+        min_component_size = min_component_size or self.params.cc_min_comp_size
+
+        unique_centroids_labels = np.unique(centroids_components.labels)
+        to_keep = set(unique_centroids_labels)
+        
+        # Extract centroids and convert from (y,x) to (x,y) format
+        centroids = np.array([region.centroid for region in centroids_components.regions])
+        centroids = torch.tensor(centroids, device=params.device, dtype=torch.float32).flip(-1)
+        
+        # Find large components
+        counts = np.bincount(reference_components.labels.reshape(-1))
+        large_mask = counts > min_component_size
+        large_indices = np.arange(len(counts))[large_mask]
+        
+        
+        # Check each large component
+        for idx in large_indices:
+            if idx == 0:  # Skip background
+                continue
+                
+            bin_image = (reference_components.labels == idx).astype(np.uint8)
+            min_dists = self._get_contour_distances(bin_image, centroids)
+            
+            # Find centroids too close
+            close_mask = min_dists < distance_threshold
+            num_close = close_mask.sum().item()
+            
+            if num_close > 0:
+                closest_idx = min_dists.argmin()
+                close_mask[closest_idx] = False  # Don't exclude the closest one
+                
+                # Recalculate number of centroids to exclude (after keeping closest)
+                num_close = close_mask.sum().item()
+                
+                if num_close > 0:
+                    # Map boolean mask to actual labels (skip background at index 0)
+                    close_labels = unique_centroids_labels[1:][close_mask.cpu().numpy()]
+                    to_keep -= set(close_labels.tolist())
+        
+        # Apply filter
+        filtered_labels = centroids_components.labels.copy()
+        to_exclude = set(unique_centroids_labels) - to_keep
+        filtered_labels[np.isin(filtered_labels, list(to_exclude))] = 0
+                
+        return connectedComponent.from_labels(
+            filtered_labels,
+            intensity_image=centroids_components.intensity_image
+        )
+
+
+    def _extract_contour_lines(self, bin_image):
+        """Extract line segments from binary image contours."""
+        image = bin_image.astype(np.uint8) * 255
+        contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if len(contours) == 0:
+            return np.empty((0, 2, 2))
+        
+        line_segments = []
+        for contour in contours:
+            contour = contour.squeeze(1)  # (N, 1, 2) → (N, 2)
+            contour = np.vstack([contour, contour[0:1]])  # Close contour
+            lines = np.stack((contour[:-1], contour[1:]), axis=1)
+            line_segments.append(lines)
+        
+        return np.concatenate(line_segments, axis=0)
+
+
+    def _point_to_line_segment_distance(self, points, lines):
+        """Calculate point-to-line-segment distances."""
+        p1, p2 = lines[:, 0], lines[:, 1]
+        v = p2 - p1
+        w = points[:, None, :] - p1[None, :, :]
+        
+        c1 = torch.einsum('ijk,jk->ij', w, v)
+        c2 = torch.einsum('jk,jk->j', v, v)[None, :]
+        t = (c1 / (c2 + 1e-10)).clamp(0, 1)
+        
+        closest = p1[None, :, :] + t[:, :, None] * v[None, :, :]
+        diff = points[:, None, :] - closest
+        return torch.sqrt(torch.einsum('ijk,ijk->ij', diff, diff))
+
+
+    def _get_contour_distances(self, bin_image, points):
+        """Get minimum distance from each point to image contours."""
+        lines = self._extract_contour_lines(bin_image)
+        
+        if len(lines) == 0:
+            return torch.full((points.shape[0],), float('inf'),
+                            device=points.device, dtype=points.dtype)
+        
+        lines = torch.tensor(lines, device=points.device, dtype=points.dtype)
+        distances = self._point_to_line_segment_distance(points, lines)
+        return distances.min(dim=1).values
+
+
+
+def extract_lines(bin_image):
+    """Extract line segments from contours."""
+    image = bin_image.astype(np.uint8) * 255
+    contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if len(contours) == 0:
+        return np.empty((0, 2, 2))
+    
+    line_segments = []
+    for contour in contours:
+        contour = contour.squeeze(1)
+        contour = np.vstack([contour, contour[0:1]])
+        lines = np.stack((contour[:-1], contour[1:]), axis=1)
+        line_segments.append(lines)
+    
+    return np.concatenate(line_segments, axis=0)
+
+
+def point_to_line_segment_distance(points, lines):
+    """Calculate distances from points to line segments."""
+    p1, p2 = lines[:, 0], lines[:, 1]
+    v = p2 - p1
+    w = points[:, None, :] - p1[None, :, :]
+    
+    c1 = torch.einsum('ijk,jk->ij', w, v)
+    c2 = torch.einsum('jk,jk->j', v, v)[None, :]
+    t = (c1 / (c2 + 1e-10)).clamp(0, 1)
+    
+    closest = p1[None, :, :] + t[:, :, None] * v[None, :, :]
+    diff = points[:, None, :] - closest
+    return torch.sqrt(torch.einsum('ijk,ijk->ij', diff, diff))
+
+
+def get_distances(bin_image, points):
+    """Get minimum distances from points to contours."""
+    lines = extract_lines(bin_image)
+    
+    if len(lines) == 0:
+        inf_dists = torch.full((points.shape[0],), float('inf'),
+                              device=points.device, dtype=points.dtype)
+        zero_idx = torch.zeros((points.shape[0],), dtype=torch.long, 
+                              device=points.device)
+        return inf_dists, zero_idx
+    
+    lines = torch.tensor(lines, device=points.device, dtype=points.dtype)
+    distances = point_to_line_segment_distance(points, lines)
+    min_distances, min_indices = distances.min(dim=1)
+    
+    return min_distances, min_indices

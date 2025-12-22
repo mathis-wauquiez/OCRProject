@@ -25,6 +25,7 @@ class HOGParameters:
     """ Either gaussian, farid_3x3, farid_5x5, hypomode or central differences """
     grdt_sigma: float   = 3.5
     ksize_factor: float = 8
+    padding_mode: str = 'reflect'
 
 
     #! HOG Parameters
@@ -32,8 +33,6 @@ class HOGParameters:
     """ Height of the cells used to compute histograms """
     cell_width: int     = 16
     """ Width of the cells used to compute histograms """
-    psize:      int     = 128
-    """ The size of the patches """
     num_bins: int       = 8
     """ Number of bins in the histogram """
     sigma: float | None = None
@@ -43,13 +42,13 @@ class HOGParameters:
     threshold: float | None = 0.2
     """ Threshold the values of the normalized histograms to 0.2 """
 
+
 @dataclass
 class fullHOGOutput:
     dx: Tensor          # C, H, W
     dy: Tensor          # C, H, W
     patches_grdt_magnitude: Tensor   # N, C, h, w
     patches_grdt_orientation: Tensor # N, C, h, w
-    patches_image           : Tensor # N, C, h, w
     histograms: Tensor               # N, C, N_cells, N_bins tensor with the normalized histograms
 
 

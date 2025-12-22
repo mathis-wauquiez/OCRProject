@@ -1,0 +1,66 @@
+# config.yaml - Hydra configuration for GlobalPipeline
+
+_target_: src.ocr.pipeline.GlobalPipeline
+
+device: cuda  # 'cuda' or 'cpu'
+
+# CRAFT Text Detector Configuration
+#! Does not need to be tweaked!
+craftDetectorParams:
+  _target_: src.ocr.params.craftParams
+  
+  # Detection parameters
+  mag_ratio: 5.0
+  canvas_size: 1280
+  interpolation: bilinear
+    
+  # Model checkpoint
+  chckpt: models/craft/craft_mlt_25k.pth
+
+# CRAFT Output Analysis Configuration
+craftComponentAnalysisParams:
+  _target_: src.ocr.params.craftComponentsParams
+  
+  # Connected components extraction
+  text_threshold: 0.6  #! Threshold on CRAFT score map
+  connectivity: 8  #? 4 or 8
+  
+  #! Component filtering
+  min_area: 18  #!Remove components smaller than this
+  min_aspect_ratio: 0.2  #? Remove too elongated components
+  max_aspect_ratio: 5.0
+  
+  # Component merging
+  min_dist: 8.0  #!Merge components closer than this (pixels)
+  
+  # Unary potential (currently unused)
+  characteristic_distance: 5.0
+  neighborhood_radius: 50
+
+# Image Binarization & Component Analysis Configuration
+imageComponentsPipelineParams:
+  _target_: src.ocr.params.imageComponentsParams
+  
+  # Binarization
+  threshold: otsu  # 'otsu' or float in [0, 1]
+  
+  # Filter elongated line-like components
+  min_image_component_aspect_ratio: 20.0  # Aspect ratio > this = line
+  min_image_component_axis_major_length_criterion: 100.0  # Length > this = line
+  
+  # Spatial filtering (distance from text regions)
+  similarity_threshold: -10.0  #! euclidean distance threshold
+  similarity_metric: mahalanobis  # 'mahalanobis' or 'euclidean'
+  
+  # Character bounding box constraints
+  min_box_size: [30, 30]  # [width, height] in pixels
+  max_box_size: [250, 250]
+  
+  # Character shape constraints
+  max_aspect_ratio: 3  # Reject very elongated boxes
+  max_filled_area_portion: 0.9  # Reject boxes that are too filled
+  min_area: 200
+
+  cc_filtering: true
+  cc_distance_threshold: 50
+  cc_min_comp_size: 4000

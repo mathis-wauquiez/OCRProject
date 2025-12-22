@@ -8,15 +8,15 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/mathis/Téléchargements/401-main(2)/401-main/io_png.c" "CMakeFiles/main.dir/io_png.c.o" "gcc" "CMakeFiles/main.dir/io_png.c.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/affine_sp_vectorization.cpp" "CMakeFiles/main.dir/affine_sp_vectorization.cpp.o" "gcc" "CMakeFiles/main.dir/affine_sp_vectorization.cpp.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/curv.cpp" "CMakeFiles/main.dir/curv.cpp.o" "gcc" "CMakeFiles/main.dir/curv.cpp.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/gass.cpp" "CMakeFiles/main.dir/gass.cpp.o" "gcc" "CMakeFiles/main.dir/gass.cpp.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/image.cpp" "CMakeFiles/main.dir/image.cpp.o" "gcc" "CMakeFiles/main.dir/image.cpp.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/levelLine.cpp" "CMakeFiles/main.dir/levelLine.cpp.o" "gcc" "CMakeFiles/main.dir/levelLine.cpp.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/lltree.cpp" "CMakeFiles/main.dir/lltree.cpp.o" "gcc" "CMakeFiles/main.dir/lltree.cpp.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/main.cpp" "CMakeFiles/main.dir/main.cpp.o" "gcc" "CMakeFiles/main.dir/main.cpp.o.d"
-  "/home/mathis/Téléchargements/401-main(2)/401-main/utility.cpp" "CMakeFiles/main.dir/utility.cpp.o" "gcc" "CMakeFiles/main.dir/utility.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/io_png.c" "CMakeFiles/main.dir/io_png.c.o" "gcc" "CMakeFiles/main.dir/io_png.c.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/affine_sp_vectorization.cpp" "CMakeFiles/main.dir/affine_sp_vectorization.cpp.o" "gcc" "CMakeFiles/main.dir/affine_sp_vectorization.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/curv.cpp" "CMakeFiles/main.dir/curv.cpp.o" "gcc" "CMakeFiles/main.dir/curv.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/gass.cpp" "CMakeFiles/main.dir/gass.cpp.o" "gcc" "CMakeFiles/main.dir/gass.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/image.cpp" "CMakeFiles/main.dir/image.cpp.o" "gcc" "CMakeFiles/main.dir/image.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/levelLine.cpp" "CMakeFiles/main.dir/levelLine.cpp.o" "gcc" "CMakeFiles/main.dir/levelLine.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/lltree.cpp" "CMakeFiles/main.dir/lltree.cpp.o" "gcc" "CMakeFiles/main.dir/lltree.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/main.cpp" "CMakeFiles/main.dir/main.cpp.o" "gcc" "CMakeFiles/main.dir/main.cpp.o.d"
+  "/home/mathis/Bureau/OCRProject/src/vectorization/utility.cpp" "CMakeFiles/main.dir/utility.cpp.o" "gcc" "CMakeFiles/main.dir/utility.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

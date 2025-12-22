@@ -1,4 +1,4 @@
-# Install script for directory: /home/mathis/Téléchargements/401-main(2)/401-main
+# Install script for directory: /home/mathis/Bureau/OCRProject/src/vectorization
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -50,5 +50,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/mathis/Téléchargements/401-main(2)/401-main/build/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/mathis/Bureau/OCRProject/src/vectorization/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

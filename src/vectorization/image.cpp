@@ -80,21 +80,21 @@ unsigned char* mirror(unsigned char* inImage, size_t w, size_t h, int m)
     size_t ncol=w+2*m;
     size_t nrow=h+2*m;
     unsigned char* outImage = new unsigned char[ncol*nrow];
-    std::fill(outImage, outImage+(ncol*nrow), 0);
+    std::fill(outImage, outImage+(ncol*nrow), 255);
 
     // Copy original image in center
     for(size_t i=0; i<h; i++)
         std::copy(inImage+i*w, inImage+(i+1)*w, outImage+ncol*(i+m)+m);
 
-    // Horizontal mirror
-    for(int i=0; i<h; i++) {
-        mirrorH(outImage + ncol*(i+m)+m,     w, m, +1); // Left
-        mirrorH(outImage + ncol*(i+m)+m+w-1, w, m, -1); // Right
-    }
+    // // Horizontal mirror
+    // for(int i=0; i<h; i++) {
+    //     mirrorH(outImage + ncol*(i+m)+m,     w, m, +1); // Left
+    //     mirrorH(outImage + ncol*(i+m)+m+w-1, w, m, -1); // Right
+    // }
 
-    // Vertical mirror
-    mirrorV(outImage + ncol*m,       ncol, h, m, +1); // Top
-    mirrorV(outImage + ncol*(m+h-1), ncol, h, m, -1); // Bottom
+    // // Vertical mirror
+    // mirrorV(outImage + ncol*m,       ncol, h, m, +1); // Top
+    // mirrorV(outImage + ncol*(m+h-1), ncol, h, m, -1); // Bottom
 
     return outImage;
 }
