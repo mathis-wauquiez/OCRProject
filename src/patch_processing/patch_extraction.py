@@ -35,6 +35,9 @@ def extract_patches(characterComponents: connectedComponent, images, return_bin 
         patches = []
 
         for region in characterComponents.regions:
+            if characterComponents.is_deleted(region.label):
+                continue
+
             h1, w1, h2, w2 = region.bbox
             h2+=2*border; w2+=2*border
 

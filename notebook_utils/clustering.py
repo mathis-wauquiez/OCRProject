@@ -1,0 +1,5 @@
+
+
+
+def cluster(nlfa):
+    

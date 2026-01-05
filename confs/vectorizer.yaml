@@ -8,7 +8,7 @@ config:
   # Vectorization
   # threshold: null  # null = auto Otsu
   smoothing_scale: 1
-  accuracy_threshold: 0.1
+  accuracy_threshold: 1
   refinement_iterations: 0
   output_type: shape_merged # outline, shape, outline_merged, shape_merged
   

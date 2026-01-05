@@ -50,6 +50,108 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import hsv_to_rgb
 
+def viz_only_hog(hog_params, histograms1, histograms2, img, patch_idx=0, 
+                 threshold=0.01, arrow_scale=0.45, figsize=(20, 10)):
+
+    # Extract parameters
+    cw = hog_params.cell_width
+    ch = hog_params.cell_height
+    Nw = img.shape[-1] // cw
+    Nh = img.shape[-2] // ch 
+    Nbins = histograms1.shape[-1]
+    
+    # Reshape histograms to spatial grid
+    scales1 = rearrange(histograms1, 'Npatchs (Nh Nw) Nbins -> Npatchs Nh Nw Nbins', 
+                        Nh=Nh, Nw=Nw).cpu()
+    scales2 = rearrange(histograms2, 'Npatchs (Nh Nw) Nbins -> Npatchs Nh Nw Nbins', 
+                        Nh=Nh, Nw=Nw).cpu()
+    
+    # Select the specified patch
+    selected_histograms1 = scales1[patch_idx]
+    selected_histograms2 = scales2[patch_idx]
+    
+    print(f"Visualizing patch {patch_idx}")
+    print(f"Grid: {Nh} x {Nw} cells, each with {Nbins} orientation bins")
+    print(f"Cell size: {ch} x {cw} pixels")
+    
+    # Create figure
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
+    
+    # UNSIGNED: angles from 0 to pi
+    bin_angles = np.linspace(0, np.pi, Nbins, endpoint=False)
+    
+    # Calculate global max magnitude across both histograms for consistent scaling
+    max_magnitude = max(selected_histograms1.max(), selected_histograms2.max())
+    min_threshold = threshold * max_magnitude
+    
+    # Plot both histograms
+    _plot_hog_on_axis(ax1, img, selected_histograms1, Nh, Nw, ch, cw, 
+                      bin_angles, max_magnitude, min_threshold, arrow_scale, 
+                      "HOG Visualization 1")
+    _plot_hog_on_axis(ax2, img, selected_histograms2, Nh, Nw, ch, cw, 
+                      bin_angles, max_magnitude, min_threshold, arrow_scale, 
+                      "HOG Visualization 2")
+    
+    plt.tight_layout()
+    return fig
+
+
+def _plot_hog_on_axis(ax, img, histograms, Nh, Nw, ch, cw, 
+                      bin_angles, max_magnitude, min_threshold, arrow_scale, title):
+
+    # Display background image
+    ax.imshow(img, cmap='gray', alpha=0.3)
+    
+    # Draw arrows for each cell
+    for cell_y in range(Nh):
+        for cell_x in range(Nw):
+            # Calculate cell center
+            center_x = (cell_x + 0.5) * cw
+            center_y = (cell_y + 0.5) * ch
+            
+            cell_hist = histograms[cell_y, cell_x]
+            
+            # Draw arrows for each orientation bin
+            for bin_idx, magnitude in enumerate(cell_hist):
+                if magnitude > min_threshold:
+                    angle = bin_angles[bin_idx]
+                    
+                    # Calculate arrow properties
+                    length = magnitude * min(cw, ch) * arrow_scale / max_magnitude
+                    dx = length * np.cos(angle)
+                    dy = length * np.sin(angle)
+                    
+                    # Color mapping: [0, π] to [0, 0.5] in HSV color wheel
+                    color = plt.cm.hsv(angle / (2 * np.pi))
+                    
+                    # Draw bidirectional arrows for unsigned gradients
+                    arrow_props = {
+                        'head_width': 2.0,
+                        'head_length': 2.0,
+                        'fc': color,
+                        'ec': color,
+                        'alpha': 0.85,
+                        'linewidth': 2.0
+                    }
+                    
+                    ax.arrow(center_x, center_y, dx, dy, **arrow_props)
+                    ax.arrow(center_x, center_y, -dx, -dy, **arrow_props)
+    
+    # Draw grid lines
+    for grid_y in range(Nh + 1):
+        ax.axhline(y=grid_y * ch - 0.5, color='cyan', linewidth=1.0, alpha=0.6)
+    for grid_x in range(Nw + 1):
+        ax.axvline(x=grid_x * cw - 0.5, color='cyan', linewidth=1.0, alpha=0.6)
+    
+    # Set axis properties
+    ax.set_xlim(-0.5, Nw * cw - 0.5)
+    ax.set_ylim(Nh * ch - 0.5, -0.5)
+    ax.set_title(f'{title} (Unsigned)\n({Nh}×{Nw} cells, {len(bin_angles)} bins)', 
+                 fontsize=16, fontweight='bold')
+    ax.axis('off')
+
+
+
 def visualize_hog(hog_params, histograms, patches, hogOutput, i):
     # Get parameters
     cw = hog_params.cell_width

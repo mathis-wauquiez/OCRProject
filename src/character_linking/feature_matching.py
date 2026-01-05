@@ -9,7 +9,6 @@ import cv2
 import numpy as np
 
 from einops import rearrange
-from ..utils import connectedComponent, extract_patches
 from .params import HOGParameters, fullHOGOutput, featureMatchingOutputs, featureMatchingParameters
 from scipy.stats import gamma as scipy_gamma
 from scipy.stats import fisk
@@ -56,7 +55,7 @@ class featureMatching:
         available_memory -= 100 * 2**20 # remove 100 MB to be sure everything fits in memory
         element_size = query_histograms.element_size()
 
-        slice_memory = N2 * Nh * Nbins * element_size * 50
+        slice_memory = N2 * Nh * Nbins * element_size * 20
 
         # Compute the batch size as the maximum amount of (N2, Nh, Nbins) slices we can fit in memory
         batch_size = max(1, available_memory // slice_memory)

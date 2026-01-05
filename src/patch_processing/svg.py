@@ -29,7 +29,25 @@ class Contour:
     """Contour represented as Bézier curves"""
     curves: np.ndarray  # Shape: (N, 4, 2) - [start, ctrl1, ctrl2, end]
     closed: bool = True
+
+    def __getstate__(self):
+        """Serialize to dict with compressed array"""
+        return {
+            'curves': self.curves.tobytes(),
+            'shape': self.curves.shape,
+            'dtype': str(self.curves.dtype),
+            'closed': self.closed
+        }
     
+    def __setstate__(self, state):
+        """Deserialize from dict"""
+        self.curves = np.frombuffer(
+            state['curves'], 
+            dtype=state['dtype']
+        ).reshape(state['shape'])
+        self.closed = state['closed']
+
+
     def __len__(self):
         return len(self.curves)
 
@@ -283,6 +301,24 @@ class SVG:
         """Render SVG in Jupyter notebook (vector, not rasterized)"""
         from IPython.display import SVG, display
         display(SVG(self.to_string()))
+
+    def __getstate__(self):
+        """Custom serialization - convert to lightweight string representation"""
+        return {
+            'svg_string': self.to_string(),
+            'original_viewbox': self.original_viewbox
+        }
+    
+    def __setstate__(self, state):
+        """Custom deserialization - reconstruct from string"""
+        # Parse the SVG string
+        root = ET.fromstring(state['svg_string'])
+        reconstructed = self._parse_root(root)
+        
+        # Copy attributes
+        self.paths = reconstructed.paths
+        self.original_viewbox = state['original_viewbox']
+
 
 
 def _parse_path_element(elem) -> SVGPath:

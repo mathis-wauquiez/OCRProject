@@ -4,6 +4,9 @@ import torch
 
 from dataclasses import dataclass
 from dataclasses import replace
+from PIL import Image
+from ..utils import connectedComponent
+from pathlib import Path
 
 
 from collections import OrderedDict
@@ -96,16 +99,14 @@ class imageComponentsParams(Updateable):
     cc_distance_threshold: float = 50
     cc_min_comp_size:      float = 10000
 
-from PIL import Image
-from ..utils import connectedComponent
 
 @dataclass
 class PipelineOutput:
 
-    img_pil:    Image
+    img_pil: Image
     "PIL input image"
     
-    preprocessed:   Any
+    preprocessed: Any
     "Image preprocessed to be fed to CRAFT"
 
     binary_img: np.ndarray
@@ -114,14 +115,8 @@ class PipelineOutput:
     score_text: torch.Tensor
     "Score map output for texts from the CRAFT model"
 
-    score_text_components: connectedComponent
-    "Connected components of the text score map"
-
-    filtered_text_components: connectedComponent
-    "Text score map components after filtering small and elongated components"
-
-    merged_text_components: connectedComponent
-    "Filtered components after merging the components that are too close"
+    craft_components: connectedComponent
+    "CRAFT text components after filtering and merging (check deletion/merge history for intermediate stages)"
 
     image_components: connectedComponent
     "The connected components of the binarized image"
@@ -129,11 +124,49 @@ class PipelineOutput:
     filtered_image_components: connectedComponent
     "The connected components of the binarized image after filtering big lines"
 
-    character_components: connectedComponent
-    "The characters' components"
+    characters: connectedComponent
+    "Final character components after all filtering (proximity, size, aspect ratio, etc.)"
+    
+    similarity_matrix: np.ndarray = None
+    "Similarity matrix between filtered image components and CRAFT components"
+    
+    characters_before_contour_filter: connectedComponent = None
+    "Character components before contour proximity filtering (for visualization)"
 
-    cc_filtered: connectedComponent
-    "The components filtered not to touch the borders etc"
-
-    filteredCharacters: connectedComponent
-    "Characters after filtering"
+    
+    def save(self, save_dir: Path | str, save_intermediates: bool = False):
+        """Save pipeline results"""
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save essentials
+        self.img_pil.save(save_dir / 'input.png')
+        Image.fromarray((self.binary_img * 255).astype(np.uint8)).save(save_dir / 'binary.png')
+        
+        # Save final characters
+        self.characters.save(save_dir / 'characters.npz')
+        Image.fromarray(self.characters.segm_img).save(save_dir / 'characters_viz.png')
+        
+        # Save deletion visualization
+        deletion_viz, colors = self.characters.deletion_viz()
+        Image.fromarray(deletion_viz).save(save_dir / 'deletion_viz.png')
+        with open(save_dir / 'deletion_legend.json', 'w') as f:
+            json.dump({k: list(v) for k, v in colors.items()}, f, indent=2)
+        
+        if save_intermediates:
+            torch.save(self.score_text, save_dir / 'score_text.pt')
+            self.craft_components.save(save_dir / 'craft_components.npz')
+            self.image_components.save(save_dir / 'image_components.npz')
+            self.filtered_image_components.save(save_dir / 'filtered_image_components.npz')
+            
+            # Save CRAFT deletion viz
+            craft_viz, craft_colors = self.craft_components.deletion_viz()
+            Image.fromarray(craft_viz).save(save_dir / 'craft_deletion_viz.png')
+            with open(save_dir / 'craft_deletion_legend.json', 'w') as f:
+                json.dump({k: list(v) for k, v in craft_colors.items()}, f, indent=2)
+    
+    @classmethod
+    def load(cls, save_dir: Path | str):
+        """Load saved characters from pipeline results"""
+        save_dir = Path(save_dir)
+        return connectedComponent.load(save_dir / 'characters.npz')

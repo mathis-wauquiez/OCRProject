@@ -3,6 +3,55 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
+import matplotlib.font_manager as fm
+
+from src.patch_processing.svg import SVG
+# Configure matplotlib to use a font that supports Chinese characters
+plt.rcParams['font.sans-serif'] = ['Noto Sans CJK JP', 'SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False  # Fix minus sign display
+
+def show_random_sample(*args, n_samples, indices=None, titles=None, **kwargs):
+    indices = np.random.randint(0, len(args[0]), n_samples) if indices is None else indices
+    n_samples = min(n_samples, len(indices))
+    fig, axes = plt.subplots(len(args), n_samples, figsize=(4*n_samples, 4*len(args)), squeeze=False)
+    
+    for row, arr in enumerate(args):
+        for col, idx in enumerate(indices):
+            ax = axes[row, col]
+            img = arr[idx]
+
+            if row == 0:
+                if titles is None:
+                    ax.set_title(f'Sample {idx}/{len(args[0])}')
+                else:
+                    ax.set_title(f'Sample {idx}/{len(args[0])} \n {titles[0]}')
+            elif titles is not None:
+                ax.set_title(f'{titles[row]}')
+            
+            # Handle string (e.g., Chinese character)
+            if isinstance(img, str):
+                ax.axis('off')
+                ax.text(0.5, 0.5, img, fontsize=100, ha='center', va='center', 
+                        transform=ax.transAxes,
+                        fontfamily='sans-serif')  # Use configured font
+            else:
+                # Handle SVG
+                if type(img) == SVG:
+                    img = img.render(**kwargs)
+                
+                # Handle numpy array
+                if type(img) == np.ndarray:
+                    if img.shape[-1] == 1:
+                        img = img[..., 0]
+
+                    cmap = "gray" if img.ndim == 2 else None
+                    ax.imshow(img, cmap=cmap, interpolation='nearest')
+    
+    plt.tight_layout()
+    plt.show()
+
+
+
 def visualize_pipeline(results, save_dir='saved_figures/pipeline_viz', filename='output', 
                       save_summary=True, save_deltas=True, save_stages=False):
     """

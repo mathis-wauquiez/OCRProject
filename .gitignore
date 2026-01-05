@@ -11,3 +11,10 @@ caches/hog_cache/params.json
 /saved_figures
 OCR_Pipeline_Results.pptx
 /outputs_svg
+/tests
+/tests_2
+*.npz
+*.json
+*.parquet
+*.fth
+/data

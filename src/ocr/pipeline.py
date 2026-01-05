@@ -28,7 +28,9 @@ class GlobalPipeline:
         self.craftDetector.to(device)
         self.device = device
 
-        self.imageComponentsPipeline = image_components.imageComponentsPipeline(imageComponentsPipelineParams, self.craftDetector)
+        self.imageComponentsPipeline = image_components.imageComponentsPipeline(
+            imageComponentsPipelineParams, self.craftDetector
+        )
         self.progress_callback = None
 
     def set_progress_callback(self, callback: Optional[Callable[[str, Any, str], None]]):
@@ -56,21 +58,18 @@ class GlobalPipeline:
         H, W, C = img_tensor.shape
         self._report_progress(f'Image dimensions: {W} x {H} x {C}')
 
+        # ============ CRAFT Detection ============
         self._report_progress('Running CRAFT detection...')
         img_tensor = img_tensor.permute(2,0,1).float().to(self.device)
         with torch.no_grad():
             preprocessed, score_text, score_link = self.craftDetector(img_tensor.unsqueeze(0))
 
-        # Report CRAFT completion with score map data
         self._report_progress('CRAFT detection completed', score_text, "score_map")
 
+        # ============ CRAFT Component Extraction ============
         self._report_progress('Detecting connected components from CRAFT score...')
-        score_text_bin = score_text.squeeze(0).cpu().numpy() > self.craftComponentAnalysisParams.text_threshold
 
-        # components = connectedComponent.from_image(score_text_bin.astype(np.uint8), 
-        #                                          connectivity=self.craftComponentAnalysisParams.connectivity)
-        
-        components = connectedComponent.from_image_watershed(
+        text_components = connectedComponent.from_image_watershed(
             score_text.squeeze(0).cpu().numpy(),
             min_distance=self.craftComponentAnalysisParams.min_dist,
             connectivity=1,
@@ -79,55 +78,79 @@ class GlobalPipeline:
             binary_threshold=self.craftComponentAnalysisParams.text_threshold
         )
 
-        # Report initial components found
-        self._report_progress(f'Found {components.nLabels - 1} initial text components', 
-                            components, "components")
+        initial_count = len(text_components.regions)
+        self._report_progress(
+            f'Found {initial_count} initial text components', 
+            text_components, "components"
+        )
 
+        # ============ CRAFT Filtering ============
         self._report_progress('Filtering components by area and aspect ratio...')
-        filtered_components = craft_components.filter_craft_components(self.craftComponentAnalysisParams, components)
+        text_components = craft_components.filter_craft_components(
+            self.craftComponentAnalysisParams, text_components
+        )
         
-        # Report filtered components
-        self._report_progress(f'After filtering: {filtered_components.nLabels - 1} components remaining', 
-                            filtered_components, "components")
+        filtered_count = len(text_components.regions)
+        deleted_count = len(text_components._deleted_labels)
+        self._report_progress(
+            f'After filtering: {filtered_count} components remaining ({deleted_count} filtered out)', 
+            text_components, "components"
+        )
         
+        # ============ CRAFT Merging ============
         self._report_progress('Merging nearby components...')
-        merged_components = craft_components.merge_craft_components(self.craftComponentAnalysisParams, filtered_components)
+        text_components = craft_components.merge_craft_components(
+            self.craftComponentAnalysisParams, text_components
+        )
 
-        # Report merged components
-        self._report_progress(f'After merging: {merged_components.nLabels - 1} final text components', 
-                            merged_components, "components")
+        merged_count = len(np.unique(text_components.labels)) - 1
+        n_merge_groups = len(text_components.get_merged_groups())
+        self._report_progress(
+            f'After merging: {merged_count} final text components ({n_merge_groups} merge groups)', 
+            text_components, "components"
+        )
 
+        # ============ Image Processing ============
         self._report_progress('Processing image components and binarization...')
-        binary_img, img_components, filtered_img_components, character_components, cc_filtered, filteredCharacters = self.imageComponentsPipeline.forward(img_pil, merged_components)
+        
+        # Run the full image components pipeline
+        image_result = self.imageComponentsPipeline.forward(
+            img_pil, text_components, 
+            return_intermediate=True
+        )
 
-        # Report binary image
-        self._report_progress('Image binarization completed', binary_img, "binary_image")
+        # Report progress for each stage
+        self._report_progress('Image binarization completed', image_result.binary_img, "binary_image")
         
-        # Report image components
-        self._report_progress(f'Found {img_components.nLabels - 1} image components', 
-                            img_components, "components")
+        img_comp_count = len(image_result.img_components.regions)
+        self._report_progress(
+            f'Found {img_comp_count} image components', 
+            image_result.img_components, "components"
+        )
         
-        # Report filtered image components
-        self._report_progress(f'After image filtering: {filtered_img_components.nLabels - 1} components', 
-                            filtered_img_components, "components")
+        filtered_img_count = len(image_result.filtered_img_components.regions)
+        self._report_progress(
+            f'After image filtering: {filtered_img_count} components', 
+            image_result.filtered_img_components, "components"
+        )
         
-        # Report final character components
-        self._report_progress(f'Final character segmentation: {character_components.nLabels - 1} components', 
-                            character_components, "components")
+        char_count = len(image_result.characters.regions)
+        self._report_progress(
+            f'Final character segmentation: {char_count} components', 
+            image_result.characters, "components"
+        )
 
         self._report_progress('Pipeline completed successfully!')
 
         return PipelineOutput(
             img_pil=img_pil,
             preprocessed=preprocessed,
-            binary_img=binary_img,
+            binary_img=image_result.binary_img,
             score_text=score_text,
-            score_text_components=components,
-            filtered_text_components=filtered_components,
-            merged_text_components=merged_components,
-            image_components=img_components,
-            cc_filtered=cc_filtered,
-            filtered_image_components=filtered_img_components,
-            character_components=character_components,
-            filteredCharacters=filteredCharacters
+            craft_components=text_components,
+            image_components=image_result.img_components,
+            filtered_image_components=image_result.filtered_img_components,
+            characters=image_result.characters,
+            similarity_matrix=image_result.similarity_matrix,
+            characters_before_contour_filter=image_result.characters_before_contour_filter
         )
