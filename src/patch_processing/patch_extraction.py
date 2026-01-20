@@ -19,7 +19,7 @@ def extract_patches(characterComponents: connectedComponent, images, return_bin 
     """
 
     patches_list = []
-    
+
     if return_bin:
         images.insert(0, characterComponents.labels)
 
@@ -33,6 +33,7 @@ def extract_patches(characterComponents: connectedComponent, images, return_bin 
             border = 0
 
         patches = []
+        
 
         for region in characterComponents.regions:
             if characterComponents.is_deleted(region.label):

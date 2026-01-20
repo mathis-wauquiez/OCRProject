@@ -30,7 +30,7 @@ def analyze_community_patch(
     Parameters
     ----------
     query_idx : int
-        Index of the query patch to analyze. If None, a random index is chosen.
+        Index of the query patch to analyze.
     patches_df : pd.DataFrame
         DataFrame containing patch data with 'svg' and 'bin_patch' columns.
     dataset : torch.Tensor or indexable
@@ -64,16 +64,10 @@ def analyze_community_patch(
     
     Returns
     -------
-    dict
-        Dictionary containing analysis results:
-        - 'query_idx': The query index used
-        - 'community_idx': Index of the query's community
-        - 'community_size': Size of the community
-        - 'n_matches': Number of accepted matches
-        - 'same_comm_matches': Matches within same community
-        - 'diff_comm_matches': Matches in different communities
-        - 'pca': PCA object (if computed)
-        - 'explained_variance': Cumulative variance explained (if PCA computed)
+    results : dict
+        Dictionary containing analysis results
+    figs : dict
+        Dictionary of matplotlib figures (None if not generated)
     """
     i = query_idx
     n_to_show = min(n_to_show, len(patches_df['svg']))
@@ -118,6 +112,8 @@ def analyze_community_patch(
         'pca': None,
         'explained_variance': None,
     }
+
+    figs = {}
     
     # Get community info
     community_indices = list(communities[query_community_idx])
@@ -130,22 +126,30 @@ def analyze_community_patch(
     
     # PCA Analysis
     if show_pca:
-        _plot_pca_analysis(
+        pca_figs = _plot_pca_analysis(
             i, community_indices, community_size, query_community_idx,
             dataset, patches_df, torch_to_pil, min_patches_for_pca,
             figsize_scale, results
         )
+        if pca_figs is not None:
+            figs['pca_components'] = pca_figs[0]
+            figs['pca_variance'] = pca_figs[1]
+            figs['pca_distributions'] = pca_figs[2]
+        else:
+            figs['pca_components'] = None
+            figs['pca_variance'] = None
+            figs['pca_distributions'] = None
     
     # Histogram
     if show_histogram:
-        _plot_histogram(
+        figs['histogram'] = _plot_histogram(
             nlfa, i, query_community_idx, nlfa_threshold, eps,
             query_matches, figsize_scale
         )
     
     # Scatter plot
     if show_scatter:
-        _plot_scatter(
+        figs['scatter'] = _plot_scatter(
             sorted_distances, accepted_mask, same_community_mask,
             nlfa_threshold, i, query_community_idx, eps,
             query_matches, n_to_show, figsize_scale
@@ -153,7 +157,7 @@ def analyze_community_patch(
     
     # Patch visualization
     if show_patches:
-        _plot_patches(
+        figs['patches'] = _plot_patches(
             patches_df, i, query_community_idx, sorted_indices,
             sorted_distances, accepted_mask, same_community_mask,
             nlfa_threshold, eps, query_matches, n_to_show, figsize_scale
@@ -165,7 +169,7 @@ def analyze_community_patch(
         same_community_mask, accepted_mask, n_to_show
     )
     
-    return results
+    return results, figs
 
 
 def _plot_pca_analysis(
@@ -173,77 +177,68 @@ def _plot_pca_analysis(
     dataset, patches_df, torch_to_pil, min_patches_for_pca,
     figsize_scale, results
 ):
-    """Plot PCA analysis of community patches."""
+    """Plot PCA analysis of community patches. Returns None if PCA can't be performed."""
     
-    if community_size >= min_patches_for_pca:
-        community_patches = [dataset[idx].unsqueeze(0) for idx in community_indices]
-        community_patches_flat = torch.stack([
-            patch.flatten() for patch in community_patches
-        ]).cpu().numpy()
-        
-        # Compute mean patch
-        mean_patch_flat = community_patches_flat.mean(axis=0)
-        mean_patch = mean_patch_flat.reshape(community_patches[0].shape)
-        
-        max_components = min(community_size - 1, community_patches_flat.shape[1])
-        
-        if community_size >= 2 and max_components >= 1:
-            # Standardize and apply PCA
-            scaler = StandardScaler()
-            community_patches_scaled = scaler.fit_transform(community_patches_flat)
-            
-            n_components = min(10, max_components)
-            pca = PCA(n_components=n_components)
-            community_pca = pca.fit_transform(community_patches_scaled)
-            
-            results['pca'] = pca
-            results['explained_variance'] = np.cumsum(pca.explained_variance_ratio_ * 100)
-            
-            # Reconstruct principal component patches
-            n_pc_to_show = min(5, n_components)
-            pc_patches = []
-            for pc_idx in range(n_pc_to_show):
-                pc = pca.components_[pc_idx]
-                pc_patch = pc.reshape(community_patches[0].shape)
-                pc_patches.append(pc_patch)
-            
-            print(f"PCA computed with {n_components} components")
-            
-            # Visualization 1: Mean and PC patches
-            _plot_mean_and_pcs(
-                mean_patch, pc_patches, pca, query_community_idx,
-                community_size, n_pc_to_show, torch_to_pil, figsize_scale
-            )
-            
-            # Visualization 2: Variance explained
-            _plot_variance_explained(
-                pca, n_components, query_community_idx, community_size, figsize_scale
-            )
-            
-            # Visualization 3: Violin plots
-            _plot_violin(
-                community_pca, pca, i, community_indices, query_community_idx,
-                community_size, n_components, figsize_scale
-            )
-            
-            cumsum_var = results['explained_variance']
-            print(f"PCA Analysis:")
-            print(f"  - Total variance explained by {n_components} components: {cumsum_var[-1]:.1f}%")
-            if cumsum_var[-1] >= 95:
-                print(f"  - Components needed for 95% variance: {np.argmax(cumsum_var >= 95) + 1}")
-            else:
-                print(f"  - Note: Only {cumsum_var[-1]:.1f}% variance achievable with {n_components} components")
-        
-        else:
-            print(f"⚠️  Community too small for PCA (size={community_size})")
-            _plot_mean_only(mean_patch, query_community_idx, community_size, torch_to_pil, figsize_scale)
+    if community_size < min_patches_for_pca:
+        print(f"⚠️  Community too small for PCA analysis (size={community_size}, min={min_patches_for_pca})")
+        return None
     
-    else:
-        print(f"⚠️  Community too small for analysis (size={community_size}, min={min_patches_for_pca})")
-        _plot_all_community_patches(
-            community_indices, i, query_community_idx, community_size,
-            patches_df, torch_to_pil, figsize_scale
-        )
+    community_patches = [dataset[idx].unsqueeze(0) for idx in community_indices]
+    community_patches_flat = torch.stack([
+        patch.flatten() for patch in community_patches
+    ]).cpu().numpy()
+    
+    max_components = min(community_size - 1, community_patches_flat.shape[1])
+    
+    if community_size < 2 or max_components < 1:
+        print(f"⚠️  Community too small for PCA (size={community_size})")
+        return None
+    
+    # Standardize and apply PCA
+    scaler = StandardScaler()
+    community_patches_scaled = scaler.fit_transform(community_patches_flat)
+    
+    n_components = min(10, max_components)
+    pca = PCA(n_components=n_components)
+    community_pca = pca.fit_transform(community_patches_scaled)
+    
+    results['pca'] = pca
+    results['explained_variance'] = np.cumsum(pca.explained_variance_ratio_ * 100)
+    
+    print(f"PCA computed with {n_components} components")
+    cumsum_var = results['explained_variance']
+    print(f"  - Total variance explained: {cumsum_var[-1]:.1f}%")
+    if cumsum_var[-1] >= 95:
+        print(f"  - Components for 95% variance: {np.argmax(cumsum_var >= 95) + 1}")
+    
+    # Compute mean patch
+    mean_patch_flat = community_patches_flat.mean(axis=0)
+    mean_patch = mean_patch_flat.reshape(community_patches[0].shape)
+    
+    # Reconstruct principal component patches
+    n_pc_to_show = min(5, n_components)
+    pc_patches = []
+    for pc_idx in range(n_pc_to_show):
+        pc = pca.components_[pc_idx]
+        pc_patch = pc.reshape(community_patches[0].shape)
+        pc_patches.append(pc_patch)
+    
+    # Create visualizations
+    fig1 = _plot_mean_and_pcs(
+        mean_patch, pc_patches, pca, query_community_idx,
+        community_size, n_pc_to_show, torch_to_pil, figsize_scale
+    )
+    
+    fig2 = _plot_variance_explained(
+        pca, n_components, query_community_idx, community_size, figsize_scale
+    )
+    
+    fig3 = _plot_violin(
+        community_pca, pca, i, community_indices, query_community_idx,
+        community_size, n_components, figsize_scale
+    )
+    
+    return fig1, fig2, fig3
 
 
 def _plot_mean_and_pcs(
@@ -253,7 +248,7 @@ def _plot_mean_and_pcs(
     """Plot mean patch and principal components."""
     fig, axs = plt.subplots(
         1, n_pc_to_show + 1,
-        figsize=(3 * (n_pc_to_show + 1) * figsize_scale, 3 * figsize_scale)
+        figsize=(2.5 * (n_pc_to_show + 1) * figsize_scale, 2.8 * figsize_scale)
     )
     if n_pc_to_show == 0:
         axs = [axs]
@@ -264,14 +259,10 @@ def _plot_mean_and_pcs(
         cmap="gray"
     )
     axs[0].set_title(
-        f'Mean Patch\n(Community {query_community_idx}, n={community_size})',
-        fontweight='bold', fontsize=11
+        f'Mean Patch\n(n={community_size})',
+        fontsize=10, pad=8
     )
     axs[0].axis('off')
-    for spine in axs[0].spines.values():
-        spine.set_edgecolor('blue')
-        spine.set_linewidth(3)
-        spine.set_visible(True)
     
     # PC patches
     for pc_idx in range(n_pc_to_show):
@@ -280,67 +271,62 @@ def _plot_mean_and_pcs(
                              (pc_patches[pc_idx].max() - pc_patches[pc_idx].min() + 1e-8)
         ax.imshow(
             torch_to_pil(torch.from_numpy(pc_patch_normalized)).resize((256, 256)),
-            cmap="seismic"
+            cmap="RdBu_r"
         )
         variance_explained = pca.explained_variance_ratio_[pc_idx] * 100
-        ax.set_title(f'PC{pc_idx + 1}\n({variance_explained:.1f}% var)', fontweight='bold', fontsize=11)
+        ax.set_title(f'PC{pc_idx + 1}\n({variance_explained:.1f}%)', fontsize=10, pad=8)
         ax.axis('off')
-        for spine in ax.spines.values():
-            spine.set_edgecolor('orange')
-            spine.set_linewidth(2)
-            spine.set_visible(True)
     
     plt.suptitle(
-        f'Community {query_community_idx}: Mean and Principal Components ({community_size} patches)',
-        fontsize=13, fontweight='bold'
+        f'Community {query_community_idx}: Mean and Principal Components',
+        fontsize=12, y=0.98
     )
     plt.tight_layout()
-    plt.show()
+    
+    return fig
 
 
 def _plot_variance_explained(pca, n_components, query_community_idx, community_size, figsize_scale):
     """Plot variance explained bar chart and cumulative plot."""
-    fig = plt.figure(figsize=(10 * figsize_scale, 4 * figsize_scale))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10 * figsize_scale, 3.5 * figsize_scale))
     
-    plt.subplot(1, 2, 1)
-    plt.bar(
+    # Bar plot
+    ax1.bar(
         range(1, n_components + 1),
         pca.explained_variance_ratio_ * 100,
-        color='steelblue', edgecolor='black'
+        color='#4682b4', edgecolor='black', linewidth=0.5
     )
-    plt.xlabel('Principal Component', fontsize=11)
-    plt.ylabel('Variance Explained (%)', fontsize=11)
-    plt.title(
-        f'Variance Explained by Each PC\n(Community {query_community_idx}, n={community_size})',
-        fontweight='bold'
-    )
-    plt.xticks(range(1, n_components + 1))
-    plt.grid(alpha=0.3, axis='y')
+    ax1.set_xlabel('Principal Component', fontsize=10)
+    ax1.set_ylabel('Variance Explained (%)', fontsize=10)
+    ax1.set_title(f'Variance per Component', fontsize=11)
+    ax1.set_xticks(range(1, n_components + 1))
+    ax1.grid(alpha=0.2, axis='y')
+    ax1.spines['top'].set_visible(False)
+    ax1.spines['right'].set_visible(False)
     
-    plt.subplot(1, 2, 2)
+    # Cumulative plot
     cumsum_var = np.cumsum(pca.explained_variance_ratio_ * 100)
-    plt.plot(
+    ax2.plot(
         range(1, n_components + 1), cumsum_var,
-        marker='o', linewidth=2, markersize=8, color='steelblue'
+        marker='o', linewidth=2, markersize=6, color='#4682b4'
     )
-    plt.xlabel('Number of Components', fontsize=11)
-    plt.ylabel('Cumulative Variance Explained (%)', fontsize=11)
-    plt.title(
-        f'Cumulative Variance Explained\n(Community {query_community_idx}, n={community_size})',
-        fontweight='bold'
-    )
-    plt.xticks(range(1, n_components + 1))
-    plt.grid(alpha=0.3)
+    ax2.set_xlabel('Number of Components', fontsize=10)
+    ax2.set_ylabel('Cumulative Variance (%)', fontsize=10)
+    ax2.set_title(f'Cumulative Variance', fontsize=11)
+    ax2.set_xticks(range(1, n_components + 1))
+    ax2.grid(alpha=0.2)
+    ax2.spines['top'].set_visible(False)
+    ax2.spines['right'].set_visible(False)
     
-    if cumsum_var[-1] < 95:
-        plt.axhline(y=cumsum_var[-1], color='orange', linestyle='--', linewidth=1,
-                   label=f'Max: {cumsum_var[-1]:.1f}%')
-    else:
-        plt.axhline(y=95, color='red', linestyle='--', linewidth=1, label='95% threshold')
-    plt.legend()
+    # Add reference line
+    if cumsum_var[-1] >= 95:
+        ax2.axhline(y=95, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+        ax2.text(1, 95, ' 95%', fontsize=8, va='bottom', color='gray')
     
+    fig.suptitle(f'Community {query_community_idx} - PCA Variance Analysis', fontsize=12, y=0.98)
     plt.tight_layout()
-    plt.show()
+    
+    return fig
 
 
 def _plot_violin(
@@ -352,7 +338,10 @@ def _plot_violin(
     n_cols = 3
     n_rows = int(np.ceil(n_pc_violin / n_cols))
     
-    fig, axs = plt.subplots(n_rows, n_cols, figsize=(15 * figsize_scale, 5 * n_rows * figsize_scale))
+    fig, axs = plt.subplots(
+        n_rows, n_cols, 
+        figsize=(12 * figsize_scale, 3.5 * n_rows * figsize_scale)
+    )
     axs = np.atleast_1d(axs).ravel()
     
     query_idx_in_community = community_indices.index(i)
@@ -361,134 +350,97 @@ def _plot_violin(
         ax = axs[pc_idx]
         component_values = community_pca[:, pc_idx]
         
+        # Choose visualization based on community size
         if community_size <= 5:
-            bp = ax.boxplot([component_values], positions=[0], widths=0.4,
-                           patch_artist=True, showmeans=True)
-            bp['boxes'][0].set_facecolor('lightblue')
-            bp['boxes'][0].set_alpha(0.7)
+            bp = ax.boxplot(
+                [component_values], positions=[0], widths=0.4,
+                patch_artist=True, showmeans=True
+            )
+            bp['boxes'][0].set_facecolor('#a8c5e0')
+            bp['boxes'][0].set_alpha(0.6)
         else:
-            parts = ax.violinplot([component_values], positions=[0], widths=0.7,
-                                 showmeans=True, showextrema=True, showmedians=True)
+            parts = ax.violinplot(
+                [component_values], positions=[0], widths=0.6,
+                showmeans=False, showextrema=True, showmedians=True
+            )
             for pc in parts['bodies']:
-                pc.set_facecolor('lightblue')
-                pc.set_alpha(0.7)
+                pc.set_facecolor('#a8c5e0')
+                pc.set_alpha(0.6)
                 pc.set_edgecolor('black')
-                pc.set_linewidth(1.5)
+                pc.set_linewidth(1)
         
-        jitter_amount = 0.04 if community_size > 10 else 0.02
+        # Scatter individual points
+        jitter_amount = 0.03 if community_size > 10 else 0.02
         jitter = np.random.normal(0, jitter_amount, size=len(component_values))
-        ax.scatter(jitter, component_values, alpha=0.5, s=30,
-                  color='steelblue', edgecolors='black', linewidth=0.5)
+        ax.scatter(
+            jitter, component_values, alpha=0.4, s=25,
+            color='#4682b4', edgecolors='none'
+        )
         
+        # Highlight query patch
         query_value = component_values[query_idx_in_community]
-        ax.scatter(0, query_value, s=200, color='red', marker='*',
-                  edgecolors='black', linewidth=2, label='Query patch', zorder=10)
+        ax.scatter(
+            0, query_value, s=150, color='#d62728', marker='*',
+            edgecolors='black', linewidth=1, zorder=10
+        )
         
         variance_explained = pca.explained_variance_ratio_[pc_idx] * 100
-        ax.set_title(f'PC{pc_idx + 1} ({variance_explained:.1f}% var)',
-                    fontweight='bold', fontsize=12)
-        ax.set_ylabel('Component Value', fontsize=10)
+        ax.set_title(f'PC{pc_idx + 1} ({variance_explained:.1f}%)', fontsize=10)
+        ax.set_ylabel('Value', fontsize=9)
         ax.set_xticks([])
-        ax.set_xlim([-0.3, 0.3])
-        ax.grid(alpha=0.3, axis='y')
-        ax.legend(fontsize=9)
-        
-        mean_val = component_values.mean()
-        std_val = component_values.std()
-        ax.text(0.02, 0.98, f'μ={mean_val:.2f}\nσ={std_val:.2f}',
-               transform=ax.transAxes, fontsize=9, verticalalignment='top',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        ax.set_xlim([-0.25, 0.25])
+        ax.grid(alpha=0.2, axis='y')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
     
+    # Hide unused subplots
     for pc_idx in range(n_pc_violin, len(axs)):
         axs[pc_idx].axis('off')
     
     plt.suptitle(
-        f'PCA Component Distributions: Community {query_community_idx} ({community_size} patches)',
-        fontsize=14, fontweight='bold'
+        f'Community {query_community_idx} - PCA Component Distributions (★ = query)',
+        fontsize=12, y=0.98
     )
     plt.tight_layout()
-    plt.show()
-
-
-def _plot_mean_only(mean_patch, query_community_idx, community_size, torch_to_pil, figsize_scale):
-    """Plot only the mean patch when PCA isn't possible."""
-    print("   Showing mean patch only...")
     
-    fig, ax = plt.subplots(1, 1, figsize=(4 * figsize_scale, 4 * figsize_scale))
-    ax.imshow(torch_to_pil(torch.from_numpy(mean_patch)).resize((256, 256)), cmap="gray")
-    ax.set_title(
-        f'Mean Patch\n(Community {query_community_idx}, n={community_size})',
-        fontweight='bold', fontsize=12
-    )
-    ax.axis('off')
-    for spine in ax.spines.values():
-        spine.set_edgecolor('blue')
-        spine.set_linewidth(3)
-        spine.set_visible(True)
-    plt.tight_layout()
-    plt.show()
-
-
-def _plot_all_community_patches(
-    community_indices, i, query_community_idx, community_size,
-    patches_df, torch_to_pil, figsize_scale
-):
-    """Plot all patches in a small community."""
-    print("   Showing all patches in community...")
-    
-    fig, axs = plt.subplots(
-        1, community_size,
-        figsize=(3 * community_size * figsize_scale, 3 * figsize_scale)
-    )
-    if community_size == 1:
-        axs = [axs]
-    
-    for idx, patch_idx in enumerate(community_indices):
-        axs[idx].imshow(
-            torch_to_pil(patches_df.iloc[patch_idx]['bin_patch'][None, ...]).resize((256, 256)),
-            cmap="gray"
-        )
-        is_query = (patch_idx == i)
-        title = f'{"Query" if is_query else f"Patch {idx+1}"}\n(idx={patch_idx})'
-        color = 'red' if is_query else 'blue'
-        axs[idx].set_title(title, fontweight='bold', fontsize=10, color=color)
-        axs[idx].axis('off')
-        for spine in axs[idx].spines.values():
-            spine.set_edgecolor(color)
-            spine.set_linewidth(3 if is_query else 2)
-            spine.set_visible(True)
-    
-    plt.suptitle(
-        f'All Patches in Community {query_community_idx} ({community_size} patches)',
-        fontsize=13, fontweight='bold'
-    )
-    plt.tight_layout()
-    plt.show()
+    return fig
 
 
 def _plot_histogram(nlfa, i, query_community_idx, nlfa_threshold, eps, query_matches, figsize_scale):
     """Plot histogram of distance distribution."""
-    plt.figure(figsize=(12 * figsize_scale, 4 * figsize_scale))
-    hist_values, bin_edges, patches_hist = plt.hist(
-        nlfa[i], bins=50, color='skyblue', edgecolor='black', alpha=0.7
+    fig, ax = plt.subplots(figsize=(10 * figsize_scale, 3.5 * figsize_scale))
+    
+    hist_values, bin_edges, patches_hist = ax.hist(
+        nlfa[i], bins=50, color='#a8c5e0', edgecolor='black', 
+        alpha=0.7, linewidth=0.5
     )
     
-    plt.vlines(nlfa_threshold, 0, hist_values.max(), color='orange', linestyle='--',
-               linewidth=3, label=f'Threshold nlfa = {nlfa_threshold:.3f}')
-    
-    plt.axvspan(nlfa[i].max(), nlfa_threshold, alpha=0.2, color='green',
-                label=f'Accepted region ({len(query_matches)} matches)')
-    
-    plt.xlabel('NLFA', fontsize=12)
-    plt.ylabel('Frequency', fontsize=12)
-    plt.title(
-        f'Distance Distribution: Query {i} (Community {query_community_idx}, ε={eps})',
-        fontsize=13, fontweight='bold'
+    # Threshold line
+    ax.axvline(
+        nlfa_threshold, color='#d62728', linestyle='--',
+        linewidth=2, label=f'Threshold = {nlfa_threshold:.3f}'
     )
-    plt.legend(fontsize=10)
-    plt.grid(alpha=0.3, axis='y')
+    
+    # Accepted region
+    ax.axvspan(
+        nlfa[i].max(), nlfa_threshold, alpha=0.15, color='#2ca02c',
+        label=f'Accepted ({len(query_matches)} matches)'
+    )
+    
+    ax.set_xlabel('NLFA', fontsize=10)
+    ax.set_ylabel('Frequency', fontsize=10)
+    ax.set_title(
+        f'Query {i} (Community {query_community_idx}) - Distance Distribution (ε={eps})',
+        fontsize=11, pad=10
+    )
+    ax.legend(fontsize=9, framealpha=0.9)
+    ax.grid(alpha=0.2, axis='y')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
     plt.tight_layout()
-    plt.show()
+    
+    return fig
 
 
 def _plot_scatter(
@@ -497,51 +449,63 @@ def _plot_scatter(
     query_matches, n_to_show, figsize_scale
 ):
     """Plot scatter plot of nearest neighbors."""
-    plt.figure(figsize=(12 * figsize_scale, 4 * figsize_scale))
+    fig, ax = plt.subplots(figsize=(10 * figsize_scale, 3.5 * figsize_scale))
     
+    # Define colors and markers
     colors = []
     markers = []
+    sizes = []
     for accepted, same_comm in zip(accepted_mask, same_community_mask):
-        if same_comm:
-            colors.append('green' if accepted else 'orange')
-            markers.append('o')
+        if accepted:
+            colors.append('#2ca02c')  # Green for accepted
+            sizes.append(80)
         else:
-            colors.append('green' if accepted else 'red')
-            markers.append('s')
+            colors.append('#d62728' if not same_comm else '#ff7f0e')  # Red/orange for rejected
+            sizes.append(60)
+        markers.append('o' if same_comm else 's')
     
-    for rank, (dist, color, marker) in enumerate(zip(sorted_distances[:n_to_show], colors, markers), 1):
-        plt.scatter(rank, dist, c=color, s=100, marker=marker, zorder=3,
-                   edgecolors='black', linewidth=0.5)
+    # Plot points
+    for rank, (dist, color, marker, size) in enumerate(
+        zip(sorted_distances[:n_to_show], colors, markers, sizes), 1
+    ):
+        ax.scatter(
+            rank, dist, c=color, s=size, marker=marker, 
+            alpha=0.7, edgecolors='black', linewidth=0.5, zorder=3
+        )
     
-    plt.axhline(y=nlfa_threshold, color='orange', linestyle='--', linewidth=2,
-                label=f'Threshold NLFA = {nlfa_threshold:.3f}')
+    # Threshold line
+    ax.axhline(
+        y=nlfa_threshold, color='gray', linestyle='--', linewidth=1.5,
+        label=f'Threshold = {nlfa_threshold:.3f}', alpha=0.7
+    )
     
-    plt.axhspan(nlfa_threshold, 0, alpha=0.2, color='red', label='Rejected region')
-    
+    # Legend
     legend_elements = [
-        Line2D([0], [0], marker='o', color='w', markerfacecolor='green', markersize=10,
-               label='Accepted + Same Community', markeredgecolor='black'),
-        Line2D([0], [0], marker='s', color='w', markerfacecolor='green', markersize=10,
-               label='Accepted + Different Community', markeredgecolor='black'),
-        Line2D([0], [0], marker='o', color='w', markerfacecolor='orange', markersize=10,
-               label='Rejected + Same Community', markeredgecolor='black'),
-        Line2D([0], [0], marker='s', color='w', markerfacecolor='red', markersize=10,
-               label='Rejected + Different Community', markeredgecolor='black'),
-        Line2D([0], [0], color='orange', linestyle='--', linewidth=2,
-               label=f'Threshold δ_i(ε) = {nlfa_threshold:.3f}')
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='#2ca02c', 
+               markersize=8, label='Accepted (same comm)', markeredgecolor='black', markeredgewidth=0.5),
+        Line2D([0], [0], marker='s', color='w', markerfacecolor='#2ca02c', 
+               markersize=8, label='Accepted (diff comm)', markeredgecolor='black', markeredgewidth=0.5),
+        Line2D([0], [0], marker='o', color='w', markerfacecolor='#ff7f0e', 
+               markersize=8, label='Rejected (same comm)', markeredgecolor='black', markeredgewidth=0.5),
+        Line2D([0], [0], marker='s', color='w', markerfacecolor='#d62728', 
+               markersize=8, label='Rejected (diff comm)', markeredgecolor='black', markeredgewidth=0.5),
     ]
     
-    plt.xlabel('Nearest Neighbor Rank', fontsize=12)
-    plt.ylabel('Distance D(a^i, b^j)', fontsize=12)
-    plt.title(
-        f'Statistical Test: Query {i} (Community {query_community_idx}, ε={eps}, {len(query_matches)} matches)',
-        fontsize=13, fontweight='bold'
+    ax.set_xlabel('Nearest Neighbor Rank', fontsize=10)
+    ax.set_ylabel('NLFA Distance', fontsize=10)
+    ax.set_title(
+        f'Query {i} (Community {query_community_idx}) - Nearest Neighbors (ε={eps}, {len(query_matches)} matches)',
+        fontsize=11, pad=10
     )
-    plt.xticks(range(1, n_to_show + 1))
-    plt.grid(alpha=0.3)
-    plt.legend(handles=legend_elements, fontsize=9, loc='upper left')
+    ax.set_xticks(range(1, min(n_to_show + 1, 25), max(1, n_to_show // 10)))
+    ax.grid(alpha=0.2)
+    ax.legend(handles=legend_elements, fontsize=8, loc='best', framealpha=0.9)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
     plt.tight_layout()
-    plt.show()
+    
+    return fig
 
 
 def _plot_patches(
@@ -554,21 +518,23 @@ def _plot_patches(
     n_cols = min(8, n_total)
     n_rows = int(np.ceil(n_total / n_cols))
     
-    fig_width = min(23, n_cols * 2.5) * figsize_scale
-    fig_height = n_rows * 2.5 * figsize_scale
+    fig_width = min(20, n_cols * 2.2) * figsize_scale
+    fig_height = n_rows * 2.2 * figsize_scale
     
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height))
     axs = np.atleast_2d(axs).ravel()
     
+    # Query patch
     ax = axs[0]
     ax.imshow(patches_df['svg'][i].render(), cmap="gray")
-    ax.set_title(f'Query patch\n(Community {query_community_idx})', fontweight='bold', fontsize=10, pad=8)
+    ax.set_title(f'Query\n(Comm {query_community_idx})', fontsize=9, pad=5)
     ax.axis('off')
     for spine in ax.spines.values():
-        spine.set_edgecolor('blue')
-        spine.set_linewidth(4)
+        spine.set_edgecolor('#4682b4')
+        spine.set_linewidth(2.5)
         spine.set_visible(True)
     
+    # Nearest neighbors
     for j in range(n_to_show):
         candidate_idx = sorted_indices[j]
         distance = sorted_distances[j]
@@ -579,24 +545,27 @@ def _plot_patches(
         is_accepted = accepted_mask[j]
         is_same_community = same_community_mask[j]
         
-        if is_same_community:
-            status = '✓●' if is_accepted else '❌●'
-            color = 'green' if is_accepted else 'orange'
-            border_style = '-'
+        # Determine styling
+        if is_accepted:
+            status = '✓'
+            color = '#2ca02c'
         else:
-            status = '✓' if is_accepted else '❌'
-            color = 'green' if is_accepted else 'red'
-            border_style = '--'
+            status = '✗'
+            color = '#d62728' if not is_same_community else '#ff7f0e'
         
-        ax.set_title(f'{status} NN{j+1}\nd={distance*100:.3f}',
-                    fontweight='bold', color=color, fontsize=9, pad=8)
+        comm_marker = '●' if is_same_community else ''
+        
+        ax.set_title(
+            f'{status} {comm_marker} {j+1}\n{distance:.3f}',
+            color=color, fontsize=8, pad=5
+        )
         ax.axis('off')
         for spine in ax.spines.values():
             spine.set_edgecolor(color)
-            spine.set_linewidth(3)
-            spine.set_linestyle(border_style)
+            spine.set_linewidth(2 if is_accepted else 1.5)
             spine.set_visible(True)
     
+    # Hide unused subplots
     for j in range(n_total, len(axs)):
         axs[j].axis('off')
         axs[j].set_visible(False)
@@ -605,13 +574,13 @@ def _plot_patches(
     diff_comm_accepted = sum(accepted_mask & ~same_community_mask)
     
     plt.suptitle(
-        f'ε-Meaningful Matches: Query {i} (Community {query_community_idx}) | ε={eps} | δ={nlfa_threshold:.3f}\n'
-        f'{len(query_matches)} accepted ({same_comm_accepted} same comm, {diff_comm_accepted} diff comm) | '
-        f'● = same community',
-        fontsize=13, fontweight='bold', y=0.99
+        f'Query {i} Matches (ε={eps}) | {len(query_matches)} accepted '
+        f'({same_comm_accepted} same, {diff_comm_accepted} diff) | ● = same community',
+        fontsize=11, y=0.98
     )
     plt.tight_layout()
-    plt.show()
+    
+    return fig
 
 
 def _print_summary(i, query_community_idx, communities, query_matches, same_community_mask, accepted_mask, n_to_show):

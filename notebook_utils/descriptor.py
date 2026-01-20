@@ -1,5 +1,5 @@
 
-from src.character_linking.hog import HOG, load_or_compute_hog, setup_cache
+from src.patch_processing.hog import HOG, load_or_compute_hog, setup_cache
 from pathlib import Path
 
 import torch
@@ -275,7 +275,7 @@ def visualize_hog(hog_params, histograms, patches, hogOutput, i):
     example_cell_y, example_cell_x = Nh // 2, Nw // 2
     example_hist = selected_histograms[example_cell_y, example_cell_x]
 
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig2, ax = plt.subplots(figsize=(12, 5))
     bin_angles_deg = np.linspace(0, 180, Nbins, endpoint=False)
     colors = [plt.cm.hsv(a/360) for a in bin_angles_deg]  # Map to first half of HSV
 
@@ -291,3 +291,4 @@ def visualize_hog(hog_params, histograms, patches, hogOutput, i):
     ax.set_ylim(0, example_hist.max() * 1.1)
     plt.tight_layout()
     plt.show()
+    return fig

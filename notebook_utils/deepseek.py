@@ -55,7 +55,7 @@ _CHAR_CACHE = _load_cache()
 
 def _get_client(api_key: Optional[str] = None) -> OpenAI:
     """Create and return a DeepSeek API client."""
-    key = api_key or os.environ.get("DEEPSEEK_API_KEY")
+    key = "sk-850474e409644f99be281abe6f962f3a"
     if not key:
         raise ValueError(
             "API key required. Pass api_key parameter or set DEEPSEEK_API_KEY environment variable."
@@ -273,7 +273,7 @@ def md_to_html(text: str) -> str:
     return text
 
 
-def display_character_with_meaning(svg, meaning: str, char: str = None, scale: float = 1.5):
+def display_character_with_meaning(svg, meaning: str, char: str = None, conf : float = 1.0, thresh: float = 0.4, scale: float = 1.5):
     """
     Display an SVG character alongside its meaning in a nicely formatted layout.
     
@@ -286,13 +286,13 @@ def display_character_with_meaning(svg, meaning: str, char: str = None, scale: f
     svg_str = svg.to_string()
     meaning_html = md_to_html(meaning)
     
-    char_header = f"<h2 style='margin: 0 0 10px 0; color: #333;'>【{char}】</h2>" if char else ""
+    char_header = f"<h2 style='margin: 0 0 10px 0; color: #333;'>【{char}】 - 【{conf:.3f}】</h2>" if char else ""
     
     html = f"""
     <div style="display: flex; gap: 24px; align-items: flex-start; 
                 padding: 16px; margin: 12px 0; 
                 border: 1px solid #e0e0e0; border-radius: 8px;
-                background: #fafafa;">
+                background: {'#fafafa' if conf > thresh else "#ffefef"};">
         <div style="flex-shrink: 0; padding: 8px; background: white; 
                     border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
             <div style="width: {100 * scale}px; height: {100 * scale}px;">
@@ -308,15 +308,16 @@ def display_character_with_meaning(svg, meaning: str, char: str = None, scale: f
     </div>
     """
     display(HTML(html))
+    return html
 
 
-def display_character_or_error(svg, char: str, scale: float = 1.5):
+def display_character_or_error(svg, char: str, conf: float, thresh = 0.4, scale: float = 1.5):
     """
     Display a character with its meaning, or show an error message if OCR failed.
     """
     try:
         meaning = get_character_meaning(char=char)
-        display_character_with_meaning(svg, meaning, char=char, scale=scale)
+        return display_character_with_meaning(svg, meaning, char=char, conf=conf, thresh=thresh, scale=scale)
     except ValueError:
         svg_str = svg.to_string()
         html = f"""
@@ -336,6 +337,7 @@ def display_character_or_error(svg, char: str, scale: float = 1.5):
         </div>
         """
         display(HTML(html))
+        return html
 # ---------------------------------------------------------------------
 # Example Usage
 # ---------------------------------------------------------------------

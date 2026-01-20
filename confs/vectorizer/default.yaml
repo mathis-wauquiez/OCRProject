@@ -1,0 +1,32 @@
+_target_: src.vectorization.BinaryShapeVectorizer
+config:
+  _target_: src.vectorization.VectorizerConfig
+  executable_path: ./build/main
+  
+  # Vectorization
+  smoothing_scale: 1
+  accuracy_threshold: 1
+  refinement_iterations: 0
+  output_type: shape_merged  # outline, shape, outline_merged, shape_merged
+  
+  # Output
+  return_svg: true
+  return_svg_string: false
+  return_rendered: false
+  save_dir: ./outputs_svg
+  
+  # Rendering (if return_rendered=true)
+  output_size: [512, 512]
+  background_color: [255, 255, 255, 255]
+  dpi: 2048
+  scale: 1.0
+  output_format: L  # PIL format
+  
+  # Batch processing
+  n_jobs: -1  # all CPUs
+  show_progress: false
+  chunk_size: 100
+  
+  # Streaming
+  stream_results: true
+  stream_parallel: true

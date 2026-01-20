@@ -200,6 +200,49 @@ def load_dataframe(base_path):
     return df
 
 
+def load_columns(base_path, columns_to_load=None):
+    """Load specific columns from column-by-column storage"""
+    base_path = Path(base_path)
+    
+    with open(base_path / "metadata.json", 'r') as f:
+        metadata = json.load(f)
+    
+    # If no columns specified, load all
+    if columns_to_load is None:
+        columns_to_load = metadata['columns']
+    
+    # Create empty DataFrame with index
+    df = pd.DataFrame(index=metadata['index'])
+    
+    for col in columns_to_load:
+        if col not in metadata['columns']:
+            print(f"Warning: Column '{col}' not found in metadata")
+            continue
+            
+        print(f"Loading column: {col}")
+        col_meta = metadata[col]
+        col_type = col_meta['type']
+        
+        # Find appropriate saver by type
+        saver_class = {
+            'numeric': NumericSaver,
+            'string': StringSaver,
+            'numpy_array': NumpyArraySaver,
+            'object': ObjectSaver
+        }[col_type]
+        
+        # Determine file extension
+        ext = '.parquet' if col_type in ['numeric', 'string'] else \
+              '.npz' if col_type == 'numpy_array' else '.pkl'
+        
+        filepath = base_path / f"{col}{ext}"
+        df[col] = saver_class.load(filepath)
+        
+        gc.collect()
+    
+    print(f"✓ Loaded {len(columns_to_load)} columns from {base_path}")
+    return df
+
 # Usage
 # save_dataframe(patches_df, 'data/processed/book1_columnwise')
 # patches_df = load_dataframe('data/processed/book1_columnwise')

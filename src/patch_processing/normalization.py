@@ -121,9 +121,6 @@ def compute_svg_normalization_homography(binary_image, svg_bbox, target_cx, targ
 
 
 
-min_size_black = 160*4
-min_size_white = 50*4
-border_min_size = 850*4
 
 def normalization_homography(svg_bbox):
     """
@@ -142,7 +139,6 @@ def normalization_homography(svg_bbox):
 
 from .svg import SVG
 from .tests.test_normalization import plot_filtering_result, plot_eigvects
-from . import filter_binary_patch
 
 def process_svg(svg_object: SVG, display=False, image=None, scale=4, dpi=256):
     """

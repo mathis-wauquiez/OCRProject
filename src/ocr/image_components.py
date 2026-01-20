@@ -95,31 +95,41 @@ class imageComponentsPipeline:
         return components
     
     def merge_from_similarities(self, imageComponents: connectedComponent, 
-                               charactersComponents: connectedComponent, similarities):
-        """Merge image components with character components based on similarity scores."""
-        # Get active labels
+                            charactersComponents: connectedComponent, similarities):
+        """Merge image components with character components based on similarity scores.
+        
+        Assigns CRAFT component labels to image components based on best similarity match.
+        """
+        # Get active labels from image components
         image_labels = np.array([r.label for r in imageComponents.regions 
                                 if not imageComponents.is_deleted(r.label)])
-        char_labels = np.array([r.label for r in charactersComponents.regions])
         
-        # Find best matching character for each image component
-        best_char_idx = similarities.argmax(axis=0)
+        # Get the actual CRAFT labels (not character component labels!)
+        # These are the labels from charactersComponents which ARE the CRAFT components
+        craft_regions = [r for r in charactersComponents.regions 
+                        if not charactersComponents.is_deleted(r.label)]
+        craft_labels = np.array([r.label for r in craft_regions])
+        
+        # Find best matching CRAFT component for each image component
+        best_craft_idx = similarities.argmax(axis=0)  # For each image component
         best_similarities = similarities.max(axis=0)
-        best_char_labels = char_labels[best_char_idx]
+        
+        # Get the CRAFT label for each best match
+        best_craft_labels = craft_labels[best_craft_idx]
         
         # Set to background where similarity is below threshold
-        best_char_labels[best_similarities < self.params.similarity_threshold] = 0
+        best_craft_labels[best_similarities < self.params.similarity_threshold] = 0
 
-        # Create label mapping
+        # Create label mapping: image_component_label -> craft_label
         max_label = imageComponents._labels.max()
-        lookup = np.zeros(max_label + 1, dtype=best_char_labels.dtype)
-        lookup[image_labels] = best_char_labels
+        lookup = np.zeros(max_label + 1, dtype=best_craft_labels.dtype)
+        lookup[image_labels] = best_craft_labels
         
-        # Apply mapping
+        # Apply mapping: replace image labels with their matched CRAFT labels
         new_labels = lookup[imageComponents.labels]
 
         return connectedComponent.from_labels(new_labels, 
-                                             intensity_image=imageComponents.intensity_image)
+                                            intensity_image=imageComponents.intensity_image)
     
     def compute_similarities(self, imageComponents: connectedComponent, 
                             charactersComponents: connectedComponent):

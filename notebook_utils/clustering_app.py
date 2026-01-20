@@ -1,6 +1,7 @@
 """
 Clustering Comparison Dashboard - High-Dimensional Version
-Optimized for comparisons with ~2,000 clusters
+Optimized for comparisons with ~2,000 clusters with enhanced features
+Now with SVG rendering support for cluster labels!
 """
 
 import numpy as np
@@ -18,10 +19,150 @@ from sklearn.metrics import (
 )
 from collections import Counter
 import networkx as nx
+import base64
+from io import BytesIO
 
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
+
+def svg_to_base64_thumbnail(svg_obj, size=(60, 60)):
+    """
+    Convert SVG object to base64 encoded thumbnail image
+    
+    Parameters
+    ----------
+    svg_obj : SVG object
+        SVG object with render() method
+    size : tuple
+        Target size (width, height)
+    
+    Returns
+    -------
+    str : base64 encoded PNG image with data URI prefix
+    """
+    try:
+        # Render SVG to numpy array
+        img_array = svg_obj.render(
+            output_size=size,
+            background_color=(255, 255, 255, 255),
+            scale=1.0,
+            output_format='RGBA'
+        )
+        
+        # Convert to PIL Image
+        from PIL import Image
+        img = Image.fromarray(img_array)
+        
+        # Save to bytes
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        
+        # Encode to base64
+        img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        
+        return f"data:image/png;base64,{img_base64}"
+    except Exception as e:
+        print(f"Warning: Could not render SVG: {e}")
+        return None
+
+
+def find_majority_character_svg(c1_label, c1_array, c2_array, svg_series):
+    """
+    For a C1 cluster, find the majority C2 character and return a representative SVG
+    
+    Parameters
+    ----------
+    c1_label : cluster label for C1
+    c1_array : array of C1 labels
+    c2_array : array of C2 labels  
+    svg_series : pandas Series of SVG objects
+    
+    Returns
+    -------
+    tuple : (majority_c2_label, svg_object) or (None, None) if not found
+    """
+    # Find all samples in this C1 cluster
+    mask = c1_array == c1_label
+    
+    if not np.any(mask):
+        return None, None
+    
+    # Get C2 labels for this cluster
+    c2_in_cluster = c2_array[mask]
+    
+    # Find most common C2 label
+    c2_counter = Counter(c2_in_cluster)
+    if not c2_counter:
+        return None, None
+    
+    majority_c2, count = c2_counter.most_common(1)[0]
+    
+    # Find a sample that has this C1 label AND the majority C2 label
+    match_mask = mask & (c2_array == majority_c2)
+    match_indices = np.where(match_mask)[0]
+    
+    if len(match_indices) == 0:
+        return majority_c2, None
+    
+    # Get the first matching SVG
+    idx = match_indices[0]
+    svg_obj = svg_series.iloc[idx]
+    
+    return majority_c2, svg_obj
+
+
+def create_svg_thumbnail_map(c1_array, c2_array, svg_series, top_clusters, size=(60, 60)):
+    """
+    Create a mapping from C1 cluster labels to SVG thumbnails based on majority C2 character
+    
+    Parameters
+    ----------
+    c1_array : array of C1 labels
+    c2_array : array of C2 labels
+    svg_series : pandas.Series containing SVG objects
+    top_clusters : list of cluster labels to process
+    size : tuple, thumbnail size
+    
+    Returns
+    -------
+    dict : Mapping from C1 cluster label to (majority_c2_label, base64_image, count, percentage)
+    """
+    thumbnail_map = {}
+    
+    print(f"Generating SVG thumbnails for {len(top_clusters)} clusters...")
+    
+    for i, c1_label in enumerate(top_clusters):
+        if i % 20 == 0:
+            print(f"  Processing cluster {i+1}/{len(top_clusters)}...")
+        
+        majority_c2, svg_obj = find_majority_character_svg(c1_label, c1_array, c2_array, svg_series)
+        
+        if svg_obj is None:
+            continue
+        
+        # Render thumbnail
+        thumbnail_b64 = svg_to_base64_thumbnail(svg_obj, size=size)
+        
+        if thumbnail_b64:
+            # Calculate percentage
+            mask = c1_array == c1_label
+            c2_in_cluster = c2_array[mask]
+            majority_count = np.sum(c2_in_cluster == majority_c2)
+            total_count = len(c2_in_cluster)
+            percentage = (majority_count / total_count * 100) if total_count > 0 else 0
+            
+            thumbnail_map[c1_label] = {
+                'majority_c2': majority_c2,
+                'image': thumbnail_b64,
+                'count': majority_count,
+                'percentage': percentage
+            }
+    
+    print(f"Generated {len(thumbnail_map)} SVG thumbnails")
+    return thumbnail_map
+
 
 def compute_similarity_matrix(clustering1, clustering2):
     """
@@ -78,6 +219,20 @@ def get_cluster_statistics(clustering):
         'labels': list(counter.keys()),
         'counts': list(counter.values())
     }
+
+
+def suggest_network_parameters(n_clusters_c1, n_clusters_c2):
+    """Suggest good default parameters based on cluster counts"""
+    total_clusters = n_clusters_c1 + n_clusters_c2
+    
+    if total_clusters < 100:
+        return {'top_n': total_clusters // 2, 'min_pct': 0.5}
+    elif total_clusters < 500:
+        return {'top_n': 100, 'min_pct': 1}
+    elif total_clusters < 2000:
+        return {'top_n': 150, 'min_pct': 2}
+    else:
+        return {'top_n': 200, 'min_pct': 3}
 
 
 def create_cluster_size_distribution(clustering, name, color):
@@ -273,7 +428,34 @@ def create_best_matches_table(similarity_matrix, top_n=100):
     return c1_df, c2_df
 
 
-def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1):
+def find_orphan_clusters(similarity_matrix, threshold=5):
+    """Find clusters with very few connections (orphans)"""
+    c1_orphans = []
+    c2_orphans = []
+    
+    for i, idx in enumerate(similarity_matrix.index):
+        n_connections = np.sum(similarity_matrix.iloc[i].values > 0)
+        if n_connections <= threshold:
+            c1_orphans.append({
+                'Cluster': f'C1-{idx}',
+                'Size': int(similarity_matrix.iloc[i].sum()),
+                'Connections': n_connections
+            })
+    
+    for j, col in enumerate(similarity_matrix.columns):
+        n_connections = np.sum(similarity_matrix.iloc[:, j].values > 0)
+        if n_connections <= threshold:
+            c2_orphans.append({
+                'Cluster': f'C2-{col}',
+                'Size': int(similarity_matrix.iloc[:, j].sum()),
+                'Connections': n_connections
+            })
+    
+    return pd.DataFrame(c1_orphans), pd.DataFrame(c2_orphans)
+
+
+def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1, 
+                                 filter_empty=True, c1_svg_map=None):
     """
     Create a network graph showing connections between clusters from two clusterings.
     Uses smart filtering to keep it fast.
@@ -286,18 +468,43 @@ def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1
         Show only top N clusters from each clustering (default: 100)
     min_overlap_pct : float
         Minimum overlap percentage to show an edge (default: 1%)
+    filter_empty : bool
+        If True, filter out empty string "" clusters (default: True)
+    c1_svg_map : dict, optional
+        Mapping from C1 cluster labels to SVG info dict with 'image', 'majority_c2', etc.
     
     Returns
     -------
     fig : plotly.graph_objs.Figure
         Network graph visualization
+    network_stats : dict
+        Statistics about the network
     """
+    # Filter out empty string clusters if requested
+    filtered_matrix = similarity_matrix.copy()
+    n_filtered_c1 = 0
+    n_filtered_c2 = 0
+    
+    if filter_empty:
+        # Remove "" from C1 (rows)
+        if "" in filtered_matrix.index:
+            n_filtered_c1 = 1
+            filtered_matrix = filtered_matrix.drop("", axis=0)
+        
+        # Remove "" from C2 (columns)
+        if "" in filtered_matrix.columns:
+            n_filtered_c2 = 1
+            filtered_matrix = filtered_matrix.drop("", axis=1)
+        
+        if n_filtered_c1 > 0 or n_filtered_c2 > 0:
+            print(f"Filtered out {n_filtered_c1} empty C1 cluster(s) and {n_filtered_c2} empty C2 cluster(s)")
+    
     # Select top clusters by size
-    c1_totals = similarity_matrix.sum(axis=1).nlargest(top_n)
-    c2_totals = similarity_matrix.sum(axis=0).nlargest(top_n)
+    c1_totals = filtered_matrix.sum(axis=1).nlargest(top_n)
+    c2_totals = filtered_matrix.sum(axis=0).nlargest(top_n)
     
     # Filter matrix to top clusters
-    filtered = similarity_matrix.loc[c1_totals.index, c2_totals.index]
+    filtered = filtered_matrix.loc[c1_totals.index, c2_totals.index]
     
     # Create graph
     G = nx.Graph()
@@ -312,6 +519,7 @@ def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1
     
     # Add edges with percentage filtering
     edge_count = 0
+    total_overlap = 0
     for i, c1_idx in enumerate(filtered.index):
         c1_total = filtered.iloc[i].sum()
         for j, c2_idx in enumerate(filtered.columns):
@@ -326,11 +534,47 @@ def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1
                 if pct_c1 >= min_overlap_pct or pct_c2 >= min_overlap_pct:
                     G.add_edge(f'C1-{c1_idx}', f'C2-{c2_idx}', weight=overlap)
                     edge_count += 1
+                    total_overlap += overlap
     
     print(f"Network: {len(G.nodes())} nodes, {edge_count} edges")
     
-    # Use spring layout with edge weights
-    pos = nx.spring_layout(G, weight='weight', iterations=500, seed=42)
+    # Use spring layout with edge weights - IMPROVED PARAMETERS
+    pos = nx.spring_layout(G, weight='weight', k=None, iterations=500, seed=42)
+    
+    # Normalize positions to [0, 1] range for easier image placement
+    x_coords = [pos[node][0] for node in pos]
+    y_coords = [pos[node][1] for node in pos]
+    x_min, x_max = min(x_coords), max(x_coords)
+    y_min, y_max = min(y_coords), max(y_coords)
+    
+    # Add padding
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    padding = 0.1
+    
+    for node in pos:
+        pos[node] = (
+            (pos[node][0] - x_min) / x_range * (1 - 2*padding) + padding,
+            (pos[node][1] - y_min) / y_range * (1 - 2*padding) + padding
+        )
+    
+    # Calculate network statistics
+    if edge_count > 0:
+        avg_degree = sum(dict(G.degree()).values()) / len(G.nodes())
+        density = nx.density(G)
+    else:
+        avg_degree = 0
+        density = 0
+    
+    network_stats = {
+        'n_nodes': len(G.nodes()),
+        'n_edges': edge_count,
+        'avg_degree': avg_degree,
+        'density': density,
+        'total_overlap': int(total_overlap),
+        'filtered_c1': n_filtered_c1,
+        'filtered_c2': n_filtered_c2
+    }
     
     # Normalize edge weights for visualization
     edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
@@ -398,30 +642,38 @@ def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1
         else:
             c1_strength[node] = 0
     
+    # Build hover text
     c1_hovertext = []
     for idx in c1_indices:
         node_name = f'C1-{idx}'
         size = int(c1_sizes.loc[idx])
         strength = int(c1_strength.get(node_name, 0))
         n_connections = len(list(G.neighbors(node_name))) if node_name in G else 0
-        c1_hovertext.append(
-            f'<b>{node_name}</b><br>'
-            f'Cluster size: {size:,}<br>'
-            f'Total overlap: {strength:,}<br>'
+        
+        hover_parts = [
+            f'<b>{node_name}</b>',
+            f'Cluster size: {size:,}',
+            f'Total overlap: {strength:,}',
             f'Connections: {n_connections}'
-        )
+        ]
+        
+        # Add majority character info if available
+        if c1_svg_map and idx in c1_svg_map:
+            svg_info = c1_svg_map[idx]
+            hover_parts.insert(1, f'Majority char: "{svg_info["majority_c2"]}" ({svg_info["percentage"]:.1f}%)')
+        
+        c1_hovertext.append('<br>'.join(hover_parts))
     
+    # For C1 nodes with SVGs, make them invisible (SVG will show instead)
     c1_node_trace = go.Scatter(
         x=c1_x, y=c1_y,
-        mode='markers+text',
+        mode='markers',
         marker=dict(
             size=c1_node_sizes,
             color='#636EFA',
+            opacity=0.3 if c1_svg_map else 1.0,  # Make semi-transparent if showing SVGs
             line=dict(width=2, color='white')
         ),
-        text=c1_labels,
-        textposition='middle center',
-        textfont=dict(size=9, color='white', family='Arial Black'),
         hovertext=c1_hovertext,
         hoverinfo='text',
         name='C1 Clusters',
@@ -450,6 +702,7 @@ def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1
         n_connections = len(list(G.neighbors(node_name))) if node_name in G else 0
         c2_hovertext.append(
             f'<b>{node_name}</b><br>'
+            f'Character: "{col}"<br>'
             f'Cluster size: {size:,}<br>'
             f'Total overlap: {strength:,}<br>'
             f'Connections: {n_connections}'
@@ -475,19 +728,61 @@ def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1
     # Create figure
     fig = go.Figure(data=edge_traces + [c1_node_trace, c2_node_trace])
     
+    # Add SVG images as overlays
+    if c1_svg_map:
+        images = []
+        image_size = 0.04  # Size in plot coordinates
+        
+        for idx in c1_indices:
+            if idx in c1_svg_map:
+                node_name = f'C1-{idx}'
+                if node_name in pos:
+                    x, y = pos[node_name]
+                    svg_info = c1_svg_map[idx]
+                    
+                    images.append(dict(
+                        source=svg_info['image'],
+                        xref="x",
+                        yref="y",
+                        x=x,
+                        y=y,
+                        sizex=image_size,
+                        sizey=image_size,
+                        xanchor="center",
+                        yanchor="middle",
+                        layer="above"
+                    ))
+        
+        fig.update_layout(images=images)
+    
+    filter_note = f" (excluding empty strings)" if filter_empty and (n_filtered_c1 > 0 or n_filtered_c2 > 0) else ""
+    svg_note = f" with {len(c1_svg_map)} SVG glyphs" if c1_svg_map else ""
+    
     fig.update_layout(
         title=dict(
-            text=f'<b>Cluster Network (Top {top_n} clusters, {min_overlap_pct}%+ overlap)</b><br>'
-                 '<sub>Node size ∝ cluster size | Edge width ∝ overlap size</sub>',
+            text=f'<b>Cluster Network{filter_note}{svg_note}</b><br>'
+                 f'<sub>Top {top_n} clusters, {min_overlap_pct}%+ overlap | C1 shows majority character glyph | C2 shows character label</sub>',
             x=0.5,
             xanchor='center',
-            font=dict(size=20)
+            font=dict(size=18)
         ),
         showlegend=True,
         hovermode='closest',
         margin=dict(b=20, l=5, r=5, t=80),
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        xaxis=dict(
+            showgrid=False, 
+            zeroline=False, 
+            showticklabels=False,
+            range=[-0.05, 1.05]
+        ),
+        yaxis=dict(
+            showgrid=False, 
+            zeroline=False, 
+            showticklabels=False,
+            range=[-0.05, 1.05],
+            scaleanchor="x",
+            scaleratio=1
+        ),
         height=700,
         plot_bgcolor='rgba(240,240,240,1)',
         paper_bgcolor='rgba(240,240,240,1)',
@@ -500,7 +795,7 @@ def create_cluster_network_graph(similarity_matrix, top_n=100, min_overlap_pct=1
         )
     )
     
-    return fig
+    return fig, network_stats
 
 
 def analyze_cluster_fragmentation(similarity_matrix):
@@ -558,7 +853,7 @@ def analyze_cluster_fragmentation(similarity_matrix):
 # MAIN FUNCTION
 # ============================================================================
 
-def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, height=900):
+def compare_clusterings(c1, c2, ground_truth=None, c1_svgs=None, c2_labels=None, mode='inline', port=8050, height=900):
     """
     Launch an interactive dashboard to compare two high-dimensional clusterings.
     
@@ -570,6 +865,12 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
         Second clustering assignment (optimized for ~2000 clusters)
     ground_truth : array-like, shape (n_samples,), optional
         Ground truth labels for comparison
+    c1_svgs : pandas.Series, optional
+        Series of SVG objects for samples (indexed same as c1)
+        For each C1 cluster, will show the SVG of majority C2 character
+    c2_labels : array-like, optional
+        C2 labels (can be same as c2, used for finding majority character)
+        If None, uses c2
     mode : str, default='inline'
         Display mode: 'inline', 'external', or 'jupyterlab'
     port : int, default=8050
@@ -586,6 +887,11 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
     # Convert to numpy arrays
     c1 = np.asarray(c1)
     c2 = np.asarray(c2)
+    if c2_labels is None:
+        c2_labels = c2
+    else:
+        c2_labels = np.asarray(c2_labels)
+    
     if ground_truth is not None:
         ground_truth = np.asarray(ground_truth)
     
@@ -593,6 +899,8 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
     assert len(c1) == len(c2), "Clusterings must have the same length"
     if ground_truth is not None:
         assert len(c1) == len(ground_truth), "Ground truth must have the same length"
+    if c1_svgs is not None:
+        assert len(c1) == len(c1_svgs), "c1_svgs must have the same length as c1"
     
     print("=" * 60)
     print("COMPUTING METRICS FOR HIGH-DIMENSIONAL CLUSTERING COMPARISON")
@@ -616,6 +924,28 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
     similarity_matrix = compute_similarity_matrix(c1, c2)
     print(f"Similarity matrix shape: {similarity_matrix.shape}")
     
+    # Store data for callbacks
+    global _callback_data
+    _callback_data = {
+        'similarity_matrix': similarity_matrix,
+        'c1_array': c1,
+        'c2_array': c2_labels,
+        'svg_series': c1_svgs
+    }
+    
+    # Check for empty string clusters
+    has_empty_c1 = "" in similarity_matrix.index
+    has_empty_c2 = "" in similarity_matrix.columns
+    if has_empty_c1 or has_empty_c2:
+        empty_c1_size = int(similarity_matrix.loc[""].sum()) if has_empty_c1 else 0
+        empty_c2_size = int(similarity_matrix[""].sum()) if has_empty_c2 else 0
+        print(f"\n⚠️  Empty string clusters detected:")
+        if has_empty_c1:
+            print(f"  - C1: {empty_c1_size:,} samples")
+        if has_empty_c2:
+            print(f"  - C2: {empty_c2_size:,} samples")
+        print("  You can filter these out in the network graph settings.")
+    
     print("\nComputing metrics...")
     metrics = compute_metrics(c1, c2)
     
@@ -627,6 +957,12 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
     
     print(f"\nARI: {metrics['ARI']:.4f}")
     print(f"NMI: {metrics['NMI']:.4f}")
+    
+    # Get suggested parameters
+    suggested = suggest_network_parameters(c1_stats['n_clusters'], c2_stats['n_clusters'])
+    print(f"\nSuggested network parameters:")
+    print(f"  - Top N clusters: {suggested['top_n']}")
+    print(f"  - Min overlap %: {suggested['min_pct']}")
     
     print("\nPreparing visualizations...")
     
@@ -640,6 +976,9 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
     
     # Create tables
     c1_matches_df, c2_matches_df = create_best_matches_table(similarity_matrix, top_n=100)
+    
+    # Find orphan clusters
+    c1_orphans_df, c2_orphans_df = find_orphan_clusters(similarity_matrix, threshold=5)
     
     print("=" * 60)
     print("DASHBOARD READY")
@@ -695,6 +1034,8 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
                         html.P(f"Clusters: {c1_stats['n_clusters']}"),
                         html.P(f"Mean size: {c1_stats['mean_size']:.1f}"),
                         html.P(f"Median size: {c1_stats['median_size']:.1f}"),
+                        html.P("🖼️ SVG glyphs: ✓" if c1_svgs is not None else "SVG glyphs: ✗", 
+                               className="text-success" if c1_svgs is not None else "text-muted"),
                     ])
                 ])
             ], width=4),
@@ -733,37 +1074,54 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
         html.H3("Interactive Cluster Network", className="mt-4 mb-3"),
         dbc.Card([
             dbc.CardBody([
+                dbc.Alert([
+                    html.H5("💡 Suggested Parameters", className="alert-heading"),
+                    html.P(f"Based on your data size, we suggest: Top {suggested['top_n']} clusters, {suggested['min_pct']}% minimum overlap"),
+                    html.P("🖼️ C1 nodes will display SVG glyphs of their majority character!" if c1_svgs is not None else "", 
+                           className="mb-0 text-success") if c1_svgs is not None else None,
+                ], color="info", className="mb-3"),
+                
                 dbc.Row([
                     dbc.Col([
                         dbc.Label("Top N clusters to show:"),
-                        dcc.Slider(
+                        dbc.Input(
                             id='network-top-n',
-                            min=20,
-                            max=min(200, c1_stats['n_clusters'], c2_stats['n_clusters']),
+                            type='number',
+                            value=suggested['top_n'],
+                            min=10,
+                            max=min(500, c1_stats['n_clusters'], c2_stats['n_clusters']),
                             step=10,
-                            value=100,
-                            marks={i: str(i) for i in range(20, min(201, c1_stats['n_clusters']+1, c2_stats['n_clusters']+1), 40)},
-                            tooltip={"placement": "bottom", "always_visible": True}
+                            placeholder=f"Enter 10-{min(500, c1_stats['n_clusters'])}"
                         ),
-                    ], width=6),
+                    ], width=4),
                     dbc.Col([
                         dbc.Label("Minimum overlap % to show edge:"),
-                        dcc.Slider(
+                        dbc.Input(
                             id='network-min-pct',
+                            type='number',
+                            value=suggested['min_pct'],
                             min=0,
-                            max=10,
+                            max=50,
                             step=0.5,
-                            value=1,
-                            marks={i: f'{i}%' for i in range(0, 11, 2)},
-                            tooltip={"placement": "bottom", "always_visible": True}
+                            placeholder="Enter 0-50"
                         ),
-                    ], width=6),
+                    ], width=4),
+                    dbc.Col([
+                        dbc.Label("Filter empty strings (\"\"):"),
+                        dbc.Checklist(
+                            id='filter-empty-checkbox',
+                            options=[{'label': ' Remove \"\" clusters', 'value': 'filter'}],
+                            value=['filter'] if has_empty_c1 or has_empty_c2 else [],
+                            switch=True,
+                        ),
+                    ], width=4),
                 ]),
                 dbc.Row([
                     dbc.Col([
-                        dbc.Button('Generate Network', id='generate-network-button', color="primary", className="w-100 mt-3"),
+                        dbc.Button('Generate Network', id='generate-network-button', color="primary", className="w-100 mt-3", size="lg"),
                     ], width=12),
                 ], className="mt-2"),
+                html.Div(id='network-stats', className="mt-3"),
             ])
         ], className="mb-3"),
         html.Div(id='network-loading', className="text-center mb-2"),
@@ -776,6 +1134,33 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
         # Overlap distribution
         html.H3("Overlap Distribution", className="mt-4 mb-3"),
         dcc.Graph(figure=overlap_dist_fig, className="mb-4"),
+        
+        # Orphan clusters
+        html.H3("Orphan Clusters (≤5 connections)", className="mt-4 mb-3"),
+        dbc.Row([
+            dbc.Col([
+                html.H5("C1 Orphans"),
+                dash_table.DataTable(
+                    data=c1_orphans_df.to_dict('records') if not c1_orphans_df.empty else [],
+                    columns=[{"name": i, "id": i} for i in ['Cluster', 'Size', 'Connections']],
+                    page_size=10,
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left', 'padding': '10px'},
+                    style_header={'backgroundColor': 'rgb(230, 230, 230)', 'fontWeight': 'bold'},
+                ) if not c1_orphans_df.empty else html.P("No orphan clusters found", className="text-muted"),
+            ], width=6),
+            dbc.Col([
+                html.H5("C2 Orphans"),
+                dash_table.DataTable(
+                    data=c2_orphans_df.to_dict('records') if not c2_orphans_df.empty else [],
+                    columns=[{"name": i, "id": i} for i in ['Cluster', 'Size', 'Connections']],
+                    page_size=10,
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left', 'padding': '10px'},
+                    style_header={'backgroundColor': 'rgb(230, 230, 230)', 'fontWeight': 'bold'},
+                ) if not c2_orphans_df.empty else html.P("No orphan clusters found", className="text-muted"),
+            ], width=6),
+        ], className="mb-4"),
         
         # Best matches tables
         html.H3("Best Cluster Matches (Top 100 by size)", className="mt-4 mb-3"),
@@ -797,6 +1182,7 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
                         ],
                         filter_action="native",
                         sort_action="native",
+                        export_format="csv",
                     )
                 ], className="p-3")
             ], label="C1 → C2 Mappings"),
@@ -817,6 +1203,7 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
                         ],
                         filter_action="native",
                         sort_action="native",
+                        export_format="csv",
                     )
                 ], className="p-3")
             ], label="C2 → C1 Mappings"),
@@ -849,21 +1236,72 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
     # Callback for network graph generation
     @app.callback(
         [Output('cluster-network', 'figure'),
-         Output('network-loading', 'children')],
+         Output('network-loading', 'children'),
+         Output('network-stats', 'children')],
         Input('generate-network-button', 'n_clicks'),
         [State('network-top-n', 'value'),
-         State('network-min-pct', 'value')],
+         State('network-min-pct', 'value'),
+         State('filter-empty-checkbox', 'value')],
         prevent_initial_call=True
     )
-    def generate_network(n_clicks, top_n, min_pct):
+    def generate_network(n_clicks, top_n, min_pct, filter_empty_value):
         if n_clicks:
-            loading_msg = html.P("⏳ Generating network graph...", className="text-info")
             try:
-                fig = create_cluster_network_graph(similarity_matrix, top_n=top_n, min_overlap_pct=min_pct)
-                return fig, html.P("✓ Network generated successfully!", className="text-success")
+                # Validate inputs
+                if top_n is None or top_n < 10:
+                    return go.Figure(), html.P("⚠️ Please enter a valid number (≥10) for top N", className="text-warning"), ""
+                if min_pct is None or min_pct < 0:
+                    return go.Figure(), html.P("⚠️ Please enter a valid percentage (≥0)", className="text-warning"), ""
+                
+                # Check if filtering is enabled
+                filter_empty = 'filter' in (filter_empty_value or [])
+                
+                loading_msg = html.P("⏳ Generating network graph with SVG glyphs (this may take 30-60 seconds)...", className="text-info")
+                
+                # Generate SVG map if SVGs are available
+                c1_svg_map = None
+                if _callback_data['svg_series'] is not None:
+                    # Get top clusters to render
+                    sim_matrix = _callback_data['similarity_matrix']
+                    if filter_empty and "" in sim_matrix.index:
+                        sim_matrix = sim_matrix.drop("", axis=0)
+                    
+                    top_c1_labels = sim_matrix.sum(axis=1).nlargest(top_n).index.tolist()
+                    
+                    c1_svg_map = create_svg_thumbnail_map(
+                        _callback_data['c1_array'],
+                        _callback_data['c2_array'],
+                        _callback_data['svg_series'],
+                        top_c1_labels,
+                        size=(60, 60)
+                    )
+                
+                fig, stats = create_cluster_network_graph(
+                    _callback_data['similarity_matrix'], 
+                    top_n=int(top_n), 
+                    min_overlap_pct=float(min_pct),
+                    filter_empty=filter_empty,
+                    c1_svg_map=c1_svg_map
+                )
+                
+                filter_info = ""
+                if stats['filtered_c1'] > 0 or stats['filtered_c2'] > 0:
+                    filter_info = f" | Filtered: {stats['filtered_c1']} C1 + {stats['filtered_c2']} C2 empty clusters"
+                
+                svg_info = f" | SVG glyphs: {len(c1_svg_map)} clusters" if c1_svg_map else ""
+                
+                stats_display = dbc.Alert([
+                    html.H6("Network Statistics:", className="alert-heading"),
+                    html.P(f"Nodes: {stats['n_nodes']} | Edges: {stats['n_edges']} | Avg Degree: {stats['avg_degree']:.2f} | Density: {stats['density']:.4f}{filter_info}{svg_info}"),
+                    html.P(f"Total overlap represented: {stats['total_overlap']:,} samples"),
+                ], color="success")
+                
+                return fig, html.P("✓ Network generated successfully!", className="text-success"), stats_display
             except Exception as e:
-                return go.Figure(), html.P(f"Error: {str(e)}", className="text-danger")
-        return go.Figure(), ""
+                import traceback
+                traceback.print_exc()
+                return go.Figure(), html.P(f"❌ Error: {str(e)}", className="text-danger"), ""
+        return go.Figure(), "", ""
     
     # Callback for search
     @app.callback(
@@ -890,7 +1328,7 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
                     total = row.sum()
                     top_matches = row.nlargest(10)
                     
-                    results.append(html.H5(f"C1 Cluster '{c1_id}' (size: {int(total)})"))
+                    results.append(html.H5(f"C1 Cluster '{c1_id}' (size: {int(total):,})"))
                     results.append(html.P(f"Top 10 C2 matches:"))
                     
                     table_data = []
@@ -925,7 +1363,7 @@ def compare_clusterings(c1, c2, ground_truth=None, mode='inline', port=8050, hei
                     total = col.sum()
                     top_matches = col.nlargest(10)
                     
-                    results.append(html.H5(f"C2 Cluster '{c2_id}' (size: {int(total)})", className="mt-3"))
+                    results.append(html.H5(f"C2 Cluster '{c2_id}' (size: {int(total):,})", className="mt-3"))
                     results.append(html.P(f"Top 10 C1 matches:"))
                     
                     table_data = []

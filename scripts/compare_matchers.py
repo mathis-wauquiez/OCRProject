@@ -79,7 +79,7 @@ import matplotlib.pyplot as plt
 import tqdm
 
 from src.character_linking.feature_matching import featureMatching
-from src.character_linking.hog import HOG
+from src.patch_processing.hog import HOG
 from src.character_linking.params import HOGParameters, featureMatchingParameters, fullHOGOutput, featureMatchingOutputs
 from src.ocr.patch_extraction import extract_patches
 from src.utils import connectedComponent, torch_to_pil

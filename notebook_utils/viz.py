@@ -28,28 +28,38 @@ def show_random_sample(*args, n_samples, indices=None, titles=None, **kwargs):
             elif titles is not None:
                 ax.set_title(f'{titles[row]}')
             
-            # Handle string (e.g., Chinese character)
             if isinstance(img, str):
                 ax.axis('off')
                 ax.text(0.5, 0.5, img, fontsize=100, ha='center', va='center', 
                         transform=ax.transAxes,
-                        fontfamily='sans-serif')  # Use configured font
+                        fontfamily='sans-serif')
             else:
-                # Handle SVG
                 if type(img) == SVG:
                     img = img.render(**kwargs)
                 
-                # Handle numpy array
                 if type(img) == np.ndarray:
                     if img.shape[-1] == 1:
                         img = img[..., 0]
-
                     cmap = "gray" if img.ndim == 2 else None
                     ax.imshow(img, cmap=cmap, interpolation='nearest')
     
     plt.tight_layout()
-    plt.show()
+    
+    # Return the figure object
+    return fig
 
+
+def savefig(fig, folder, *args, **kwargs):
+    folder = Path('report_figures') / folder
+    folder.mkdir(parents=True, exist_ok=True)
+    i = 0
+    filepath = folder / f'fig-{i:06d}.png'
+    while filepath.exists():
+        i += 1
+        filepath = folder / f'fig-{i:06d}.png'
+    
+    fig.savefig(filepath, *args, **kwargs)
+    return filepath
 
 
 def visualize_pipeline(results, save_dir='saved_figures/pipeline_viz', filename='output', 

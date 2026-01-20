@@ -1,0 +1,26 @@
+# Hydra Configuration for Graph Clustering Sweep
+# === Hydra ===
+hydra:
+  run:
+    dir: .hydra_outputs/clustering/${now:%Y-%m-%d_%H-%M-%S}
+
+# Data paths
+data:
+  # input_path: "outputs/processed_test"
+  target_lbl: "char_qwen"
+  # output_path: "outputs/clustering_results"
+  input_path: "outputs/processed_patches_book1complete"
+  output_path: "outputs/clustering_results_full"
+
+  
+# Clustering method
+method:
+  feature: "histogram"
+  edges_type: "nlfa"
+  metric: "CEMD"
+  keep_reciprocal: true
+  device: "cuda"
+  
+  # Parameter sweep ranges
+  epsilons: [0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1, 3, 10, 25, 50, 100, 200]
+  gammas: [0.5, 1, 2, 5, 10, 25, 50, 125, 250, 500]

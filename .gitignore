@@ -18,3 +18,7 @@ OCR_Pipeline_Results.pptx
 *.parquet
 *.fth
 /data
+/.hydra_outputs
+/hydra_outputs
+/report_figures
+/preprocessing_outputs

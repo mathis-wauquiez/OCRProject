@@ -520,7 +520,30 @@ class connectedComponent:
         idx = self._deleted_labels.index(label)
         return self._delete_reason[idx]
 
-    
+    def __deepcopy__(self, memo):
+        """Custom deepcopy that regenerates regions instead of copying them."""
+        # Create new instance without calling __init__
+        cls = self.__class__
+        result = cls.__new__(cls)
+        
+        # Add to memo to handle circular references
+        memo[id(self)] = result
+        
+        # Deep copy everything except _regions
+        result._nLabels = self._nLabels
+        result._labels = self._labels.copy()
+        result._deleted_labels = self._deleted_labels.copy()
+        result._delete_reason = self._delete_reason.copy()
+        result._merge_mapping = self._merge_mapping.copy()
+        result._stats = self._stats.copy() if self._stats is not None else None
+        result._intensity_image = self._intensity_image.copy() if self._intensity_image is not None else None
+        result._colors = self._colors.copy() if self._colors is not None else None
+        
+        # Regenerate regions instead of copying
+        result._regions = regionprops(result._labels, result._intensity_image)
+        
+        return result
+        
 def torch_to_pil(tensor, max_size=None, max_normalize=False, mean_normalize=True):
     if max_normalize:
         tensor = tensor - tensor.min()
