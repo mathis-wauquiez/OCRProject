@@ -72,6 +72,29 @@ def _normalize_char(s: str) -> str:
     except Exception:
         return ""
 
+# ------ things i have no other files for -------
+
+
+from hanziconv import HanziConv
+
+def is_chinese_character(char):
+    """Check if a character is a Chinese character (CJK Unified Ideographs)"""
+    code_point = ord(char)
+    # Main CJK Unified Ideographs block
+    return (0x4E00 <= code_point <= 0x9FFF or
+            # CJK Extension A
+            0x3400 <= code_point <= 0x4DBF or
+            # CJK Extension B and beyond
+            0x20000 <= code_point <= 0x2A6DF)
+
+def simplified_to_traditional(text):
+    """Convert simplified Chinese to traditional Chinese"""
+    return HanziConv.toTraditional(text)
+
+def traditional_to_simplified(text):
+    """Convert traditional Chinese to simplified Chinese"""
+    return HanziConv.toSimplified(text)
+
 
 # ---------------- abstract base ----------------
 
@@ -285,51 +308,231 @@ class EnsembleOCR:
     
 
 
+# class QwenOCR(nn.Module, OCRModel):
+#     name = "qwen"
+    
+#     main_prompt_template: str = """Transcribe ALL characters from this image EXACTLY as they appear.
+
+# Grid Layout: {nrows} rows × {ncols} columns = {num_chars} total characters
+
+# CRITICAL: Preserve the EXACT character forms shown in the image.
+# - If you see 臺, write 臺 (NOT 台)
+# - If you see 國, write 國 (NOT 国)
+# - Match the VISUAL FORM in the image character-by-character
+
+# Reading Instructions:
+# 1. Read row 1 (all {ncols} characters from left to right)
+# 2. Read row 2 (all {ncols} characters from left to right)
+# 3. Continue for ALL {nrows} rows
+# 4. You MUST output EXACTLY {num_chars} characters
+
+# Transcription Rules:
+# - Copy the EXACT character variants shown in the image
+# - For damaged/unreadable characters, use ▯ (U+25AF)
+# - Do NOT convert between traditional/simplified forms
+# - Do NOT standardize or normalize characters
+# - Output EXACTLY {num_chars} characters, no more, no less
+# - Output ONLY the characters, no explanations
+
+# Begin transcription:"""
+
+# #     main_prompt_template: str = """转录此传统中文文字格中的所有字符。
+
+# # 网格布局：{nrows} 行 × {ncols} 列 = 共 {num_chars} 个字符
+
+# # 阅读顺序：
+# # 1. 阅读第 1 行（所有 {ncols} 个字符，从左至右）
+# # 2. 阅读第 2 行（所有 {ncols} 个字符，从左至右）
+# # 3. 继续直至所有 {nrows} 行完成
+# # 4. 你**必须**输出**恰好** {num_chars} 个字符
+
+# # 转录规则：
+# # - 对于损坏/无法识别的字符，使用 ▯（U+25AF）
+# # - **不要**跳过任何行
+# # - 输出**恰好** {num_chars} 个字符，不多不少
+# # - **仅**输出字符，不添加解释
+# # - **仅**以繁体中文输出字符——不提供对应的简体中文版本。
+
+# # 开始转录："""
+
+#     def __init__(self, nrows: int, ncols: int, max_pixels=512*512, device_map="auto"):
+#         nn.Module.__init__(self)
+
+#         import logging
+#         # Suppress transformers and huggingface_hub logging
+#         logging.getLogger("transformers").setLevel(logging.ERROR)
+#         logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+        
+#         self.nrows = nrows
+#         self.ncols = ncols
+#         self.grid_size = nrows * ncols
+
+#         self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+#             "Qwen/Qwen2-VL-2B-Instruct",
+#             torch_dtype=torch.float16,
+#             device_map=device_map,
+#             token=hf_tok
+#         )
+
+#         kwargs = {} if max_pixels is None else {'max_pixels': max_pixels}
+#         self.processor = AutoProcessor.from_pretrained(
+#             "Qwen/Qwen2-VL-2B-Instruct",
+#             min_pixels=256*256,
+#             **kwargs
+#         )
+
+#     @classmethod
+#     def available(cls) -> bool:
+#         try:
+#             from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+#             return True
+#         except:
+#             return False
+
+#     def _grid_to_pil(self, grid_tensor: torch.Tensor) -> Image.Image:
+#         """Convert grid tensor to PIL Image."""
+#         canvas = (1 - grid_tensor.squeeze()).numpy().astype(np.uint8) * 255
+#         canvas = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
+#         return Image.fromarray(canvas)
+
+#     @torch.inference_mode()
+#     def _process_grid(self, image: Image.Image, num_chars: int):
+#         """Process a single grid image and return characters."""
+#         # Create prompt with expected character count
+#         prompt = self.main_prompt_template.format(
+#             num_chars=num_chars,
+#             nrows=self.nrows,
+#             ncols=self.ncols
+#         )
+
+#         messages = [
+#             {"role": "user", "content": [
+#                 {"type": "image"},
+#                 {"type": "text", "text": prompt}
+#             ]}
+#         ]
+#         text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
+        
+#         inputs = self.processor(
+#             text=[text_prompt],
+#             images=[image],
+#             padding=True,
+#             return_tensors="pt"
+#         )
+#         inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+
+#         output_ids = self.model.generate(**inputs, max_new_tokens=1024, do_sample=False, use_cache=True)
+#         # output_text = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0]
+
+#         generated_ids = output_ids[:, inputs['input_ids'].shape[1]:]
+#         output_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+
+
+
+#         chinese_pattern = r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef▯]+'
+#         chinese_only = ''.join(re.findall(chinese_pattern, output_text))
+        
+#         return chinese_only
+
+#     def predict_with_scores(self, dataset) -> Tuple[List[str], List[float]]:
+#         """Process dataset in grids and return characters with uncertainties."""
+#         grid_ds = GridDataset(dataset, k=self.nrows, l=self.ncols)
+        
+#         chars = []
+#         uncertainties = []
+#         total_patches = len(dataset)
+        
+#         for grid_idx, grid in enumerate(tqdm(grid_ds, desc=f"{self.name} - Detection", colour="blue")):
+#             pil_image = self._grid_to_pil(grid)
+            
+#             # How many patches are actually in this grid?
+#             start_idx = grid_idx * self.grid_size
+#             expected_chars = min(self.grid_size, total_patches - start_idx)
+            
+#             # Process with expected character count
+#             chinese_only = self._process_grid(pil_image, expected_chars)
+            
+#             # Length mismatch means everything uncertain
+#             length_mismatch = len(chinese_only) != expected_chars
+            
+#             for i in range(expected_chars):
+#                 char = chinese_only[i] if i < len(chinese_only) else "▯"
+#                 is_uncertain = length_mismatch or char == '▯' or char == ""
+                
+#                 chars.append(char)
+#                 uncertainties.append(1.0 if is_uncertain else 0.0)
+        
+#         chars = [simplified_to_traditional(char) for char in chars]
+#         return chars, uncertainties
+
+#     def __call__(self, dataset) -> List[str]:
+#         chars, _ = self.predict_with_scores(dataset)
+#         return chars
+    
+
+import re
+import xml.etree.ElementTree as ET
+from xml.etree.ElementTree import ParseError
+
 class QwenOCR(nn.Module, OCRModel):
     name = "qwen"
-    
-    main_prompt_template: str = """Transcribe ALL characters from this traditional Chinese text grid.
 
-Grid Layout: {nrows} rows × {ncols} columns = {num_chars} total characters
+    # Enhanced system prompt with confidence boost
+    SYSTEM_PROMPT = (
+        "You are an expert Chinese character OCR system. "
+        "You have excellent accuracy and can read complex handwritten and printed Chinese characters. "
+        "Output every character you see - be confident. "
+        "Only use ▯ when a cell is truly empty or completely unreadable. "
+        "Match exact visual forms (traditional vs simplified)."
+    )
 
-Reading Instructions:
-1. Read row 1 (all {ncols} characters from left to right)
-2. Read row 2 (all {ncols} characters from left to right)
-3. Continue for ALL {nrows} rows
-4. You MUST output EXACTLY {num_chars} characters
+    # Clearer prompt with explicit grid structure and row-by-row format
+    main_prompt_template: str = """Read ALL characters from this {nrows}×{ncols} grid (total: {num_chars} characters).
 
-Transcription Rules:
-- For damaged/unreadable characters, use ▯ (U+25AF)
-- Do NOT skip any rows
-- Output EXACTLY {num_chars} characters, no more, no less
-- Output ONLY the characters, no explanations
+GRID STRUCTURE:
+- {nrows} rows (horizontal lines)
+- {ncols} columns (vertical lines)
+- Read left-to-right, then top-to-bottom
+- One character per cell
 
-Begin transcription:"""
+OUTPUT FORMAT (row by row):
+Row 1: [char1] [char2] [char3] [char4]
+Row 2: [char5] [char6] [char7] [char8]
+Row 3: [char9] [char10] [char11] [char12]
 
+RULES:
+✓ Output EXACTLY {num_chars} characters
+✓ Be confident - read every visible character
+✓ Use ▯ only for truly empty/unreadable cells
+✓ Preserve traditional/simplified forms exactly as shown
 
-    def __init__(self, nrows: int, ncols: int, max_pixels=512*512, device_map="auto"):
-        nn.Module.__init__(self)
+Begin output now (row by row):"""
 
-        import logging
-        # Suppress transformers and huggingface_hub logging
-        logging.getLogger("transformers").setLevel(logging.ERROR)
-        logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
-        
+    def __init__(self, nrows: int, ncols: int, max_pixels=768 * 768, device_map="auto"):
+        super().__init__()
+
         self.nrows = nrows
         self.ncols = ncols
         self.grid_size = nrows * ncols
 
-        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
-            "Qwen/Qwen2-VL-2B-Instruct",
-            torch_dtype=torch.float16,
-            device_map=device_map,
-            token=hf_tok
+        from transformers import Qwen2VLForConditionalGeneration, BitsAndBytesConfig
+
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16
         )
 
-        kwargs = {} if max_pixels is None else {'max_pixels': max_pixels}
+        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+            "Qwen/Qwen2-VL-2B-Instruct",
+            quantization_config=quantization_config,
+            torch_dtype=torch.float16,
+            device_map=device_map
+        )
+
+        # Increased max_pixels for better character recognition
+        kwargs = {} if max_pixels is None else {"max_pixels": max_pixels}
         self.processor = AutoProcessor.from_pretrained(
             "Qwen/Qwen2-VL-2B-Instruct",
-            min_pixels=256*256,
             **kwargs
         )
 
@@ -338,33 +541,98 @@ Begin transcription:"""
         try:
             from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
             return True
-        except:
+        except Exception:
             return False
 
     def _grid_to_pil(self, grid_tensor: torch.Tensor) -> Image.Image:
-        """Convert grid tensor to PIL Image."""
+        """Enhanced preprocessing for better OCR"""
         canvas = (1 - grid_tensor.squeeze()).numpy().astype(np.uint8) * 255
+        
+        # Optional: enhance contrast for better character visibility
+        canvas = cv2.convertScaleAbs(canvas, alpha=1.2, beta=10)
+        
         canvas = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
         return Image.fromarray(canvas)
 
+    def _parse_row_format(self, raw: str, num_chars: int) -> str:
+        """Parse row-by-row format with robust fallback"""
+        chars = []
+        
+        # Strategy 1: Parse "Row N: char1 char2 char3..." format
+        row_pattern = r'Row\s*\d+\s*:\s*(.+)'
+        row_matches = re.findall(row_pattern, raw, re.IGNORECASE)
+        
+        if row_matches:
+            for row_text in row_matches:
+                # Extract characters from each row
+                row_chars = []
+                for ch in row_text:
+                    if ch == "▯":
+                        row_chars.append("▯")
+                    elif is_chinese_character(ch):
+                        row_chars.append(ch)
+                chars.extend(row_chars)
+            
+            if len(chars) == num_chars:
+                return "".join(chars)
+        
+        # Strategy 2: Parse bracket format [char1] [char2]
+        bracket_pattern = r'\[([^\]]+)\]'
+        bracket_matches = re.findall(bracket_pattern, raw)
+        
+        if bracket_matches:
+            for match in bracket_matches:
+                ch = match.strip()
+                if ch == "▯":
+                    chars.append("▯")
+                elif ch and is_chinese_character(ch[0]):
+                    chars.append(ch[0])
+            
+            if len(chars) == num_chars:
+                return "".join(chars)
+        
+        # Strategy 3: Extract all Chinese characters in order (aggressive fallback)
+        chars = []
+        # Skip common instructional text
+        content = raw
+        for skip_phrase in ["Row", "row", "格式", "输出", "Output"]:
+            content = content.replace(skip_phrase, " ")
+        
+        for ch in content:
+            if ch == "▯":
+                chars.append("▯")
+            elif is_chinese_character(ch):
+                chars.append(ch)
+        
+        # Pad or trim to exact length
+        if len(chars) < num_chars:
+            chars += ["▯"] * (num_chars - len(chars))
+        
+        return "".join(chars[:num_chars])
+
     @torch.inference_mode()
-    def _process_grid(self, image: Image.Image, num_chars: int):
-        """Process a single grid image and return characters."""
-        # Create prompt with expected character count
+    def _process_grid(self, image: Image.Image, num_chars: int) -> str:
         prompt = self.main_prompt_template.format(
-            num_chars=num_chars,
             nrows=self.nrows,
-            ncols=self.ncols
+            ncols=self.ncols,
+            num_chars=num_chars
         )
 
         messages = [
-            {"role": "user", "content": [
-                {"type": "image"},
-                {"type": "text", "text": prompt}
-            ]}
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": prompt}
+                ]
+            }
         ]
-        text_prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True)
-        
+
+        text_prompt = self.processor.apply_chat_template(
+            messages, add_generation_prompt=True
+        )
+
         inputs = self.processor(
             text=[text_prompt],
             images=[image],
@@ -373,48 +641,195 @@ Begin transcription:"""
         )
         inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
-        output_ids = self.model.generate(**inputs, max_new_tokens=1024, do_sample=False, use_cache=True)
-        output_text = self.processor.batch_decode(output_ids, skip_special_tokens=True)[0]
+        output_ids = self.model.generate(
+            **inputs,
+            max_new_tokens=num_chars * 4,  # Increased buffer for format + chars
+            do_sample=False,
+            temperature=None,  # Greedy decoding
+            use_cache=True
+        )
 
-        chinese_pattern = r'[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef▯]+'
-        chinese_only = ''.join(re.findall(chinese_pattern, output_text))
-        
-        return chinese_only
+        gen_ids = output_ids[:, inputs["input_ids"].shape[1]:]
+        raw = self.processor.batch_decode(gen_ids, skip_special_tokens=True)[0]
 
-    def predict_with_scores(self, dataset) -> Tuple[List[str], List[float]]:
-        """Process dataset in grids and return characters with uncertainties."""
+        # Debug: optionally print raw output
+        # print(f"Raw output: {raw}")
+
+        # Parse row format
+        return self._parse_row_format(raw, num_chars)
+
+    def predict_with_scores(self, dataset):
         grid_ds = GridDataset(dataset, k=self.nrows, l=self.ncols)
-        
+
         chars = []
         uncertainties = []
-        total_patches = len(dataset)
-        
-        for grid_idx, grid in enumerate(tqdm(grid_ds, desc=f"{self.name} - Detection", colour="blue")):
-            pil_image = self._grid_to_pil(grid)
-            
-            # How many patches are actually in this grid?
-            start_idx = grid_idx * self.grid_size
-            expected_chars = min(self.grid_size, total_patches - start_idx)
-            
-            # Process with expected character count
-            chinese_only = self._process_grid(pil_image, expected_chars)[1:]
-            
-            # Length mismatch means everything uncertain
-            length_mismatch = len(chinese_only) != expected_chars
-            
-            for i in range(expected_chars):
-                char = chinese_only[i] if i < len(chinese_only) else "▯"
-                is_uncertain = length_mismatch or char == '▯' or char == ""
-                
-                chars.append(char)
-                uncertainties.append(1.0 if is_uncertain else 0.0)
-        
+        total = len(dataset)
+
+        for grid_idx, grid in enumerate(
+            tqdm(grid_ds, desc=f"{self.name} - Detection", colour="blue")
+        ):
+            pil = self._grid_to_pil(grid)
+            start = grid_idx * self.grid_size
+            n = min(self.grid_size, total - start)
+
+            text = self._process_grid(pil, n)
+
+            for ch in text:
+                chars.append(ch)
+                uncertainties.append(1.0 if ch == "▯" else 0.0)
+
+        chars = [simplified_to_traditional(c) for c in chars]
         return chars, uncertainties
 
-    def __call__(self, dataset) -> List[str]:
+    def __call__(self, dataset):
         chars, _ = self.predict_with_scores(dataset)
         return chars
-    
+
+
+
+import re
+
+class QwenOCRSingle(nn.Module, OCRModel):
+    """Optimized OCR for single character recognition (1×1 grid)"""
+    name = "qwen_single"
+
+    # Ultra-minimal system prompt for single char
+    SYSTEM_PROMPT = (
+        "You are a Chinese character OCR system. "
+        "Output exactly one Chinese character that you see in the image. "
+        "If unreadable, output ▯. Match the exact visual form shown."
+    )
+
+    # Extremely simple prompt for single character
+    main_prompt_template: str = """What Chinese character is shown in this image?
+
+Output only the character, nothing else.
+If unreadable: ▯"""
+
+    def __init__(self, max_pixels=768 * 768, device_map="auto"):
+        super().__init__()
+
+        self.nrows = 1
+        self.ncols = 1
+        self.grid_size = 1
+
+        from transformers import Qwen2VLForConditionalGeneration, BitsAndBytesConfig
+
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
+
+        self.model = Qwen2VLForConditionalGeneration.from_pretrained(
+            "Qwen/Qwen2-VL-2B-Instruct",
+            quantization_config=quantization_config,
+            torch_dtype=torch.float16,
+            device_map=device_map
+        )
+
+        kwargs = {} if max_pixels is None else {"max_pixels": max_pixels}
+        self.processor = AutoProcessor.from_pretrained(
+            "Qwen/Qwen2-VL-2B-Instruct",
+            **kwargs
+        )
+
+    @classmethod
+    def available(cls) -> bool:
+        try:
+            from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+            return True
+        except Exception:
+            return False
+
+    def _grid_to_pil(self, grid_tensor: torch.Tensor) -> Image.Image:
+        """Enhanced preprocessing for single character"""
+        canvas = (1 - grid_tensor.squeeze()).numpy().astype(np.uint8) * 255
+        
+        # Enhance contrast for better recognition
+        canvas = cv2.convertScaleAbs(canvas, alpha=1.2, beta=10)
+        
+        canvas = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGR)
+        return Image.fromarray(canvas)
+
+    def _parse_single_char(self, raw: str) -> str:
+        """Extract single character from response"""
+        # Remove common wrapper text
+        raw = raw.strip()
+        
+        # Check for ▯ first
+        if "▯" in raw:
+            return "▯"
+        
+        # Extract first Chinese character found
+        for ch in raw:
+            if is_chinese_character(ch):
+                return ch
+        
+        # If no character found, return unreadable marker
+        return "▯"
+
+    @torch.inference_mode()
+    def _process_single(self, image: Image.Image) -> str:
+        """Process single character image"""
+        messages = [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": self.main_prompt_template}
+                ]
+            }
+        ]
+
+        text_prompt = self.processor.apply_chat_template(
+            messages, add_generation_prompt=True
+        )
+
+        inputs = self.processor(
+            text=[text_prompt],
+            images=[image],
+            padding=True,
+            return_tensors="pt"
+        )
+        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+
+        output_ids = self.model.generate(
+            **inputs,
+            max_new_tokens=8,  # Only need ~2-3 tokens for single char
+            do_sample=False,
+            temperature=None,
+            use_cache=True
+        )
+
+        gen_ids = output_ids[:, inputs["input_ids"].shape[1]:]
+        raw = self.processor.batch_decode(gen_ids, skip_special_tokens=True)[0]
+
+        return self._parse_single_char(raw)
+
+    def predict_with_scores(self, dataset):
+        """Process dataset character by character"""
+        chars = []
+        uncertainties = []
+
+        for idx, sample in enumerate(
+            tqdm(dataset, desc=f"{self.name} - Detection", colour="blue")
+        ):
+            # Assuming sample is a tensor of single character
+            pil = self._grid_to_pil(sample)
+            
+            char = self._process_single(pil)
+            
+            chars.append(char)
+            uncertainties.append(1.0 if char == "▯" else 0.0)
+
+        chars = [simplified_to_traditional(c) for c in chars]
+        return chars, uncertainties
+
+    def __call__(self, dataset):
+        chars, _ = self.predict_with_scores(dataset)
+        return chars
+
 
 # ---------------- registry ----------------
 

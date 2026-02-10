@@ -13,7 +13,11 @@ from sklearn.metrics.cluster import contingency_matrix
 from scipy.optimize import linear_sum_assignment
 import pandas as pd
 
-def compute_metrics(reference_labels, predicted_labels):
+
+UNKNOWN_LABEL = '▯'  # U+25AF - represents unrecognized characters
+
+
+def compute_metrics(reference_labels, predicted_labels, exclude_label=None):
     """
     Compute classical clustering evaluation metrics.
     
@@ -28,8 +32,13 @@ def compute_metrics(reference_labels, predicted_labels):
     ref = np.array(reference_labels)
     pred = np.array(predicted_labels)
     
-    # Remove any NaN values (keep only valid indices)
+    # Remove any NaN values
     valid_mask = ~(pd.isna(ref) | pd.isna(pred))
+    
+    # Exclude specified label if provided
+    if exclude_label is not None:
+        exclude_mask = ref != exclude_label
+        valid_mask = valid_mask & exclude_mask
     ref = ref[valid_mask]
     pred = pred[valid_mask]
     

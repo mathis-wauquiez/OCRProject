@@ -28,14 +28,18 @@ import matplotlib.pyplot as plt
 from .graph_visu import matches_per_treshold, random_match_figure, size_distribution_figure, purity_figure, completeness_figure, report_community, plot_nearest_neighbors
 from .tsne_plot import plot_community_tsne
 from tqdm import tqdm
+import warnings
 
 import io
 import base64
 
+# actual stuff related to computing
+from src.patch_processing.configs import get_hog_cfg
+from src.patch_processing.hog import HOG
+
 UNKNOWN_LABEL = '▯'  # U+25AF - represents unrecognized characters
 
 
-import warnings
 def _get_b64(fig, dpi=75, quality=70):
     # Convert figure to base64
     buf = io.BytesIO()
@@ -63,6 +67,12 @@ class graphClusteringSweep(AutoReport):
             keep_reciprocal: bool = True,
             device: str = "cuda",
             output_dir: str = "./outputs/clustering_results",
+
+            cell_sizes: None | List[int] = None,
+            normalization_methods: None | List[None | str] =  ['patch'], # None (=False), cell, patch 
+            grdt_sigmas: None | List[float] = None,
+            nums_bins: None | List[int] = None,
+
 
             embed_images: bool = False,  # False = save as files
             image_dpi: int = 100,
@@ -98,9 +108,15 @@ class graphClusteringSweep(AutoReport):
 
         self.feature            = feature
         self.featureMatcher     = featureMatcher
+
         self.epsilons           = epsilons
-        self.edges_type         = edges_type
         self.gammas             = gammas
+        self.cell_sizes         = cell_sizes
+        self.normalization_methods = normalization_methods
+        self.grdt_sigmas        = grdt_sigmas
+        self.nums_bins          = nums_bins
+
+        self.edges_type         = edges_type
         self.target_lbl         = target_lbl
         self.keep_reciprocal    = keep_reciprocal
         self.device             = device
@@ -179,58 +195,264 @@ class graphClusteringSweep(AutoReport):
             dataframe
     ):
         
-        # -- Compute the matches thanks to the featureMatching class --
-        if dataframe[self.feature].ndim == 1:
-            dataframe[self.feature] = dataframe[self.feature].map(lambda x: x.reshape(-1, 8))
+        from itertools import product
         
-        features = dataframe[self.feature]
-        features = torch.tensor(features, device=self.device)
-
-        _, nlfa, dissimilarities = self.featureMatcher.match(features, features)
-
-        results = []
-
-        for epsilon in tqdm(self.epsilons, desc="Epsilon", colour="blue"):
-            graph, edges = self.get_graph(nlfa, dissimilarities, epsilon)
-            G_ig = ig.Graph.from_networkx(graph)
-
-            for gamma in tqdm(self.gammas, desc="Gamma", leave=False, colour="green"):
-
-                partition = la.find_partition(G_ig, la.RBConfigurationVertexPartition, resolution_parameter=gamma, n_iterations=10, seed=42)
-                metrics = self._evaluate_membership(target_labels=dataframe[self.target_lbl], membership=partition.membership)
-                results.append({
-                    'epsilon': epsilon,
-                    'gamma': gamma,
-                    **metrics
-                })
-
-
-        results_df = pd.DataFrame(results)
+        # Use default values if parameters are None
+        if self.cell_sizes is None:
+            self.cell_sizes = [24]
+        if self.grdt_sigmas is None:
+            self.grdt_sigmas = [5]
+        if self.nums_bins is None:
+            self.nums_bins = [16]
         
-        # Find best combination by v_measure
-        best_idx = results_df['adjusted_rand_index'].idxmax()
-        best_row = results_df.loc[best_idx]
-        best_epsilon = best_row['epsilon']
-        best_gamma = best_row['gamma']
+        # Generate all HOG configurations
+        hog_configs = {}
+        for cell_size, grdt_sigma, num_bins, normalize in product(self.cell_sizes, self.grdt_sigmas, self.nums_bins, self.normalization_methods):
+            if normalize == False or normalize is None:
+                normalization_name = 'unnormalized'
+            else:
+                normalization_name = normalize
 
-        print(best_epsilon, best_gamma)
+            config_name = f'hog_{cell_size}_{num_bins}_{grdt_sigma}_{normalization_name}'
+            renderer, hog_params = get_hog_cfg(cell_size, grdt_sigma, num_bins, normalize, device=self.device)
+            hog_configs[config_name] = {
+                'renderer': renderer,
+                'hog_params': hog_params,
+                'cell_size': cell_size,
+                'grdt_sigma': grdt_sigma,
+                'num_bins': num_bins,
+                'normalization': normalize
+            }
+        
+        all_results = []
+        best_overall_score = -np.inf
+        best_overall_config = None
+        
+        # Iterate over HOG configurations
+        for config_name, hog_cfg in tqdm(hog_configs.items(), desc="HOG Config", colour="cyan"):
+            print(f"\n{'='*60}")
+            print(f"Processing HOG Configuration: {config_name}")
+            print(f"{'='*60}")
+            
+            # Compute HOG features with this configuration
+            hog_processor = HOG(hog_cfg['hog_params'])
+            hog_renderer = hog_cfg['renderer'](dataframe['svg'])
+            
+            # Convert images to HOG features
+            from torch.utils.data import DataLoader
+            dataloader = DataLoader(
+                hog_renderer,
+                batch_size=256,
+                shuffle=False,
+                num_workers=0,
+                pin_memory=True
+            )
+            
+            # Preallocate histograms
+            first_batch = next(iter(dataloader))
+            sample_output = hog_processor(first_batch[:1].unsqueeze(1).to(dtype=torch.float32, device=self.device))
+            
+            total_samples = len(dataframe)
+            histogram_shape = sample_output.histograms[0, 0].shape
+            histograms = torch.zeros((total_samples, *histogram_shape), device=self.device)
+            
+            # Compute HOG features
+            start_idx = 0
+            for batch in tqdm(dataloader, desc="Computing HOG", colour="red", leave=False):
+                hogOutput = hog_processor(batch.unsqueeze(1).to(dtype=torch.float32, device=self.device))
+                histogram_batch = hogOutput.histograms[:, 0]
+                
+                batch_size = histogram_batch.shape[0]
+                histograms[start_idx:start_idx + batch_size] = histogram_batch
+                start_idx += batch_size
+            
+            features = histograms
+            
+            # Compute matches
+            _, nlfa, dissimilarities = self.featureMatcher.match(features, features)
+            
+            # Sweep over epsilon and gamma for this HOG config
+            config_results = []
+            
+            for epsilon in tqdm(self.epsilons, desc="Epsilon", leave=False, colour="blue"):
+                graph, edges = self.get_graph(nlfa, dissimilarities, epsilon)
+                G_ig = ig.Graph.from_networkx(graph)
 
-        metric_names = [col for col in results_df.columns if col not in ['epsilon', 'gamma']]
-    
-        for metric in metric_names:
-            pivot = results_df.pivot_table(values=metric, index='gamma', columns='epsilon')
-            self.report_table(pivot, title=f'{metric} (gamma × epsilon)')
-
-        fig = self.report_parameter_heatmaps(results_df)
-        self.report_figure(fig, title="Parameter Sweep Heatmaps")
-
-
-        dataframe, filtered_dataframe, label_representatives_dataframe = self.report_graph(
-            dataframe, nlfa, dissimilarities, best_epsilon, best_gamma
+                for gamma in tqdm(self.gammas, desc="Gamma", leave=False, colour="green"):
+                    partition = la.find_partition(G_ig, la.RBConfigurationVertexPartition, 
+                                                resolution_parameter=gamma, n_iterations=10, seed=42)
+                    metrics = self._evaluate_membership(
+                        target_labels=dataframe[self.target_lbl], 
+                        membership=partition.membership
+                    )
+                    
+                    result = {
+                        'hog_config': config_name,
+                        'cell_size': hog_cfg['cell_size'],
+                        'grdt_sigma': hog_cfg['grdt_sigma'],
+                        'num_bins': hog_cfg['num_bins'],
+                        'epsilon': epsilon,
+                        'gamma': gamma,
+                        **metrics
+                    }
+                    config_results.append(result)
+                    all_results.append(result)
+            
+            # Find best for this HOG config
+            config_df = pd.DataFrame(config_results)
+            best_idx = config_df['adjusted_rand_index'].idxmax()
+            best_score = config_df.loc[best_idx, 'adjusted_rand_index']
+            
+            if best_score > best_overall_score:
+                best_overall_score = best_score
+                best_overall_config = {
+                    'config_name': config_name,
+                    'hog_cfg': hog_cfg,
+                    'features': features,
+                    'nlfa': nlfa,
+                    'dissimilarities': dissimilarities,
+                    **config_df.loc[best_idx].to_dict()
+                }
+            
+            # Clean up to free memory
+            del features, nlfa, dissimilarities, histograms, hog_processor, hog_renderer
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Create full results dataframe
+        results_df = pd.DataFrame(all_results)
+        
+        # Report best overall configuration
+        print(f"\n{'='*60}")
+        print(f"BEST OVERALL CONFIGURATION")
+        print(f"{'='*60}")
+        print(f"HOG Config: {best_overall_config['config_name']}")
+        print(f"Cell Size: {best_overall_config['cell_size']}")
+        print(f"Gradient Sigma: {best_overall_config['grdt_sigma']}")
+        print(f"Num Bins: {best_overall_config['num_bins']}")
+        print(f"Epsilon: {best_overall_config['epsilon']:.4f}")
+        print(f"Gamma: {best_overall_config['gamma']:.4f}")
+        print(f"Adjusted Rand Index: {best_overall_config['adjusted_rand_index']:.4f}")
+        
+        # Save summary table of best results per HOG config
+        best_per_config = results_df.loc[results_df.groupby('hog_config')['adjusted_rand_index'].idxmax()]
+        best_per_config_sorted = best_per_config.sort_values('adjusted_rand_index', ascending=False)
+        self.report_table(best_per_config_sorted, title="Best Results per HOG Configuration")
+        
+        # Report tables for each HOG config
+        for config_name in hog_configs.keys():
+            config_subset = results_df[results_df['hog_config'] == config_name]
+            
+            metric_names = [col for col in config_subset.columns 
+                        if col not in ['hog_config', 'cell_size', 'grdt_sigma', 'num_bins', 'epsilon', 'gamma']]
+            
+            for metric in metric_names:
+                pivot = config_subset.pivot_table(values=metric, index='gamma', columns='epsilon')
+                self.report_table(pivot, title=f'{metric} (gamma × epsilon) - {config_name}')
+        
+        # Report heatmaps comparing all configurations
+        fig = self.report_hog_comparison_heatmaps(results_df)
+        self.report_figure(fig, title="HOG Configuration Comparison")
+        
+        # Use best configuration for detailed reporting
+        dataframe['histogram'] = list(best_overall_config['features'].cpu().numpy())
+        
+        dataframe, filtered_dataframe, label_representatives_dataframe, graph, partition = self.report_graph(
+            dataframe, 
+            best_overall_config['nlfa'], 
+            best_overall_config['dissimilarities'], 
+            best_overall_config['epsilon'], 
+            best_overall_config['gamma']
         )
         
-        return dataframe, filtered_dataframe, label_representatives_dataframe
+        # Add HOG config info to output dataframes
+        for df in [dataframe, filtered_dataframe, label_representatives_dataframe]:
+            df['best_hog_config'] = best_overall_config['config_name']
+            df['best_cell_size'] = best_overall_config['cell_size']
+            df['best_grdt_sigma'] = best_overall_config['grdt_sigma']
+            df['best_num_bins'] = best_overall_config['num_bins']
+        
+        return dataframe, filtered_dataframe, label_representatives_dataframe, graph, partition
 
+
+    def report_hog_comparison_heatmaps(self, results_df):
+        """
+        Create comparison heatmaps across HOG configurations.
+        """
+        import seaborn as sns
+        
+        # Group by HOG config and find best epsilon/gamma for each
+        best_per_config = results_df.loc[results_df.groupby('hog_config')['adjusted_rand_index'].idxmax()]
+        
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # Plot 1: Adjusted Rand Index by config
+        ax = axes[0, 0]
+        best_per_config_sorted = best_per_config.sort_values('adjusted_rand_index', ascending=False)
+        ax.barh(range(len(best_per_config_sorted)), best_per_config_sorted['adjusted_rand_index'])
+        ax.set_yticks(range(len(best_per_config_sorted)))
+        ax.set_yticklabels(best_per_config_sorted['hog_config'])
+        ax.set_xlabel('Adjusted Rand Index')
+        ax.set_title('Best Performance by HOG Configuration')
+        ax.grid(axis='x', alpha=0.3)
+        
+        # Highlight the best one
+        max_idx = best_per_config_sorted['adjusted_rand_index'].idxmax()
+        best_bar_position = list(best_per_config_sorted.index).index(max_idx)
+        ax.get_children()[best_bar_position].set_color('green')
+        
+        # Plot 2: Heatmap of cell_size vs grdt_sigma (averaging over num_bins)
+        pivot = best_per_config.pivot_table(
+            values='adjusted_rand_index', 
+            index='grdt_sigma', 
+            columns='cell_size',
+            aggfunc='mean'
+        )
+        sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', ax=axes[0, 1], 
+                    vmin=results_df['adjusted_rand_index'].min(),
+                    vmax=results_df['adjusted_rand_index'].max())
+        axes[0, 1].set_title('ARI: Cell Size vs Gradient Sigma')
+        
+        # Plot 3: Heatmap of num_bins vs cell_size (averaging over grdt_sigma)
+        pivot = best_per_config.pivot_table(
+            values='adjusted_rand_index', 
+            index='num_bins', 
+            columns='cell_size',
+            aggfunc='mean'
+        )
+        sns.heatmap(pivot, annot=True, fmt='.3f', cmap='RdYlGn', ax=axes[1, 0],
+                    vmin=results_df['adjusted_rand_index'].min(),
+                    vmax=results_df['adjusted_rand_index'].max())
+        axes[1, 0].set_title('ARI: Num Bins vs Cell Size')
+        
+        # Plot 4: Parameter scatter
+        ax = axes[1, 1]
+        scatter = ax.scatter(
+            best_per_config['epsilon'], 
+            best_per_config['gamma'],
+            c=best_per_config['adjusted_rand_index'],
+            s=200,
+            cmap='RdYlGn',
+            alpha=0.6,
+            edgecolors='black',
+            vmin=results_df['adjusted_rand_index'].min(),
+            vmax=results_df['adjusted_rand_index'].max()
+        )
+        
+        # Annotate each point with config name
+        for idx, row in best_per_config.iterrows():
+            ax.annotate(row['hog_config'], 
+                    (row['epsilon'], row['gamma']),
+                    xytext=(5, 5), textcoords='offset points',
+                    fontsize=8, alpha=0.7)
+        
+        ax.set_xlabel('Epsilon')
+        ax.set_ylabel('Gamma')
+        ax.set_title('Best Epsilon/Gamma per HOG Config (colored by ARI)')
+        plt.colorbar(scatter, ax=ax, label='ARI')
+        
+        plt.tight_layout()
+        return fig
 
     def report_graph(self, dataframe, nlfa, dissimilarities, best_epsilon, best_gamma):
             
@@ -238,10 +460,19 @@ class graphClusteringSweep(AutoReport):
             graph, edges = self.get_graph(nlfa, dissimilarities, best_epsilon)
             G_ig = ig.Graph.from_networkx(graph)
             partition = la.find_partition(G_ig, la.RBConfigurationVertexPartition, resolution_parameter=best_gamma, n_iterations=-1, seed=42)
-            dataframe['membership'] = partition.membership
+            
+            # Set the membership
+            dataframe.loc[:, 'membership'] = pd.Series(partition.membership, index=dataframe.index)
+            
             degree_centrality = nx.degree_centrality(graph)
-            dataframe['degree_centrality'] = dataframe.index.map(degree_centrality)
+            # Create a series with positional indices, then map to dataframe index
+            degree_centrality_series = pd.Series(
+                [degree_centrality[i] for i in range(len(dataframe))],
+                index=dataframe.index
+            )
+            dataframe['degree_centrality'] = degree_centrality_series
 
+            
             best_metrics = self._evaluate_membership(target_labels=dataframe[self.target_lbl], membership=partition.membership)
 
             #! Report the metrics
@@ -558,8 +789,15 @@ class graphClusteringSweep(AutoReport):
             
             self.report_raw_html(''.join(html_parts), title=f"All Hapax ({len(hapax_df)} items)")
 
-            # == Save the label representatives for Edwin ==
-
+            #! == Save the label representatives for Edwin ==
+            #? This code section is a bit important
+            #? Which is the reason why
+            #? I am adding
+            #? So much
+            #? Useless
+            #? Coloured
+            #? Comments
+            
             # keep only the characters that are present more than a few times in the document
             # for each "pseudo-gt" label, yield the most connected in the graph
             min_size = 2
@@ -574,7 +812,7 @@ class graphClusteringSweep(AutoReport):
 
             #! Save these dataframes!
 
-            return dataframe, filtered_dataframe, label_representatives_dataframe
+            return dataframe, filtered_dataframe, label_representatives_dataframe, graph, partition
     
     """ ================================================================== """
     """ ====                                                          ==== """

@@ -23,6 +23,8 @@ from notebook_utils.parquet_utils import save_dataframe, load_dataframe
 import pandas as pd
 
 from src.clustering.clustering_sweep import graphClusteringSweep
+from src.ocr.wrappers import is_chinese_character, simplified_to_traditional
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,12 @@ def main(cfg: DictConfig):
     
     dataframe = load_dataframe(input_path)
 
+    # Convert to trad-ch
+
+    # for _, row in tqdm(dataframe.iterrows(), desc="Converting to tr-ch"):
+    #     if is_chinese_character(row['char_qwen']):
+    #         row['char_qwen'] = simplified_to_traditional(row['char_qwen'])
+
     logger.info(f"Loaded {len(dataframe)} patches")
     
     # Create clustering sweep
@@ -44,6 +52,10 @@ def main(cfg: DictConfig):
         feature=cfg.method.feature,
         epsilons=cfg.method.epsilons,
         gammas=cfg.method.gammas,
+        cell_sizes=cfg.method.cell_sizes,
+        normalization_methods=cfg.method.normalization_methods,
+        grdt_sigmas=cfg.method.grdt_sigmas,
+        nums_bins=cfg.method.nums_bins,
         target_lbl=cfg.data.target_lbl,
         edges_type=cfg.method.edges_type,
         metric=cfg.method.metric,
@@ -54,7 +66,7 @@ def main(cfg: DictConfig):
     
     # Run sweep
     logger.info("Starting clustering sweep...")
-    dataframe, filtered_dataframe, label_representatives_dataframe = sweep(dataframe)
+    dataframe, filtered_dataframe, label_representatives_dataframe, graph, partition = sweep(dataframe)
     
     # Generate HTML report
     logger.info("Generating HTML report...")
@@ -73,6 +85,11 @@ def main(cfg: DictConfig):
     save_dataframe(dataframe, output_path / "clustered_patches")
     save_dataframe(filtered_dataframe, output_path / "filtered_patches")
     save_dataframe(label_representatives_dataframe, output_path / "label_representatives")
+
+    import pickle
+    pickle.dump(graph, open(output_path / 'graph.gpickle', 'wb'))
+
+
 
 
 if __name__ == "__main__":

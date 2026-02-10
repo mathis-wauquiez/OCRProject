@@ -25,6 +25,7 @@ from .hog import HOG
 from .params import HOGParameters
 from .svg import SVG
 from .patch_extraction import extract_patches
+from ..layout_analysis.skew import get_document_orientation
 
 import torch
 from torch.utils.data import DataLoader
@@ -75,7 +76,7 @@ def create_dataframe(ro_processor: ReadingOrder, image_folder, comps_folder, ret
     files = next(os.walk(image_folder))[2]
 
     # main dataframe that we will manipulate in this script
-    patches_df: pd.DataFrame = pd.DataFrame(columns=['bin_patch', 'img_patch', 'page', 'file', 'left', 'top', 'width', 'height', 'label'])
+    patches_df: pd.DataFrame = pd.DataFrame(columns=['bin_patch', 'img_patch', 'page', 'file', 'left', 'top', 'width', 'height', 'label', 'page_skew'])
 
     figs = []
 
@@ -105,6 +106,8 @@ def create_dataframe(ro_processor: ReadingOrder, image_folder, comps_folder, ret
         # Create the dataframe for this page
         stats = img_comp.stats[1:]
 
+        page_skew = get_document_orientation(img_np)
+
         page_df = pd.DataFrame({
             'bin_patch': _bin_patches,
             'img_patch': _img_patches,
@@ -114,7 +117,8 @@ def create_dataframe(ro_processor: ReadingOrder, image_folder, comps_folder, ret
             'top': stats[:, 1],
             'width': stats[:,2],
             'height': stats[:, 3],
-            'label': lbls
+            'label': lbls,
+            'page_skew': page_skew
         })
 
         # Populate it
@@ -225,10 +229,19 @@ class PatchPreprocessing:
 
         del ink_filtered # we should not need that now
 
+        # == Deskew the SVG images ==
+
+        for _, row in patches_dataframe.iterrows():
+            from .svg import rotation
+            row['svg'].apply_homography(rotation(-row['page_skew']))
+
         # == Use OCR models like Qwen, Tesseract, EasyOCR, ... ==
 
         self._print('Getting the output from the OCR models')
         ocr_renderer = self.ocr_renderer(svg_imgs)
+
+        for item in tqdm(ocr_renderer, desc="testing the ocr renderer"):
+            continue
 
         for ocr_partial in self.ocr_model_configs:
             with self._load_ocr_model(ocr_partial) as ocr_model:

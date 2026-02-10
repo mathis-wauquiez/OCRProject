@@ -40,6 +40,8 @@ class Renderer(Dataset):
         self.barycenters = []
         self.canvas_dims = None
 
+        self.cached_renders = [] 
+
         if svg_imgs is not None:
             self(svg_imgs)
     
@@ -62,7 +64,7 @@ class Renderer(Dataset):
 
     def _precompute_canvas(self):
         """Compute canvas dimensions and barycenters once."""        
-        shapes, self.barycenters = self._compute_barycenters()
+        shapes, self.barycenters, self.cached_renders = self._compute_barycenters()
         extents = self._compute_extents(shapes, self.barycenters)
         self.canvas_dims = self._compute_canvas_dims(extents)
     
@@ -92,17 +94,21 @@ class Renderer(Dataset):
         
         return cy_pixel, cx_pixel
 
-    def _compute_barycenters(self) -> Tuple[List[Tuple[int, int]], List[Tuple[float, float]]]:
-        """Compute shapes and barycenters for all images."""
+
+    def _compute_barycenters(self) -> Tuple[List[Tuple[int, int]], List[Tuple[float, float]], List[np.ndarray]]:  # <-- MODIFIED
+        """Compute shapes and barycenters for all images, caching the renders."""
         barycenters = []
         shapes = []
+        cached_renders = []
 
         for binary_svg in self._render_with_progress(self.svg_imgs):
             cy_pixel, cx_pixel = self._compute_barycenter(binary_svg)
             barycenters.append((cy_pixel, cx_pixel))
             shapes.append(binary_svg.shape)
+            cached_renders.append(binary_svg)
 
-        return shapes, barycenters
+        return shapes, barycenters, cached_renders
+
 
     def _compute_extents(
         self, 
@@ -157,6 +163,19 @@ class Renderer(Dataset):
         
         return CanvasDimensions(canvas_width, canvas_height, center_x, center_y)
     
+    # def _place_on_canvas(self, binary_svg: np.ndarray, barycenter: Tuple[float, float]) -> np.ndarray:
+    #     """Place a binary image on the canvas, centered at its barycenter."""
+    #     cy, cx = barycenter
+    #     h, w = binary_svg.shape
+        
+    #     start_y = int(np.round(self.canvas_dims.center_y - cy))
+    #     start_x = int(np.round(self.canvas_dims.center_x - cx))
+        
+    #     canvas_img = np.zeros((self.canvas_dims.height, self.canvas_dims.width))
+    #     canvas_img[start_y:start_y+h, start_x:start_x+w] = binary_svg
+        
+    #     return canvas_img
+        
     def _place_on_canvas(self, binary_svg: np.ndarray, barycenter: Tuple[float, float]) -> np.ndarray:
         """Place a binary image on the canvas, centered at its barycenter."""
         cy, cx = barycenter
@@ -166,23 +185,53 @@ class Renderer(Dataset):
         start_x = int(np.round(self.canvas_dims.center_x - cx))
         
         canvas_img = np.zeros((self.canvas_dims.height, self.canvas_dims.width))
-        canvas_img[start_y:start_y+h, start_x:start_x+w] = binary_svg
+        
+        # Calculate actual end positions (may exceed canvas due to rounding)
+        end_y = start_y + h
+        end_x = start_x + w
+        
+        # Clip to canvas bounds
+        src_start_y = max(0, -start_y)
+        src_start_x = max(0, -start_x)
+        src_end_y = h - max(0, end_y - self.canvas_dims.height)
+        src_end_x = w - max(0, end_x - self.canvas_dims.width)
+        
+        dst_start_y = max(0, start_y)
+        dst_start_x = max(0, start_x)
+        dst_end_y = min(end_y, self.canvas_dims.height)
+        dst_end_x = min(end_x, self.canvas_dims.width)
+        
+        # Place the clipped portion
+        canvas_img[dst_start_y:dst_end_y, dst_start_x:dst_end_x] = \
+            binary_svg[src_start_y:src_end_y, src_start_x:src_end_x]
         
         return canvas_img
-    
+
     def __len__(self) -> int:
         return len(self.svg_imgs)
     
+    # def __getitem__(self, idx: int) -> torch.Tensor:
+    #     """Get a single rendered image by index."""
+    #     if not self.fully_initialized:
+    #         raise RuntimeError("Renderer must be initialized with __call__ before accessing items")
+        
+    #     binary_svg = self._render_single(self.svg_imgs[idx])
+    #     canvas_img = self._place_on_canvas(binary_svg, self.barycenters[idx])
+        
+    #     return torch.from_numpy(canvas_img).float()
+    
+
     def __getitem__(self, idx: int) -> torch.Tensor:
         """Get a single rendered image by index."""
         if not self.fully_initialized:
             raise RuntimeError("Renderer must be initialized with __call__ before accessing items")
         
-        binary_svg = self._render_single(self.svg_imgs[idx])
+        # Use cached render instead of re-rendering
+        binary_svg = self.cached_renders[idx] 
         canvas_img = self._place_on_canvas(binary_svg, self.barycenters[idx])
         
         return torch.from_numpy(canvas_img).float()
-    
+
 
 class GridDataset(Dataset):
     def __init__(self, base_dataset, k, l):

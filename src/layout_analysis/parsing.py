@@ -97,9 +97,7 @@ def split_to_rectangles(labels, min_col_area, threshold_cols=1, canvas=None, thr
         column_slice = bin_image[:, left:right]
         lbls_slice = labels[:, left:right]
 
-        # For every row in the column
-        # top_rows, bottom_rows = find_columns_by_label(lbls_slice.T)
-        
+        # For every row in the column        
         top_rows, bottom_rows = find_columns(column_slice.T)
 
         for row_idx, (top, bottom) in enumerate(zip(top_rows, bottom_rows)):
@@ -107,7 +105,7 @@ def split_to_rectangles(labels, min_col_area, threshold_cols=1, canvas=None, thr
             crop = column_slice[top:bottom]
             lbl_slice = labels[top:bottom, left:right]
 
-            # For every subcolumn
+            # For every subcolumn of the row
             subcol_lefts, subcol_rights = find_columns(crop, threshold=1)
             crop_labels = []
 
@@ -163,7 +161,7 @@ def get_reading_order(rectangles):
 
     # For every column
     for col_idx, col_rectangles in rectangles.groupby('col_idx'):
-        subcolumns = break_into_subcols(col_rectangles)
+        subcolumns = break_into_subcols(col_rectangles) # subcol1, subcol2, ...
 
         # For every subcolumn in the column
         for subcolumn in subcolumns:
