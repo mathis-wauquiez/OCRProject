@@ -21,6 +21,36 @@ class CanvasDimensions:
     center_y: int
 
 
+# Add this at module level (outside the class)
+def _process_single_svg(args):
+    """Worker function for parallel rendering."""
+    svg_obj, scale, dpi, bin_thresh = args
+    
+    # Render
+    svg_rendered = svg_obj.render(
+        dpi=dpi, 
+        output_format='L', 
+        scale=scale,
+        output_size=None
+    )
+    binary_svg = svg_rendered < bin_thresh
+    
+    # Compute barycenter
+    m00 = compute_moment(binary_svg, 0, 0)
+    h, w = binary_svg.shape
+    
+    if m00 == 0:
+        cy_pixel = h // 2
+        cx_pixel = w // 2
+    else:
+        cy = compute_moment(binary_svg, 1, 0) / m00
+        cx = compute_moment(binary_svg, 0, 1) / m00
+        cy_pixel = (cy + 1) * (h - 1) / 2
+        cx_pixel = (cx + 1) * (w - 1) / 2
+    
+    return binary_svg.shape, (cy_pixel, cx_pixel), binary_svg
+
+
 class Renderer(Dataset):
     """Renders SVG images centered on their barycenters."""
     
@@ -114,21 +144,15 @@ class Renderer(Dataset):
     #     return shapes, barycenters, cached_renders
 
 
+
+
     def _compute_barycenters(self) -> Tuple[List[Tuple[int, int]], List[Tuple[float, float]], List[np.ndarray]]:
         """Compute shapes and barycenters for all images, caching the renders."""
-
-        #? This is the multicore version of the above, commented function.
         
-        def process_svg(svg_obj):
-            """Worker function for parallel processing."""
-            binary_svg = self._render_single(svg_obj)
-            cy_pixel, cx_pixel = self._compute_barycenter(binary_svg)
-            return binary_svg.shape, (cy_pixel, cx_pixel), binary_svg
+        args_list = [(svg, self.scale, self.dpi, self.bin_thresh) for svg in self.svg_imgs]
         
-        n_cores = os.cpu_count()
-        
-        with ProcessPoolExecutor(max_workers=n_cores) as executor:
-            iterator = executor.map(process_svg, self.svg_imgs)
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+            iterator = executor.map(_process_single_svg, args_list)
             
             if self.verbose:
                 iterator = tqdm(iterator, total=len(self.svg_imgs), desc="Rendering", unit="img")
@@ -137,7 +161,6 @@ class Renderer(Dataset):
         
         shapes, barycenters, cached_renders = zip(*results)
         return list(shapes), list(barycenters), list(cached_renders)
-
 
 
     def _compute_extents(
