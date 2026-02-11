@@ -8,6 +8,10 @@ from .normalization import compute_moment
 
 from .svg import SVG
 
+from concurrent.futures import ProcessPoolExecutor
+import os
+
+
 @dataclass
 class CanvasDimensions:
     """Container for canvas dimension calculations."""
@@ -95,19 +99,45 @@ class Renderer(Dataset):
         return cy_pixel, cx_pixel
 
 
-    def _compute_barycenters(self) -> Tuple[List[Tuple[int, int]], List[Tuple[float, float]], List[np.ndarray]]:  # <-- MODIFIED
+    # def _compute_barycenters(self) -> Tuple[List[Tuple[int, int]], List[Tuple[float, float]], List[np.ndarray]]:
+    #     """Compute shapes and barycenters for all images, caching the renders."""
+    #     barycenters = []
+    #     shapes = []
+    #     cached_renders = []
+
+    #     for binary_svg in self._render_with_progress(self.svg_imgs):
+    #         cy_pixel, cx_pixel = self._compute_barycenter(binary_svg)
+    #         barycenters.append((cy_pixel, cx_pixel))
+    #         shapes.append(binary_svg.shape)
+    #         cached_renders.append(binary_svg)
+
+    #     return shapes, barycenters, cached_renders
+
+
+    def _compute_barycenters(self) -> Tuple[List[Tuple[int, int]], List[Tuple[float, float]], List[np.ndarray]]:
         """Compute shapes and barycenters for all images, caching the renders."""
-        barycenters = []
-        shapes = []
-        cached_renders = []
 
-        for binary_svg in self._render_with_progress(self.svg_imgs):
+        #? This is the multicore version of the above, commented function.
+        
+        def process_svg(svg_obj):
+            """Worker function for parallel processing."""
+            binary_svg = self._render_single(svg_obj)
             cy_pixel, cx_pixel = self._compute_barycenter(binary_svg)
-            barycenters.append((cy_pixel, cx_pixel))
-            shapes.append(binary_svg.shape)
-            cached_renders.append(binary_svg)
+            return binary_svg.shape, (cy_pixel, cx_pixel), binary_svg
+        
+        n_cores = os.cpu_count()
+        
+        with ProcessPoolExecutor(max_workers=n_cores) as executor:
+            iterator = executor.map(process_svg, self.svg_imgs)
+            
+            if self.verbose:
+                iterator = tqdm(iterator, total=len(self.svg_imgs), desc="Rendering", unit="img")
+            
+            results = list(iterator)
+        
+        shapes, barycenters, cached_renders = zip(*results)
+        return list(shapes), list(barycenters), list(cached_renders)
 
-        return shapes, barycenters, cached_renders
 
 
     def _compute_extents(

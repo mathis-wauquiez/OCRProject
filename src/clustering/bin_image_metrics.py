@@ -6,6 +6,8 @@ from ..registration.multiscale_registration import MultiscaleIC
 
 import torch
 
+import numpy as np
+import tqdm
 
 
 # At the end of this file there is:
@@ -39,34 +41,57 @@ def jaccard_index(img1, img2):
     return result.item() if torch.is_tensor(result) else result
 
 
+# def compute_hausdorff(img1_bin, img2_bin):
+#     """
+#     Proper Hausdorff distance using KD-tree.
+
+#     ---- EDWIN'S CODE ----
+#     """
+#     # Get coordinates
+#     coords1 = torch.nonzero(img1_bin, as_tuple=False).float()
+#     coords2 = torch.nonzero(img2_bin, as_tuple=False).float()
+    
+#     if len(coords1) == 0 or len(coords2) == 0:
+#         return float('inf')
+    
+#     # Convert to numpy for KD-tree (scipy doesn't work with torch)
+#     coords1_np = coords1.cpu().numpy()
+#     coords2_np = coords2.cpu().numpy()
+    
+#     from scipy.spatial import cKDTree
+    
+#     tree1 = cKDTree(coords1_np)
+#     tree2 = cKDTree(coords2_np)
+    
+#     # Query nearest neighbors
+#     dist1, _ = tree2.query(coords1_np, workers=-1)
+#     dist2, _ = tree1.query(coords2_np, workers=-1)
+    
+#     return float(max(dist1.max(), dist2.max()))
+
 def compute_hausdorff(img1_bin, img2_bin):
     """
-    Proper Hausdorff distance using KD-tree.
-
-    ---- EDWIN'S CODE ----
+    Hausdorff distance using distorch (Rony & Kervadec, MIDL 2025).
+    
+    Supports both single masks (H, W) and batched masks (B, H, W).
+    Returns float for single pair, (B,) tensor for batched.
     """
-    # Get coordinates
-    coords1 = torch.nonzero(img1_bin, as_tuple=False).float()
-    coords2 = torch.nonzero(img2_bin, as_tuple=False).float()
-    
-    if len(coords1) == 0 or len(coords2) == 0:
-        return float('inf')
-    
-    # Convert to numpy for KD-tree (scipy doesn't work with torch)
-    coords1_np = coords1.cpu().numpy()
-    coords2_np = coords2.cpu().numpy()
-    
-    from scipy.spatial import cKDTree
-    
-    tree1 = cKDTree(coords1_np)
-    tree2 = cKDTree(coords2_np)
-    
-    # Query nearest neighbors
-    dist1, _ = tree2.query(coords1_np, workers=-1)
-    dist2, _ = tree1.query(coords2_np, workers=-1)
-    
-    return float(max(dist1.max(), dist2.max()))
+    import distorch
 
+    m1 = img1_bin.bool()
+    m2 = img2_bin.bool()
+
+    # Handle empty masks
+    if m1.dim() == 2:
+        if not m1.any() or not m2.any():
+            return float('inf')
+    
+    metrics = distorch.boundary_metrics(m1, m2)
+    
+    if m1.dim() == 2:
+        return float(metrics.Hausdorff)
+    else:
+        return metrics.Hausdorff  # (B,) tensor
 
 
 class registeredMetric:
@@ -139,7 +164,7 @@ class registeredMetric:
                 return {metric_name: 999 for metric_name in self.metrics.keys()}
             I2 = T.warp(I2.unsqueeze(0))[0, 0]
 
-            mask = T.visibility_mask(I1.shape[1], I1.shape[2], delta=0)
+            mask = T.visibility_mask(I1.shape[1], I1.shape[2], delta=0).squeeze()
             I2[~mask] = 0
 
         I2_bin = I2 > 0.5
@@ -169,3 +194,143 @@ metrics_dict = {
 
 # Initialize the registered metric
 reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
+
+
+
+
+
+""" BELOW THIS LINE IS AI SLOP """
+
+#! ===============================
+
+def compute_distance_matrices_batched(
+    reg_metric, renderer, subdf, 
+    batch_size=64,   # pairs per batch — tune to your VRAM
+    device='cuda'
+):
+    """
+    Batched pairwise distance matrix computation.
+    
+    Instead of N² sequential IC registrations, we batch pairs of images
+    through the multiscale IC and compute all metrics in parallel.
+    """
+    indices = subdf.index.tolist()
+    N = len(indices)
+    metric_names = list(reg_metric.metrics.keys())
+    
+    distance_matrices = {key: np.zeros((N, N)) for key in metric_names}
+    
+    # ── Build all (i, j) pairs with i < j (symmetric) ──────────────────
+    if reg_metric.sym:
+        pairs = [(i, j) for i in range(N) for j in range(i + 1, N)]
+    else:
+        pairs = [(i, j) for i in range(N) for j in range(N) if i != j]
+    
+    n_pairs = len(pairs)
+    
+    # ── Process in batches ──────────────────────────────────────────────
+    for start in tqdm.tqdm(range(0, n_pairs, batch_size), 
+                           total=(n_pairs + batch_size - 1) // batch_size,
+                           desc=f"Batched IC (B={batch_size})"):
+        
+        batch_pairs = pairs[start : start + batch_size]
+        B = len(batch_pairs)
+        
+        # Stack image pairs → (B, 1, H, W)
+        I1_batch = torch.stack([renderer[indices[i]].to(device) for i, j in batch_pairs]).unsqueeze(1)
+        I2_batch = torch.stack([renderer[indices[j]].to(device) for i, j in batch_pairs]).unsqueeze(1)
+        
+        # ── Batched registration ────────────────────────────────────
+        try:
+            T = reg_metric.ic.run(I1_batch, I2_batch)  # (B,) transforms
+        except Exception:
+            # Fill with sentinel on failure
+            for i_loc, j_loc in batch_pairs:
+                for key in metric_names:
+                    distance_matrices[key][i_loc, j_loc] = 999
+                    if reg_metric.sym:
+                        distance_matrices[key][j_loc, i_loc] = 999
+            continue
+        
+        # Warp I2 → (B, 1, H, W)
+        I2_warped = T.warp(I2_batch)[:, 0]          # (B, H, W)
+        
+        # Visibility mask → (B, H, W)
+        H, W = I1_batch.shape[2], I1_batch.shape[3]
+        mask = T.visibility_mask(H, W, delta=0)      # (B, H, W)
+        I2_warped[~mask] = 0
+        
+        # Binarise
+        I1_bin = (I1_batch[:, 0] > 0.5)              # (B, H, W)
+        I2_bin = (I2_warped > 0.5)                    # (B, H, W)
+        
+        # ── Batched metrics ─────────────────────────────────────────
+        batch_metrics = _compute_metrics_batched(I1_bin, I2_bin, metric_names)
+        
+        # ── Symmetrise: also register I2→I1 ─────────────────────────
+        if reg_metric.sym:
+            try:
+                T_rev = reg_metric.ic.run(I2_batch, I1_batch)
+            except Exception:
+                T_rev = None
+            
+            if T_rev is not None:
+                I1_warped = T_rev.warp(I1_batch)[:, 0]
+                mask_rev = T_rev.visibility_mask(H, W, delta=0)
+                I1_warped[~mask_rev] = 0
+                I2_bin_rev = (I2_batch[:, 0] > 0.5)
+                I1_bin_rev = (I1_warped > 0.5)
+                batch_metrics_rev = _compute_metrics_batched(I2_bin_rev, I1_bin_rev, metric_names)
+                
+                # Average forward + reverse
+                for key in metric_names:
+                    batch_metrics[key] = (batch_metrics[key] + batch_metrics_rev[key]) / 2
+        
+        # ── Write to distance matrices ──────────────────────────────
+        for k, (i_loc, j_loc) in enumerate(batch_pairs):
+            for key in metric_names:
+                val = batch_metrics[key][k].item() if torch.is_tensor(batch_metrics[key]) else batch_metrics[key][k]
+                distance_matrices[key][i_loc, j_loc] = val
+                if reg_metric.sym:
+                    distance_matrices[key][j_loc, i_loc] = val
+    
+    # ── Diagonal ────────────────────────────────────────────────────────
+    for key in metric_names:
+        if key in ('dice', 'jaccard'):
+            np.fill_diagonal(distance_matrices[key], 1.0)
+        # hamming=0, hausdorff=0 on diagonal (already zero from np.zeros)
+    
+    return distance_matrices
+
+
+def _compute_metrics_batched(I1_bin, I2_bin, metric_names):
+    """
+    Compute all metrics for B pairs at once.
+    
+    I1_bin, I2_bin: (B, H, W) bool tensors.
+    Returns: dict[str → (B,) tensor or array]
+    """
+    B = I1_bin.shape[0]
+    results = {}
+    
+    if 'dice' in metric_names:
+        inter = (I1_bin & I2_bin).flatten(1).sum(1).float()
+        denom = I1_bin.flatten(1).sum(1).float() + I2_bin.flatten(1).sum(1).float() + 1e-8
+        results['dice'] = 2.0 * inter / denom
+    
+    if 'jaccard' in metric_names:
+        inter = (I1_bin & I2_bin).flatten(1).sum(1).float()
+        union = (I1_bin | I2_bin).flatten(1).sum(1).float() + 1e-8
+        results['jaccard'] = inter / union
+    
+    if 'hamming' in metric_names:
+        n_pixels = I1_bin.shape[1] * I1_bin.shape[2]
+        results['hamming'] = (I1_bin != I2_bin).flatten(1).sum(1).float() / n_pixels
+    
+    if 'hausdorff' in metric_names:
+        import distorch
+        hd = distorch.boundary_metrics(I1_bin, I2_bin).Hausdorff  # (B,)
+        results['hausdorff'] = hd
+    
+    return results
+
