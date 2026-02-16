@@ -169,7 +169,7 @@ class ReportItem:
     width: Optional[float] = None
     height: Optional[float] = None
     metadata: Optional[Dict] = field(default_factory=dict)
-    
+
     def __post_init__(self):
         """Validate report item"""
         valid_types = {'figure', 'text', 'image', 'table', 'raw_html', 'lazy'}
@@ -178,9 +178,23 @@ class ReportItem:
                 f"Invalid content_type '{self.content_type}'. "
                 f"Must be one of: {valid_types}"
             )
-        
+
         if self.metadata is None:
             self.metadata = {}
+
+
+@dataclass
+class ReportSection:
+    """A named section that groups multiple report items under one collapsible header.
+
+    Use via the ``AutoReport.section()`` context manager::
+
+        with report.section("Results"):
+            report.report_figure(fig)
+            report.report_table(df)
+    """
+    title: str
+    items: List[ReportItem] = field(default_factory=list)
 
 
 @dataclass
@@ -884,9 +898,15 @@ class AutoReport:
         
         # Initialize image optimizer
         self.image_optimizer = ImageOptimizer(self.config)
-        
+
         # Track opened figures for cleanup
         self._figures_to_close: List[plt.Figure] = []
+
+        # Sections support: ordered content that may contain ReportSection or
+        # standalone ReportItem entries.  The flat ``self.items`` list is kept
+        # in sync for backward compatibility.
+        self._content_order: List[Union[ReportItem, ReportSection]] = []
+        self._current_section: Optional[ReportSection] = None
     
     # ========================================================================
     # CONTEXT MANAGERS
@@ -917,7 +937,7 @@ class AutoReport:
     def batch_add(self):
         """
         Context manager for batch adding items with single progress update.
-        
+
         Usage:
             with report.batch_add():
                 report.report(...)
@@ -930,7 +950,66 @@ class AutoReport:
             added = len(self.items) - initial_count
             if added > 0:
                 self.logger.info(f"Batch added {added} items to report")
-    
+
+    @contextmanager
+    def section(self, title: str):
+        """
+        Context manager to group report items into a named section.
+
+        All ``report_*`` calls made inside the block are collected under a
+        single collapsible header in the HTML output.  Items added outside any
+        section remain standalone (one collapsible header each), preserving
+        full backward compatibility.
+
+        Usage::
+
+            with report.section("Analysis"):
+                report.report_figure(fig, title="Distribution")
+                report.report_table(df, title="Metrics")
+
+            # This item is standalone
+            report.report_text("Some note")
+
+        Args:
+            title: The section heading shown in the report.
+        """
+        if self._current_section is not None:
+            raise ReportError(
+                f"Cannot open section '{title}' – section "
+                f"'{self._current_section.title}' is already open. "
+                "Nested sections are not supported."
+            )
+
+        sec = ReportSection(title=title)
+        self._content_order.append(sec)
+        self._current_section = sec
+        self.logger.info(f"Opened section: {title}")
+        try:
+            yield sec
+        finally:
+            self._current_section = None
+            self.logger.info(
+                f"Closed section: {title} ({len(sec.items)} items)"
+            )
+
+    # ========================================================================
+    # INTERNAL HELPERS
+    # ========================================================================
+
+    def _add_item(self, item: ReportItem):
+        """Append *item* to the report, respecting the active section context.
+
+        * Maintains the flat ``self.items`` list for backward compatibility.
+        * Routes the item to the current ``ReportSection`` if one is open,
+          otherwise appends it as a standalone entry in ``_content_order``.
+        """
+        self.items.append(item)
+        self.metadata.item_count += 1
+        if self._current_section is not None:
+            self._current_section.items.append(item)
+        else:
+            self._content_order.append(item)
+
     # ========================================================================
     # VALIDATION
     # ========================================================================
@@ -971,8 +1050,7 @@ class AutoReport:
             # Check if object implements Reportable protocol
             if isinstance(content, Reportable):
                 item = content.to_report_item()
-                self.items.append(item)
-                self.metadata.item_count += 1
+                self._add_item(item)
                 self.logger.info(f"Added Reportable item: {item.title}")
                 return
             
@@ -1026,9 +1104,8 @@ class AutoReport:
                 height=height or fig.get_figheight(),
                 metadata={'kwargs': kwargs}
             )
-            
-            self.items.append(item)
-            self.metadata.item_count += 1
+
+            self._add_item(item)
             self._figures_to_close.append(fig)
             
             self.logger.info(f"✓ Added figure: {item.title}")
@@ -1053,9 +1130,8 @@ class AutoReport:
                 title=title,
                 metadata={'is_katex': is_katex, 'kwargs': kwargs}
             )
-            
-            self.items.append(item)
-            self.metadata.item_count += 1
+
+            self._add_item(item)
             
             preview = text[:50] + "..." if len(text) > 50 else text
             self.logger.info(f"✓ Added text: {title or preview}")
@@ -1093,9 +1169,8 @@ class AutoReport:
                 height=height,
                 metadata={'kwargs': kwargs}
             )
-            
-            self.items.append(item)
-            self.metadata.item_count += 1
+
+            self._add_item(item)
             
             self.logger.info(f"✓ Added image: {item.title}")
             
@@ -1141,9 +1216,8 @@ class AutoReport:
                     'kwargs': kwargs
                 }
             )
-            
-            self.items.append(item)
-            self.metadata.item_count += 1
+
+            self._add_item(item)
             
             self.logger.info(
                 f"✓ Added table: {item.title} "
@@ -1169,9 +1243,8 @@ class AutoReport:
                 title=title or 'HTML Section',
                 metadata={'kwargs': kwargs}
             )
-            
-            self.items.append(item)
-            self.metadata.item_count += 1
+
+            self._add_item(item)
             
             self.logger.info(f"✓ Added HTML content: {item.title}")
             
@@ -1417,20 +1490,9 @@ class AutoReport:
         
         try:
             self.logger.info(f"Starting HTML generation: {html_path}")
-            
-            # Prepare sections
-            sections = []
-            items_iter = self._get_progress_iterator(
-                self.items,
-                "Generating HTML"
-            )
-            
-            for item in items_iter:
-                section_content = self._render_html_item(item)
-                sections.append({
-                    'title': item.title or 'Untitled',
-                    'content': section_content
-                })
+
+            # Prepare sections — respects ReportSection grouping when present
+            sections = self._build_html_sections()
             
             # Prepare template context
             context = {
@@ -1468,6 +1530,49 @@ class AutoReport:
             self.logger.error(f"HTML generation failed: {e}")
             raise ReportGenerationError(f"Failed to generate HTML: {e}") from e
     
+    def _build_html_sections(self) -> List[Dict]:
+        """Build the sections list for Jinja / manual HTML rendering.
+
+        * If ``section()`` was used, ``_content_order`` mixes
+          ``ReportSection`` (grouped) and standalone ``ReportItem`` entries.
+        * If ``section()`` was never called, ``_content_order`` contains only
+          ``ReportItem`` entries — each becomes its own collapsible section,
+          which is identical to the old (pre-sections) behaviour.
+        """
+        # Fallback: nothing was ever added via report_* methods.
+        if not self._content_order and not self.items:
+            return []
+
+        # If _content_order is empty but items exist (direct append by legacy
+        # code), fall back to the flat list.
+        source = self._content_order if self._content_order else self.items
+
+        items_iter = self._get_progress_iterator(source, "Generating HTML")
+
+        sections: List[Dict] = []
+        for entry in items_iter:
+            if isinstance(entry, ReportSection):
+                content_parts: List[str] = []
+                for item in entry.items:
+                    if item.title:
+                        content_parts.append(
+                            f'<h3 style="color: #555; margin: 25px 0 10px 0; '
+                            f'padding-bottom: 6px; border-bottom: 1px solid #eee;">'
+                            f'{item.title}</h3>'
+                        )
+                    content_parts.append(self._render_html_item(item))
+                sections.append({
+                    'title': entry.title,
+                    'content': '\n'.join(content_parts),
+                })
+            else:
+                # Standalone ReportItem → its own collapsible section
+                sections.append({
+                    'title': entry.title or 'Untitled',
+                    'content': self._render_html_item(entry),
+                })
+        return sections
+
     def _render_html_item(self, item: ReportItem) -> str:
         """Render a single item to HTML"""
         try:
@@ -1558,7 +1663,50 @@ class AutoReport:
         
         return html
     
-    def generate_markdown(self, 
+    def _render_md_item(self, item: ReportItem, parts: List[str],
+                        fig_counter: int, img_counter: int,
+                        heading_level: str = '##') -> tuple:
+        """Render a single *item* to Markdown, appending strings to *parts*.
+
+        Returns the updated (fig_counter, img_counter) for filename uniqueness.
+        """
+        title = item.title or 'Untitled'
+        parts.append(f"\n{heading_level} {title}\n\n")
+
+        if item.content_type == 'figure':
+            fig_counter += 1
+            fig_filename = f"figure_{fig_counter}.png"
+            fig_path = self.output_dir / fig_filename
+            item.content.savefig(fig_path, bbox_inches='tight',
+                                 dpi=self.config.dpi)
+            parts.append(f"![Figure: {title}]({fig_filename})\n\n")
+
+        elif item.content_type == 'text':
+            if item.metadata.get('is_katex', False):
+                parts.append(f"$${item.content}$$\n\n")
+            else:
+                parts.append(f"{item.content}\n\n")
+
+        elif item.content_type == 'image':
+            if isinstance(item.content, (str, Path)):
+                fname = Path(item.content).name
+                parts.append(f"![{title}]({fname})\n\n")
+            else:
+                img_counter += 1
+                img_filename = f"image_{img_counter}.png"
+                img_path = self.output_dir / img_filename
+                item.content.save(img_path)
+                parts.append(f"![{title}]({img_filename})\n\n")
+
+        elif item.content_type == 'table':
+            parts.append(f"{item.content.to_markdown()}\n\n")
+
+        elif item.content_type == 'raw_html':
+            parts.append(f"```html\n{item.content}\n```\n\n")
+
+        return fig_counter, img_counter
+
+    def generate_markdown(self,
                          filename: Optional[str] = None) -> Path:
         """
         Generate a Markdown report.
@@ -1585,43 +1733,26 @@ class AutoReport:
 
 """
             
-            items_iter = self._get_progress_iterator(
-                self.items,
-                "Generating Markdown"
-            )
-            
-            for i, item in enumerate(items_iter):
-                title = item.title or f"Item {i+1}"
-                markdown += f"\n## {title}\n\n"
-                
-                if item.content_type == 'figure':
-                    fig_filename = f"figure_{i+1}.png"
-                    fig_path = self.output_dir / fig_filename
-                    item.content.savefig(fig_path, bbox_inches='tight', 
-                                        dpi=self.config.dpi)
-                    markdown += f"![Figure: {title}]({fig_filename})\n\n"
-                    
-                elif item.content_type == 'text':
-                    if item.metadata.get('is_katex', False):
-                        markdown += f"$${item.content}$$\n\n"
-                    else:
-                        markdown += f"{item.content}\n\n"
-                        
-                elif item.content_type == 'image':
-                    if isinstance(item.content, (str, Path)):
-                        filename = Path(item.content).name
-                        markdown += f"![{title}]({filename})\n\n"
-                    else:
-                        img_filename = f"image_{i+1}.png"
-                        img_path = self.output_dir / img_filename
-                        item.content.save(img_path)
-                        markdown += f"![{title}]({img_filename})\n\n"
-                        
-                elif item.content_type == 'table':
-                    markdown += f"{item.content.to_markdown()}\n\n"
-                    
-                elif item.content_type == 'raw_html':
-                    markdown += f"```html\n{item.content}\n```\n\n"
+            source = self._content_order if self._content_order else self.items
+            items_iter = self._get_progress_iterator(source, "Generating Markdown")
+            fig_counter = 0
+            img_counter = 0
+
+            for entry in items_iter:
+                if isinstance(entry, ReportSection):
+                    markdown += f"\n## {entry.title}\n\n"
+                    for item in entry.items:
+                        fig_counter, img_counter = self._render_md_item(
+                            item, markdown_parts := [], fig_counter, img_counter,
+                            heading_level='###',
+                        )
+                        markdown += ''.join(markdown_parts)
+                else:
+                    fig_counter, img_counter = self._render_md_item(
+                        entry, markdown_parts := [], fig_counter, img_counter,
+                        heading_level='##',
+                    )
+                    markdown += ''.join(markdown_parts)
             
             with open(md_path, 'w', encoding='utf-8') as f:
                 f.write(markdown)
@@ -1647,6 +1778,8 @@ class AutoReport:
             
             self.items.clear()
             self._figures_to_close.clear()
+            self._content_order.clear()
+            self._current_section = None
             self.metadata.item_count = 0
             
             self.logger.info("✓ Report cleared")
@@ -1674,10 +1807,27 @@ class AutoReport:
         for content_type, count in sorted(type_counts.items()):
             print(f"  - {content_type:12s}: {count}")
         
-        print(f"\nItems:")
-        for i, item in enumerate(self.items, 1):
-            title = item.title or f"Item {i}"
-            print(f"  {i:3d}. [{item.content_type:10s}] {title}")
+        # Show section structure if sections were used, otherwise flat list
+        has_sections = any(isinstance(e, ReportSection) for e in self._content_order)
+        if has_sections:
+            print(f"\nSections:")
+            idx = 1
+            for entry in self._content_order:
+                if isinstance(entry, ReportSection):
+                    print(f"  {idx:3d}. [section    ] {entry.title} ({len(entry.items)} items)")
+                    for j, item in enumerate(entry.items, 1):
+                        title = item.title or f"Item {j}"
+                        print(f"       {j:3d}. [{item.content_type:10s}] {title}")
+                    idx += 1
+                else:
+                    title = entry.title or f"Item {idx}"
+                    print(f"  {idx:3d}. [{entry.content_type:10s}] {title}")
+                    idx += 1
+        else:
+            print(f"\nItems:")
+            for i, item in enumerate(self.items, 1):
+                title = item.title or f"Item {i}"
+                print(f"  {i:3d}. [{item.content_type:10s}] {title}")
         
         print(f"\nConfiguration:")
         print(f"  - DPI:              {self.config.dpi}")
@@ -1691,10 +1841,25 @@ class AutoReport:
     
     def to_dict(self) -> Dict:
         """Serialize report metadata for testing/debugging"""
+        def _serialize_entry(entry):
+            if isinstance(entry, ReportSection):
+                return {
+                    'type': 'section',
+                    'title': entry.title,
+                    'items': [
+                        {'type': it.content_type, 'title': it.title, 'metadata': it.metadata}
+                        for it in entry.items
+                    ],
+                }
+            return {'type': entry.content_type, 'title': entry.title, 'metadata': entry.metadata}
+
+        content = self._content_order if self._content_order else self.items
         return {
             'title': self.title,
             'author': self.author,
             'metadata': self.metadata.to_dict(),
+            'content': [_serialize_entry(e) for e in content],
+            # Flat list kept for backward compatibility
             'items': [
                 {
                     'type': item.content_type,

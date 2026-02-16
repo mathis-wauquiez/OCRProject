@@ -873,22 +873,24 @@ class graphClusteringSweep(AutoReport):
         # Save summary table of best results per HOG config
         best_per_config = results_df.loc[results_df.groupby('hog_config')['adjusted_rand_index'].idxmax()]
         best_per_config_sorted = best_per_config.sort_values('adjusted_rand_index', ascending=False)
-        self.report_table(best_per_config_sorted, title="Best Results per HOG Configuration")
-        
-        # Report tables for each HOG config
-        for config_name in hog_configs.keys():
-            config_subset = results_df[results_df['hog_config'] == config_name]
-            
-            metric_names = [col for col in config_subset.columns 
-                        if col not in ['hog_config', 'cell_size', 'grdt_sigma', 'num_bins', 'epsilon', 'gamma']]
-            
-            for metric in metric_names:
-                pivot = config_subset.pivot_table(values=metric, index='gamma', columns='epsilon')
-                self.report_table(pivot, title=f'{metric} (gamma × epsilon) - {config_name}')
-        
-        # Report heatmaps comparing all configurations
-        fig = self.report_hog_comparison_heatmaps(results_df)
-        self.report_figure(fig, title="HOG Configuration Comparison")
+
+        with self.section("HOG Configuration Sweep"):
+            self.report_table(best_per_config_sorted, title="Best Results per HOG Configuration")
+
+            # Report tables for each HOG config
+            for config_name in hog_configs.keys():
+                config_subset = results_df[results_df['hog_config'] == config_name]
+
+                metric_names = [col for col in config_subset.columns
+                            if col not in ['hog_config', 'cell_size', 'grdt_sigma', 'num_bins', 'epsilon', 'gamma']]
+
+                for metric in metric_names:
+                    pivot = config_subset.pivot_table(values=metric, index='gamma', columns='epsilon')
+                    self.report_table(pivot, title=f'{metric} (gamma × epsilon) - {config_name}')
+
+            # Report heatmaps comparing all configurations
+            fig = self.report_hog_comparison_heatmaps(results_df)
+            self.report_figure(fig, title="HOG Configuration Comparison")
         
         # Use best configuration for detailed reporting
         dataframe['histogram'] = list(best_overall_config['features'].cpu().numpy())
@@ -1024,12 +1026,15 @@ class graphClusteringSweep(AutoReport):
                 dataframe, 'membership_pre_split'
             )
 
-            # ── Report "All Clusters Analysis (Before Splitting)" ──
-            self._report_clusters_section(
-                dataframe, 'membership_pre_split', pre_purity_df,
-                pre_representatives, graph,
-                title_prefix="All Clusters Analysis (Before Splitting)"
-            )
+            # ─────────────────────────────────────────────
+            #  Section 1: Pre-Split Clusters
+            # ─────────────────────────────────────────────
+            with self.section("Clusters (Pre-Split)"):
+                self._report_clusters_section(
+                    dataframe, 'membership_pre_split', pre_purity_df,
+                    pre_representatives, graph,
+                    title_prefix="All Clusters Analysis (Before Splitting)"
+                )
 
             # ─────────────────────────────────────────────
             #  CLUSTER SPLITTING via hierarchical sub-clustering
@@ -1045,32 +1050,30 @@ class graphClusteringSweep(AutoReport):
                     post_split_membership, index=dataframe.index
                 )
 
-                # ── Report sweep results (if >1 threshold) ──
-                if len(self.split_thresholds) > 1:
-                    self.report_split_sweep(sweep_results_df, best_threshold)
-
-                # ── Report before / after metrics ──
-                self.report_split_comparison(
-                    dataframe, pre_split_membership, post_split_membership,
-                    best_split_log, best_threshold
-                )
-
-                # ── Visual display: which clusters were split and how ──
-                self.report_split_visualization(
-                    dataframe, best_split_log, best_threshold
-                )
-
-                # Compute purity & representatives for POST-SPLIT
+                # Compute purity & representatives for POST-SPLIT (before reporting)
                 purity_dataframe, representatives = self._compute_purity_and_representatives(
                     dataframe, 'membership'
                 )
 
-                # ── Report "All Clusters Analysis After Splitting" ──
-                self._report_clusters_section(
-                    dataframe, 'membership', purity_dataframe,
-                    representatives, graph,
-                    title_prefix="All Clusters Analysis After Splitting"
-                )
+                # Section 2: Cluster Splitting
+                with self.section("Cluster Splitting"):
+                    if len(self.split_thresholds) > 1:
+                        self.report_split_sweep(sweep_results_df, best_threshold)
+
+                    self.report_split_comparison(
+                        dataframe, pre_split_membership, post_split_membership,
+                        best_split_log, best_threshold
+                    )
+
+                    self.report_split_visualization(
+                        dataframe, best_split_log, best_threshold
+                    )
+
+                    self._report_clusters_section(
+                        dataframe, 'membership', purity_dataframe,
+                        representatives, graph,
+                        title_prefix="All Clusters Analysis After Splitting"
+                    )
             else:
                 best_threshold = None
                 # No splitting — use Leiden membership directly
@@ -1103,14 +1106,12 @@ class graphClusteringSweep(AutoReport):
                 **best_metrics
             }])
 
-            #? Compute the completeness stats
-
             label_data = []
 
             for label, label_rows in tqdm(dataframe.groupby(self.target_lbl), desc="Computing completeness", colour='blue'):
                 label_size = len(label_rows)
                 cluster_counts = label_rows['membership'].value_counts()
-                
+
                 cluster_probs = cluster_counts / label_size
                 label_entropy = entropy(cluster_probs, base=2)
                 if len(cluster_counts) > 1:
@@ -1118,7 +1119,7 @@ class graphClusteringSweep(AutoReport):
                 else:
                     label_ne = 0
                 best_share = cluster_counts.iloc[0] / label_size
-                
+
                 label_data.append({
                     'Label': label,
                     'Size': label_size,
@@ -1131,163 +1132,148 @@ class graphClusteringSweep(AutoReport):
 
             label_dataframe = pd.DataFrame(label_data)
 
-
-            # == Report general metrics about the clustering ==
-
-            # a. Metrics
-            self.report_table(best_metrics_df.T, title=f'Best Parameters (ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_t={best_threshold})')
-
-            # b. Summary
-            self.report_executive_summary(dataframe, purity_dataframe, label_dataframe, 
-                                best_epsilon, best_gamma, best_split_threshold=best_threshold)
-
-            # b. Connectivity
-            self.report(matches_per_treshold(nlfa, best_epsilon), title="Average number of matches = f(epsilon)")
-
-            # c. Cluster size distribution
-            self.report(size_distribution_figure(dataframe['membership'], dataframe[self.target_lbl]), title="Cluster Size Distribution")
-
-            # d. Purity - share that the dominant label takes in each cluster
-
-            self.report_figure(purity_figure(purity_dataframe), title="Purity of the clusters")
-
-            # e. Completeness measure - across how much clusters does one label spread?
-
-            self.report_figure(completeness_figure(label_dataframe), title="Compleness")
-
-            # f. Happax statistics
-
-            # Find singleton clusters
+            # Find singleton clusters (needed by both metrics and hapax sections)
             cluster_sizes = dataframe['membership'].value_counts()
             hapax_clusters = cluster_sizes[cluster_sizes == 1].index
             hapax_df = dataframe[dataframe['membership'].isin(hapax_clusters)]
 
-            # Statistics
-            hapax_stats = pd.DataFrame({
-                'Count': [len(hapax_df)],
-                'Percentage': [100 * len(hapax_df) / len(dataframe)],
-                'Unique_Labels': [hapax_df[self.target_lbl].nunique()]
-            })
-            self.report_table(hapax_stats, title="Hapax (Singleton Clusters)")
+            # ─────────────────────────────────────────────
+            #  Section 3: Summary & Metrics
+            # ─────────────────────────────────────────────
+            with self.section("Summary & Metrics"):
+                self.report_table(best_metrics_df.T, title=f'Best Parameters (ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_t={best_threshold})')
 
-            # g. Stats about unknown characters
+                self.report_executive_summary(dataframe, purity_dataframe, label_dataframe,
+                                    best_epsilon, best_gamma, best_split_threshold=best_threshold)
 
-            unknown_df = dataframe[dataframe[self.target_lbl] == UNKNOWN_LABEL]
-            unknown_stats = pd.DataFrame({
-                'Total Unknown': [len(unknown_df)],
-                'Percentage': [100 * len(unknown_df) / len(dataframe)],
-                'Clusters Containing Unknown': [unknown_df['membership'].nunique()],
-                'Pure Unknown Clusters': [(dataframe.groupby('membership')[self.target_lbl]
-                                        .apply(lambda x: (x == UNKNOWN_LABEL).all())).sum()]
-            })
-            self.report_table(unknown_stats, title="Unknown Character Statistics (▯)")
-            
-            # == Report random instances of characters and their NNs ==
+                self.report(matches_per_treshold(nlfa, best_epsilon), title="Average number of matches = f(epsilon)")
 
-            nn_examples_html = '<div style="display: grid; gap: 30px;">'
+                self.report(size_distribution_figure(dataframe['membership'], dataframe[self.target_lbl]), title="Cluster Size Distribution")
 
-            for i in tqdm(range(30), desc="Random NN examples", colour='cyan'):
-                idx = np.random.randint(len(dataframe))
-                
-                fig = plot_nearest_neighbors(
-                    query_idx=idx,
-                    dataframe=dataframe,
-                    dissimilarities=dissimilarities,
-                    graph=graph,
-                    n_to_show=23
-                )
-                
-                img_tag = self._save_figure(fig, prefix="nn_example")
-                
-                nn_examples_html += f'''
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <h3 style="color: #667eea; margin-top: 0;">Example {i+1}: Nearest Neighbors for Sample {idx}</h3>
-                    {img_tag}
-                </div>
-                '''
+                self.report_figure(purity_figure(purity_dataframe), title="Purity of the clusters")
 
-            nn_examples_html += '</div>'
+                self.report_figure(completeness_figure(label_dataframe), title="Completeness")
 
-            self.report_raw_html(nn_examples_html, title="Random Nearest Neighbor Examples (10 samples)")
+                # Hapax statistics
+                hapax_stats = pd.DataFrame({
+                    'Count': [len(hapax_df)],
+                    'Percentage': [100 * len(hapax_df) / len(dataframe)],
+                    'Unique_Labels': [hapax_df[self.target_lbl].nunique()]
+                })
+                self.report_table(hapax_stats, title="Hapax (Singleton Clusters)")
 
+                # Unknown character statistics
+                unknown_df = dataframe[dataframe[self.target_lbl] == UNKNOWN_LABEL]
+                unknown_stats = pd.DataFrame({
+                    'Total Unknown': [len(unknown_df)],
+                    'Percentage': [100 * len(unknown_df) / len(dataframe)],
+                    'Clusters Containing Unknown': [unknown_df['membership'].nunique()],
+                    'Pure Unknown Clusters': [(dataframe.groupby('membership')[self.target_lbl]
+                                            .apply(lambda x: (x == UNKNOWN_LABEL).all())).sum()]
+                })
+                self.report_table(unknown_stats, title="Unknown Character Statistics (▯)")
 
-            # == Report some examples on specific instances of Hanzi ==
+            # ─────────────────────────────────────────────
+            #  Section 4: Examples
+            # ─────────────────────────────────────────────
+            with self.section("Examples"):
+                # Random nearest neighbor examples
+                nn_examples_html = '<div style="display: grid; gap: 30px;">'
 
-            match_examples_html = '<div style="display: grid; gap: 30px;">'
+                for i in tqdm(range(30), desc="Random NN examples", colour='cyan'):
+                    idx = np.random.randint(len(dataframe))
 
-            for i in tqdm(range(30), desc="Random match figures", colour='yellow'):
-                fig1, fig2, idx = random_match_figure(self.featureMatcher, dataframe['histogram'], best_epsilon, svgs=dataframe['svg'])
+                    fig = plot_nearest_neighbors(
+                        query_idx=idx,
+                        dataframe=dataframe,
+                        dissimilarities=dissimilarities,
+                        graph=graph,
+                        n_to_show=23
+                    )
 
-                match_examples_html += f'''
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <h3 style="color: #667eea; margin-top: 0;">Example {i+1}: Sample {idx}</h3>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                        <div>
-                            <h4>Distribution</h4>
-                            <img src="data:image/png;base64,{_get_b64(fig1)}" style="max-width: 100%; height: auto;">
-                        </div>
-                        <div>
-                            <h4>Matches</h4>
-                            <img src="data:image/png;base64,{_get_b64(fig2)}" style="max-width: 100%; height: auto;">
+                    img_tag = self._save_figure(fig, prefix="nn_example")
+
+                    nn_examples_html += f'''
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h3 style="color: #667eea; margin-top: 0;">Example {i+1}: Nearest Neighbors for Sample {idx}</h3>
+                        {img_tag}
+                    </div>
+                    '''
+
+                nn_examples_html += '</div>'
+                self.report_raw_html(nn_examples_html, title="Random Nearest Neighbor Examples (10 samples)")
+
+                # Random match examples
+                match_examples_html = '<div style="display: grid; gap: 30px;">'
+
+                for i in tqdm(range(30), desc="Random match figures", colour='yellow'):
+                    fig1, fig2, idx = random_match_figure(self.featureMatcher, dataframe['histogram'], best_epsilon, svgs=dataframe['svg'])
+
+                    match_examples_html += f'''
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h3 style="color: #667eea; margin-top: 0;">Example {i+1}: Sample {idx}</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                            <div>
+                                <h4>Distribution</h4>
+                                <img src="data:image/png;base64,{_get_b64(fig1)}" style="max-width: 100%; height: auto;">
+                            </div>
+                            <div>
+                                <h4>Matches</h4>
+                                <img src="data:image/png;base64,{_get_b64(fig2)}" style="max-width: 100%; height: auto;">
+                            </div>
                         </div>
                     </div>
-                </div>
-                '''
+                    '''
 
-            match_examples_html += '</div>'
+                match_examples_html += '</div>'
+                self.report_raw_html(match_examples_html, title="Random Match Examples (10 samples)")
 
-            self.report_raw_html(match_examples_html, title="Random Match Examples (10 samples)")
+            # ─────────────────────────────────────────────
+            #  Section 5: Hapax Analysis
+            # ─────────────────────────────────────────────
+            with self.section("Hapax Analysis"):
+                # Hapax nearest neighbor examples
+                idxs = list(np.random.permutation(hapax_df.index))[:10]
+                hapax_nn_html = '<div style="display: grid; gap: 30px;">'
 
+                for idx in tqdm(idxs, desc="Hapax NN examples", colour='red'):
+                    fig = plot_nearest_neighbors(
+                        query_idx=idx,
+                        dataframe=dataframe,
+                        dissimilarities=dissimilarities,
+                        graph=graph,
+                        n_to_show=23
+                    )
 
-            # == Hapax Report ==
-
-            # a. NNs
-
-            idxs = list(np.random.permutation(hapax_df.index))[:10]
-            hapax_nn_html = '<div style="display: grid; gap: 30px;">'
-
-            for idx in tqdm(idxs, desc="Hapax NN examples", colour='red'):            
-                fig = plot_nearest_neighbors(
-                    query_idx=idx,
-                    dataframe=dataframe,
-                    dissimilarities=dissimilarities,
-                    graph=graph,
-                    n_to_show=23
-                )
-                
-                hapax_nn_html += f'''
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <h3 style="color: #667eea; margin-top: 0;">Hapax Example - Sample {idx}</h3>
-                    <img src="data:image/png;base64,{_get_b64(fig)}" style="max-width: 100%; height: auto;">
-                </div>
-                '''
-
-            hapax_nn_html += '</div>'
-
-            self.report_raw_html(hapax_nn_html, title="Hapax Nearest Neighbor Examples (10 samples)")
-
-            
-            # b. All Happax
-
-            html_parts = ['<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px;">']
-            
-            for idx, row in hapax_df.iterrows():
-                svg_string = row['svg'].to_string()
-                label = row[self.target_lbl]
-                
-                html_parts.append(f'''
-                <div style="border: 1px solid #ddd; padding: 10px; text-align: center; border-radius: 5px;">
-                    <div style="width: 100px; height: 100px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-                        {svg_string}
+                    hapax_nn_html += f'''
+                    <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h3 style="color: #667eea; margin-top: 0;">Hapax Example - Sample {idx}</h3>
+                        <img src="data:image/png;base64,{_get_b64(fig)}" style="max-width: 100%; height: auto;">
                     </div>
-                    <div style="margin-top: 5px; font-size: 11px; font-weight: bold;">{label}</div>
-                    <div style="font-size: 9px; color: #666;">idx: {idx}</div>
-                </div>
-                ''')
-            
-            html_parts.append('</div>')
-            
-            self.report_raw_html(''.join(html_parts), title=f"All Hapax ({len(hapax_df)} items)")
+                    '''
+
+                hapax_nn_html += '</div>'
+                self.report_raw_html(hapax_nn_html, title="Hapax Nearest Neighbor Examples (10 samples)")
+
+                # All hapax items
+                html_parts = ['<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 15px;">']
+
+                for idx, row in hapax_df.iterrows():
+                    svg_string = row['svg'].to_string()
+                    label = row[self.target_lbl]
+
+                    html_parts.append(f'''
+                    <div style="border: 1px solid #ddd; padding: 10px; text-align: center; border-radius: 5px;">
+                        <div style="width: 100px; height: 100px; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
+                            {svg_string}
+                        </div>
+                        <div style="margin-top: 5px; font-size: 11px; font-weight: bold;">{label}</div>
+                        <div style="font-size: 9px; color: #666;">idx: {idx}</div>
+                    </div>
+                    ''')
+
+                html_parts.append('</div>')
+                self.report_raw_html(''.join(html_parts), title=f"All Hapax ({len(hapax_df)} items)")
 
             #! == Save the label representatives for Edwin ==
             
