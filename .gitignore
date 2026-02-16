@@ -22,3 +22,6 @@ OCR_Pipeline_Results.pptx
 /hydra_outputs
 /report_figures
 /preprocessing_outputs
+/codesave
+*.mlmodel
+/notebooks/codesave

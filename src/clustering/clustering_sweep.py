@@ -1,4 +1,3 @@
-
 # graph-related
 import networkx as nx
 import igraph as ig
@@ -11,6 +10,8 @@ import pandas as pd
 
 # sci-stuff
 from scipy.stats import entropy
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
 
 # path things
 from pathlib import Path
@@ -18,7 +19,7 @@ from pathlib import Path
 # type hinting
 from .graph_clustering import communityDetectionBase
 from .feature_matching import featureMatching
-from typing import List, Dict
+from typing import List, Dict, Optional
 from .params import featureMatchingParameters
 
 # Reporting
@@ -36,6 +37,11 @@ import base64
 # actual stuff related to computing
 from src.patch_processing.configs import get_hog_cfg
 from src.patch_processing.hog import HOG
+
+# Cluster splitting
+from src.clustering.bin_image_metrics import (
+    compute_hausdorff, registeredMetric, compute_distance_matrices_batched
+)
 
 UNKNOWN_LABEL = '▯'  # U+25AF - represents unrecognized characters
 
@@ -73,6 +79,13 @@ class graphClusteringSweep(AutoReport):
             grdt_sigmas: None | List[float] = None,
             nums_bins: None | List[int] = None,
 
+            # ── Cluster splitting parameters ──
+            split_thresholds: Optional[List[float]] = None,  # default [21.5]; pass list to sweep
+            split_linkage_method: str = 'average',
+            split_min_cluster_size: int = 2,
+            split_batch_size: int = 256,
+            split_render_scale: float = 0.3,
+            split_metrics: Optional[Dict[str, callable]] = None,
 
             embed_images: bool = False,  # False = save as files
             image_dpi: int = 100,
@@ -120,6 +133,14 @@ class graphClusteringSweep(AutoReport):
         self.target_lbl         = target_lbl
         self.keep_reciprocal    = keep_reciprocal
         self.device             = device
+
+        # ── Cluster splitting config ──
+        self.split_thresholds       = split_thresholds if split_thresholds is not None else [21.5]
+        self.split_linkage_method   = split_linkage_method
+        self.split_min_cluster_size = split_min_cluster_size
+        self.split_batch_size       = split_batch_size
+        self.split_render_scale     = split_render_scale
+        self.split_metrics          = split_metrics
 
         self.embed_images = embed_images
         self.image_dpi = image_dpi
@@ -188,6 +209,517 @@ class graphClusteringSweep(AutoReport):
         G.add_weighted_edges_from(edges_list)
 
         return G, edges
+
+    # ================================================================
+    #  CLUSTER SPLITTING
+    # ================================================================
+
+    def _compute_cluster_linkages(self, dataframe, partition_membership, renderer):
+        """
+        Expensive step (done once): compute pairwise Hausdorff distances
+        per Leiden cluster and build linkage matrices.
+
+        Returns
+        -------
+        cluster_linkages : dict[int, dict]
+            {cluster_id: {'indices': np.ndarray, 'linkage': np.ndarray, 'size': int}}
+            For clusters below split_min_cluster_size, 'linkage' is None.
+        """
+        metrics_dict = {'hausdorff': compute_hausdorff}
+        if self.split_metrics is not None:
+            metrics_dict.update(self.split_metrics)
+
+        reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
+
+        membership = np.asarray(partition_membership)
+        cluster_linkages = {}
+
+        for cid in tqdm(np.unique(membership), desc="Computing cluster linkages (Hausdorff)", colour="yellow"):
+            idx = np.where(membership == cid)[0]
+            size = len(idx)
+
+            if size < self.split_min_cluster_size:
+                cluster_linkages[cid] = dict(indices=idx, linkage=None, size=size)
+                continue
+
+            subdf = dataframe.iloc[idx]
+            D_dict = compute_distance_matrices_batched(
+                reg_metric, renderer, subdf,
+                batch_size=self.split_batch_size,
+            )
+            D = D_dict['hausdorff']
+            condensed = squareform(D, checks=False)
+            # Replace NaN / inf with a large finite value so linkage doesn't crash
+            bad_mask = ~np.isfinite(condensed)
+            if bad_mask.any():
+                finite_max = np.nanmax(condensed[np.isfinite(condensed)]) if np.isfinite(condensed).any() else 1.0
+                condensed[bad_mask] = finite_max * 10
+            Z = linkage(condensed, method=self.split_linkage_method)
+
+            cluster_linkages[cid] = dict(indices=idx, linkage=Z, size=size)
+
+        return cluster_linkages
+
+    def _apply_split_threshold(self, cluster_linkages, threshold):
+        """
+        Cheap step: cut every pre-computed linkage at the given threshold.
+
+        Returns
+        -------
+        new_membership : np.ndarray[int]
+        split_log : list[dict]
+        """
+        # figure out total number of samples from the indices
+        all_indices = np.concatenate([v['indices'] for v in cluster_linkages.values()])
+        n_total = all_indices.max() + 1
+        new_membership = np.full(n_total, -1, dtype=int)
+        split_log = []
+        next_id = 0
+
+        for cid, info in cluster_linkages.items():
+            idx = info['indices']
+            Z = info['linkage']
+
+            if Z is None:
+                # cluster too small to split
+                new_membership[idx] = next_id
+                split_log.append(dict(
+                    original_cluster=int(cid), original_size=info['size'],
+                    n_subclusters=1, subcluster_sizes=[info['size']],
+                ))
+                next_id += 1
+                continue
+
+            sub_labels = fcluster(Z, threshold, criterion='distance')
+            n_sub = len(np.unique(sub_labels))
+            sub_sizes = [int((sub_labels == s).sum()) for s in np.unique(sub_labels)]
+
+            for s in np.unique(sub_labels):
+                new_membership[idx[sub_labels == s]] = next_id
+                next_id += 1
+
+            split_log.append(dict(
+                original_cluster=int(cid), original_size=info['size'],
+                n_subclusters=n_sub, subcluster_sizes=sub_sizes,
+            ))
+
+        assert (new_membership >= 0).all(), "Unassigned samples after splitting!"
+        return new_membership, split_log
+
+    def sweep_split_thresholds(self, dataframe, partition_membership, renderer):
+        """
+        Compute linkages once, then sweep over all split_thresholds.
+
+        Returns
+        -------
+        best_threshold : float
+        best_membership : np.ndarray
+        best_split_log : list[dict]
+        sweep_results_df : pd.DataFrame   (metrics for each threshold)
+        cluster_linkages : dict            (reusable linkage data)
+        """
+        # 1. Expensive: compute linkages once
+        cluster_linkages = self._compute_cluster_linkages(
+            dataframe, partition_membership, renderer
+        )
+
+        # 2. Cheap: sweep thresholds
+        sweep_results = []
+        best_score = -np.inf
+        best_threshold = self.split_thresholds[0]
+        best_membership = None
+        best_split_log = None
+
+        for threshold in tqdm(self.split_thresholds, desc="Split threshold sweep", colour="magenta"):
+            membership, split_log = self._apply_split_threshold(cluster_linkages, threshold)
+            metrics = self._evaluate_membership(
+                target_labels=dataframe[self.target_lbl],
+                membership=membership.tolist()
+            )
+            n_clusters = len(np.unique(membership))
+            n_split = sum(1 for entry in split_log if entry['n_subclusters'] > 1)
+
+            sweep_results.append({
+                'split_threshold': threshold,
+                'n_clusters_post_split': n_clusters,
+                'n_clusters_actually_split': n_split,
+                **metrics,
+            })
+
+            score = metrics.get('adjusted_rand_index', 0)
+            if score > best_score:
+                best_score = score
+                best_threshold = threshold
+                best_membership = membership
+                best_split_log = split_log
+
+        sweep_results_df = pd.DataFrame(sweep_results)
+        return best_threshold, best_membership, best_split_log, sweep_results_df, cluster_linkages
+
+    def report_split_sweep(self, sweep_results_df, best_threshold):
+        """
+        Report the split threshold sweep: metrics vs threshold curves + table.
+        """
+        import seaborn as sns
+
+        self.report_table(
+            sweep_results_df.set_index('split_threshold'),
+            title="Split Threshold Sweep — All Metrics"
+        )
+
+        # ── Metric curves vs threshold ──
+        _keep_metrics = {
+            'adjusted_rand_index', 'normalized_mutual_info', 'adjusted_mutual_info',
+            'homogeneity', 'completeness', 'purity', 'v_measure',
+        }
+        metric_cols = [c for c in sweep_results_df.columns
+                       if c in _keep_metrics]
+
+        fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+
+        # Left: clustering quality metrics
+        ax = axes[0]
+        for col in metric_cols:
+            ax.plot(sweep_results_df['split_threshold'], sweep_results_df[col],
+                    marker='o', label=col, markersize=4)
+        ax.axvline(best_threshold, color='red', linestyle='--', alpha=0.7,
+                   label=f'best = {best_threshold}')
+        ax.set_xlabel('Split Threshold')
+        ax.set_ylabel('Score')
+        ax.set_title('Clustering Metrics vs Split Threshold')
+        ax.legend(fontsize=7, loc='best')
+        ax.grid(alpha=0.3)
+
+        # Right: number of clusters
+        ax = axes[1]
+        ax.plot(sweep_results_df['split_threshold'],
+                sweep_results_df['n_clusters_post_split'],
+                marker='s', color='#667eea', label='total clusters')
+        ax.plot(sweep_results_df['split_threshold'],
+                sweep_results_df['n_clusters_actually_split'],
+                marker='^', color='#f5576c', label='clusters that were split')
+        ax.axvline(best_threshold, color='red', linestyle='--', alpha=0.7)
+        ax.set_xlabel('Split Threshold')
+        ax.set_ylabel('Count')
+        ax.set_title('Number of Clusters vs Split Threshold')
+        ax.legend()
+        ax.grid(alpha=0.3)
+
+        plt.tight_layout()
+        self.report_figure(fig, title="Split Threshold Sweep")
+
+    def report_split_comparison(self, dataframe, pre_membership, post_membership, split_log, best_threshold):
+        """
+        Generate a before / after report section for cluster splitting.
+        """
+        split_log_df = pd.DataFrame(split_log)
+
+        n_pre  = len(np.unique(pre_membership))
+        n_post = len(np.unique(post_membership))
+        n_split = int((split_log_df['n_subclusters'] > 1).sum())
+        max_sub = int(split_log_df['n_subclusters'].max())
+
+        # ── Executive card ──
+        summary_html = f"""
+        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                    color: white; padding: 30px; border-radius: 10px; margin: 20px 0;">
+            <h2 style="margin: 0 0 15px 0;">🔪 Cluster Splitting Summary</h2>
+            <p>Best threshold: <strong>{best_threshold}</strong> | 
+               Linkage: <strong>{self.split_linkage_method}</strong> |
+               Swept {len(self.split_thresholds)} threshold(s)</p>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 15px;">
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Before</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{n_pre}</p><small>clusters</small>
+                </div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">After</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{n_post}</p><small>clusters</small>
+                </div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Split</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{n_split}</p><small>clusters were split</small>
+                </div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Max Split</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{max_sub}</p><small>sub-clusters from one</small>
+                </div>
+            </div>
+        </div>
+        """
+        self.report_raw_html(summary_html, title="Cluster Splitting Summary")
+
+        # ── Table of actually-split clusters ──
+        actually_split = split_log_df[split_log_df['n_subclusters'] > 1].sort_values(
+            'n_subclusters', ascending=False
+        )
+        if len(actually_split) > 0:
+            self.report_table(actually_split, title="Clusters That Were Split")
+
+        # ── Before / after size distributions ──
+        fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+
+        pre_sizes  = pd.Series(pre_membership).value_counts().values
+        post_sizes = pd.Series(post_membership).value_counts().values
+
+        axes[0].hist(pre_sizes, bins=50, color='#667eea', edgecolor='white', alpha=0.8)
+        axes[0].set_title(f'Before splitting ({n_pre} clusters)')
+        axes[0].set_xlabel('Cluster size'); axes[0].set_ylabel('Count')
+        axes[0].set_yscale('log')
+
+        axes[1].hist(post_sizes, bins=50, color='#f5576c', edgecolor='white', alpha=0.8)
+        axes[1].set_title(f'After splitting ({n_post} clusters)')
+        axes[1].set_xlabel('Cluster size'); axes[1].set_ylabel('Count')
+        axes[1].set_yscale('log')
+
+        plt.tight_layout()
+        self.report_figure(fig, title="Size Distribution: Before vs After Splitting")
+
+        # ── Sub-cluster count distribution ──
+        fig, ax = plt.subplots(figsize=(10, 4))
+        sc = split_log_df['n_subclusters'].value_counts().sort_index()
+        ax.bar(sc.index, sc.values, color='#667eea', edgecolor='white')
+        ax.set_xlabel('Number of sub-clusters')
+        ax.set_ylabel('Number of original clusters')
+        ax.set_title('Distribution of Split Degree')
+        ax.set_xticks(sc.index)
+        plt.tight_layout()
+        self.report_figure(fig, title="How Many Sub-Clusters Per Original Cluster")
+
+        # ── Metrics comparison ──
+        pre_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl], membership=pre_membership
+        )
+        post_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl], membership=post_membership
+        )
+        comparison_df = pd.DataFrame({
+            'Before Split': pre_metrics,
+            'After Split': post_metrics,
+        }).T
+        self.report_table(comparison_df, title="Clustering Metrics: Before vs After Splitting")
+
+    # ================================================================
+    #  HELPER: compute purity stats for an arbitrary membership
+    # ================================================================
+
+    def _compute_purity_and_representatives(self, dataframe, membership_col):
+        """
+        Compute purity stats and label representatives for a given membership column.
+        Returns (purity_dataframe, representatives_dict).
+        """
+        purity_data = []
+        representatives = {}
+
+        for cluster, cluster_data in dataframe.groupby(membership_col):
+            cluster_size = len(cluster_data)
+            known_mask = cluster_data[self.target_lbl] != UNKNOWN_LABEL
+            known_data = cluster_data[known_mask]
+            unknown_count = (~known_mask).sum()
+
+            if len(known_data) > 0:
+                label_counts = known_data[self.target_lbl].value_counts()
+                known_size = len(known_data)
+                label_probs = label_counts / known_size
+                cluster_entropy = entropy(label_probs, base=2)
+                cluster_ne = cluster_entropy / np.log2(len(label_counts)) if len(label_counts) > 1 else 0
+                purity = label_counts.iloc[0] / known_size
+                dominant_label = label_counts.index[0]
+                unique_labels = len(label_counts)
+            else:
+                cluster_entropy = np.nan
+                cluster_ne = np.nan
+                purity = np.nan
+                dominant_label = UNKNOWN_LABEL
+                unique_labels = 0
+                label_counts = pd.Series(dtype=int)
+
+            label_representatives = {}
+            for label in label_counts.index:
+                if label == UNKNOWN_LABEL:
+                    continue
+                label_nodes = cluster_data[cluster_data[self.target_lbl] == label]
+                most_central_idx = label_nodes['degree_centrality'].idxmax()
+                label_representatives[label] = most_central_idx
+
+            representatives[cluster] = label_representatives
+
+            purity_data.append({
+                'Cluster': cluster,
+                'Size': cluster_size,
+                'Known_Size': len(known_data),
+                'Unknown_Count': unknown_count,
+                'Purity': purity,
+                'Entropy': cluster_entropy,
+                'Normalized entropy': cluster_ne,
+                'Dominant_Label': dominant_label,
+                'Unique_Labels': unique_labels,
+            })
+
+        purity_df = pd.DataFrame(purity_data)
+        purity_df.set_index('Cluster', inplace=True)
+        return purity_df, representatives
+
+    # ================================================================
+    #  HELPER: report one "All Clusters Analysis" section
+    # ================================================================
+
+    def _report_clusters_section(self, dataframe, membership_col, purity_dataframe,
+                                  representatives, graph, title_prefix):
+        """
+        Generate the clusters HTML section for a given membership column.
+        Reusable for both pre-split and post-split memberships.
+        """
+        # For external functions that hardcode 'membership', create a view
+        # with the correct column aliased as 'membership'
+        if membership_col != 'membership':
+            df_view = dataframe.copy(deep=False)
+            df_view['membership'] = dataframe[membership_col]
+        else:
+            df_view = dataframe
+
+        cluster_sizes = df_view.groupby('membership').size().sort_values(ascending=False)
+        clusters_html = '<div style="display: grid; gap: 30px;">'
+        min_cluster_size = 2
+
+        for cluster in tqdm(cluster_sizes[cluster_sizes >= min_cluster_size].index,
+                            desc=f"Reporting clusters ({title_prefix})", colour='magenta'):
+            cluster_df = df_view[df_view['membership'] == cluster]
+            cluster_stats = purity_dataframe.loc[cluster]
+            label_reps = representatives[cluster]
+
+            fig = report_community(cluster, cluster_stats, cluster_df, label_reps, self.target_lbl)
+            img_tag = self._save_figure(fig, prefix="cluster")
+
+            purity_display = f"{cluster_stats['Purity']:.2%}" if not np.isnan(cluster_stats['Purity']) else "N/A"
+
+            clusters_html += f'''
+            <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h3 style="color: #667eea; margin-top: 0;">Cluster {cluster} - Representatives</h3>
+                <p><strong>Size:</strong> {cluster_stats["Size"]} | <strong>Purity:</strong> {purity_display}</p>
+                {img_tag}
+            '''
+
+            if len(cluster_df) >= 10:
+                fig = plot_community_tsne(
+                    cluster_id=cluster,
+                    dataframe=df_view,
+                    graph=graph,
+                    target_lbl=self.target_lbl,
+                )
+                tsne_img_tag = self._save_figure(fig, prefix="tsne")
+                clusters_html += f'''
+                    <h4 style="color: #667eea; margin-top: 20px;">t-SNE Visualization</h4>
+                    {tsne_img_tag}
+                '''
+
+            clusters_html += '</div>'
+
+        clusters_html += '</div>'
+        n_total = len(cluster_sizes)
+        self.report_raw_html(clusters_html,
+                             title=f"{title_prefix} ({n_total} clusters)")
+
+    # ================================================================
+    #  SPLIT VISUALIZATION: show which clusters were split and how
+    # ================================================================
+
+    def report_split_visualization(self, dataframe, split_log, best_threshold):
+        """
+        For each cluster that was actually split, render a visual showing
+        the original cluster → its sub-clusters with sample thumbnails.
+        """
+        split_log_df = pd.DataFrame(split_log)
+        actually_split = split_log_df[split_log_df['n_subclusters'] > 1].sort_values(
+            'original_size', ascending=False
+        )
+
+        if len(actually_split) == 0:
+            self.report_raw_html(
+                '<p>No clusters were split at this threshold.</p>',
+                title="Split Visualization"
+            )
+            return
+
+        max_thumbs_per_subcluster = 12  # max SVGs to render per sub-cluster
+
+        vis_html = '<div style="display: grid; gap: 40px;">'
+
+        for _, row in tqdm(actually_split.iterrows(), total=len(actually_split),
+                           desc="Split visualization", colour="cyan"):
+            orig_cid = int(row['original_cluster'])
+            n_sub = int(row['n_subclusters'])
+            orig_size = int(row['original_size'])
+
+            # Get all samples from this original Leiden cluster
+            orig_mask = dataframe['membership_pre_split'] == orig_cid
+            orig_df = dataframe[orig_mask]
+
+            # Group by post-split membership
+            sub_groups = orig_df.groupby('membership')
+
+            vis_html += f'''
+            <div style="border: 2px solid #667eea; border-radius: 10px; padding: 20px; background: #fafbff;">
+                <h3 style="color: #667eea; margin-top: 0;">
+                    Leiden Cluster {orig_cid} → {n_sub} sub-clusters
+                    <span style="font-weight: normal; font-size: 0.8em; color: #888;">
+                        (original size: {orig_size})
+                    </span>
+                </h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 15px;">
+            '''
+
+            for sub_id, sub_df in sub_groups:
+                sub_size = len(sub_df)
+                # Dominant label in sub-cluster
+                known = sub_df[sub_df[self.target_lbl] != UNKNOWN_LABEL]
+                if len(known) > 0:
+                    dom_label = known[self.target_lbl].value_counts().index[0]
+                    sub_purity = known[self.target_lbl].value_counts().iloc[0] / len(known)
+                else:
+                    dom_label = UNKNOWN_LABEL
+                    sub_purity = float('nan')
+
+                # Render a few SVG thumbnails
+                sample = sub_df.head(max_thumbs_per_subcluster)
+                thumbs_html = ''
+                for _, srow in sample.iterrows():
+                    svg_str = srow['svg'].to_string()
+                    lbl = srow[self.target_lbl]
+                    thumbs_html += f'''
+                    <div style="display:inline-block; text-align:center; margin:2px; border:1px solid #ddd; border-radius:4px; padding:3px; background:white;">
+                        <div style="width:40px; height:40px; display:flex; align-items:center; justify-content:center;">{svg_str}</div>
+                        <div style="font-size:9px; color:#666;">{lbl}</div>
+                    </div>
+                    '''
+
+                pur_str = f"{sub_purity:.0%}" if not np.isnan(sub_purity) else "?"
+
+                color = '#27ae60' if (not np.isnan(sub_purity) and sub_purity >= 0.9) else \
+                        '#f39c12' if (not np.isnan(sub_purity) and sub_purity >= 0.5) else '#e74c3c'
+
+                vis_html += f'''
+                <div style="border: 1px solid #ddd; border-radius: 8px; padding: 10px; background: white;
+                            border-left: 4px solid {color};">
+                    <div style="font-weight: bold; margin-bottom: 5px;">
+                        Sub-cluster {sub_id}
+                        <span style="font-weight: normal; color: #888; font-size: 0.85em;">
+                            n={sub_size} | dom="{dom_label}" | pur={pur_str}
+                        </span>
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 2px;">
+                        {thumbs_html}
+                    </div>
+                    {'<div style="font-size:10px; color:#999; margin-top:4px;">... and ' + str(sub_size - len(sample)) + ' more</div>' if sub_size > len(sample) else ''}
+                </div>
+                '''
+
+            vis_html += '</div></div>'
+
+        vis_html += '</div>'
+        self.report_raw_html(vis_html,
+                             title=f"Split Visualization (threshold={best_threshold})")
+
 
 
     def __call__(
@@ -269,7 +801,11 @@ class graphClusteringSweep(AutoReport):
             features = histograms
             
             # Compute matches
-            _, nlfa, dissimilarities = self.featureMatcher.match(features, features)
+            _, nlfa, dissimilarities, mu_tot, var_tot = self.featureMatcher.match(features, features)
+
+            # Save mu_tot and var_tot for potential later analysis
+            dataframe['mu_tot'] = mu_tot.cpu().numpy()
+            dataframe['var_tot'] = var_tot.cpu().numpy()
             
             # Sweep over epsilon and gamma for this HOG config
             config_results = []
@@ -356,13 +892,17 @@ class graphClusteringSweep(AutoReport):
         
         # Use best configuration for detailed reporting
         dataframe['histogram'] = list(best_overall_config['features'].cpu().numpy())
+
+        # ── Retrieve the renderer for the best HOG config (needed for splitting) ──
+        best_renderer = best_overall_config['hog_cfg']['renderer']
         
         dataframe, filtered_dataframe, label_representatives_dataframe, graph, partition = self.report_graph(
             dataframe, 
             best_overall_config['nlfa'], 
             best_overall_config['dissimilarities'], 
             best_overall_config['epsilon'], 
-            best_overall_config['gamma']
+            best_overall_config['gamma'],
+            renderer=best_renderer,
         )
         
         # Add HOG config info to output dataframes
@@ -454,97 +994,114 @@ class graphClusteringSweep(AutoReport):
         plt.tight_layout()
         return fig
 
-    def report_graph(self, dataframe, nlfa, dissimilarities, best_epsilon, best_gamma):
+    def report_graph(self, dataframe, nlfa, dissimilarities, best_epsilon, best_gamma, renderer=None):
             
-            # == Build the grah / evaluate ==
+            # == Build the graph / evaluate ==
             graph, edges = self.get_graph(nlfa, dissimilarities, best_epsilon)
             G_ig = ig.Graph.from_networkx(graph)
             partition = la.find_partition(G_ig, la.RBConfigurationVertexPartition, resolution_parameter=best_gamma, n_iterations=-1, seed=42)
-            
-            # Set the membership
-            dataframe.loc[:, 'membership'] = pd.Series(partition.membership, index=dataframe.index)
-            
+
+            # ─────────────────────────────────────────────
+            #  Degree centrality (needed by purity computation)
+            # ─────────────────────────────────────────────
             degree_centrality = nx.degree_centrality(graph)
-            # Create a series with positional indices, then map to dataframe index
             degree_centrality_series = pd.Series(
                 [degree_centrality[i] for i in range(len(dataframe))],
                 index=dataframe.index
             )
             dataframe['degree_centrality'] = degree_centrality_series
-
             
-            best_metrics = self._evaluate_membership(target_labels=dataframe[self.target_lbl], membership=partition.membership)
+            # ─────────────────────────────────────────────
+            #  PRE-SPLIT: save Leiden membership
+            # ─────────────────────────────────────────────
+            pre_split_membership = np.array(partition.membership)
+            dataframe.loc[:, 'membership_pre_split'] = pd.Series(
+                pre_split_membership, index=dataframe.index
+            )
 
-            #! Report the metrics
+            # Compute purity & representatives for PRE-SPLIT
+            pre_purity_df, pre_representatives = self._compute_purity_and_representatives(
+                dataframe, 'membership_pre_split'
+            )
+
+            # ── Report "All Clusters Analysis (Before Splitting)" ──
+            self._report_clusters_section(
+                dataframe, 'membership_pre_split', pre_purity_df,
+                pre_representatives, graph,
+                title_prefix="All Clusters Analysis (Before Splitting)"
+            )
+
+            # ─────────────────────────────────────────────
+            #  CLUSTER SPLITTING via hierarchical sub-clustering
+            # ─────────────────────────────────────────────
+            did_split = renderer is not None and self.split_thresholds is not None
+            if did_split:
+                best_threshold, post_split_membership, best_split_log, \
+                    sweep_results_df, cluster_linkages = self.sweep_split_thresholds(
+                        dataframe, pre_split_membership, renderer
+                    )
+
+                dataframe.loc[:, 'membership'] = pd.Series(
+                    post_split_membership, index=dataframe.index
+                )
+
+                # ── Report sweep results (if >1 threshold) ──
+                if len(self.split_thresholds) > 1:
+                    self.report_split_sweep(sweep_results_df, best_threshold)
+
+                # ── Report before / after metrics ──
+                self.report_split_comparison(
+                    dataframe, pre_split_membership, post_split_membership,
+                    best_split_log, best_threshold
+                )
+
+                # ── Visual display: which clusters were split and how ──
+                self.report_split_visualization(
+                    dataframe, best_split_log, best_threshold
+                )
+
+                # Compute purity & representatives for POST-SPLIT
+                purity_dataframe, representatives = self._compute_purity_and_representatives(
+                    dataframe, 'membership'
+                )
+
+                # ── Report "All Clusters Analysis After Splitting" ──
+                self._report_clusters_section(
+                    dataframe, 'membership', purity_dataframe,
+                    representatives, graph,
+                    title_prefix="All Clusters Analysis After Splitting"
+                )
+            else:
+                best_threshold = None
+                # No splitting — use Leiden membership directly
+                dataframe.loc[:, 'membership'] = pd.Series(
+                    partition.membership, index=dataframe.index
+                )
+                purity_dataframe = pre_purity_df
+                representatives = pre_representatives
+
+            # ─────────────────────────────────────────────
+            #  Reorder dataframe by post-split membership
+            # ─────────────────────────────────────────────
+            dataframe = dataframe.sort_values(
+                by=['membership', 'degree_centrality'],
+                ascending=[True, False]
+            ).reset_index(drop=True)
+
+            # ─────────────────────────────────────────────
+            #  General metrics & completeness (post-split)
+            # ─────────────────────────────────────────────
+            best_metrics = self._evaluate_membership(
+                target_labels=dataframe[self.target_lbl],
+                membership=dataframe['membership'].tolist()
+            )
+
             best_metrics_df = pd.DataFrame([{
                 'epsilon': best_epsilon,
                 'gamma': best_gamma,
+                'split_threshold': best_threshold,
                 **best_metrics
             }])
-
-            #? Compute the purity stats
-
-            purity_data = []
-            representatives = {}
-
-            for cluster, cluster_data in tqdm(dataframe.groupby('membership'), desc="Computing purity", colour='green'):
-                cluster_size = len(cluster_data)
-                
-                # Separate known vs unknown labels
-                known_mask = cluster_data[self.target_lbl] != UNKNOWN_LABEL
-                known_data = cluster_data[known_mask]
-                unknown_count = (~known_mask).sum()
-                
-                if len(known_data) > 0:
-                    label_counts = known_data[self.target_lbl].value_counts()
-                    known_size = len(known_data)
-                    
-                    label_probs = label_counts / known_size
-                    cluster_entropy = entropy(label_probs, base=2)
-                    
-                    if len(label_counts) > 1:
-                        cluster_ne = cluster_entropy / np.log2(len(label_counts))
-                    else:
-                        cluster_ne = 0
-                    
-                    purity = label_counts.iloc[0] / known_size
-                    dominant_label = label_counts.index[0]
-                    unique_labels = len(label_counts)
-                else:
-                    # Cluster contains only unknowns
-                    cluster_entropy = np.nan
-                    cluster_ne = np.nan
-                    purity = np.nan
-                    dominant_label = UNKNOWN_LABEL
-                    unique_labels = 0
-                    label_counts = pd.Series(dtype=int)
-                
-                # Find representatives only among known labels
-                label_representatives = {}
-                for label in label_counts.index:
-                    if label == UNKNOWN_LABEL:
-                        continue
-
-                    label_nodes = cluster_data[cluster_data[self.target_lbl] == label]
-                    most_central_idx = label_nodes['degree_centrality'].idxmax()
-                    label_representatives[label] = most_central_idx
-                
-                representatives[cluster] = label_representatives
-                
-                purity_data.append({
-                    'Cluster': cluster,
-                    'Size': cluster_size,
-                    'Known_Size': len(known_data),
-                    'Unknown_Count': unknown_count,
-                    'Purity': purity,
-                    'Entropy': cluster_entropy,
-                    'Normalized entropy': cluster_ne,
-                    'Dominant_Label': dominant_label,
-                    'Unique_Labels': unique_labels
-                })
-
-            purity_dataframe = pd.DataFrame(purity_data)
-            purity_dataframe.set_index('Cluster', inplace=True)
 
             #? Compute the completeness stats
 
@@ -578,11 +1135,11 @@ class graphClusteringSweep(AutoReport):
             # == Report general metrics about the clustering ==
 
             # a. Metrics
-            self.report_table(best_metrics_df.T, title=f'Best Parameters (ε={best_epsilon:.4f}, γ={best_gamma:.4f})')
+            self.report_table(best_metrics_df.T, title=f'Best Parameters (ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_t={best_threshold})')
 
             # b. Summary
             self.report_executive_summary(dataframe, purity_dataframe, label_dataframe, 
-                                best_epsilon, best_gamma)
+                                best_epsilon, best_gamma, best_split_threshold=best_threshold)
 
             # b. Connectivity
             self.report(matches_per_treshold(nlfa, best_epsilon), title="Average number of matches = f(epsilon)")
@@ -625,10 +1182,6 @@ class graphClusteringSweep(AutoReport):
             })
             self.report_table(unknown_stats, title="Unknown Character Statistics (▯)")
             
-            # Label distribution
-            # label_dist = hapax_df[self.target_lbl].value_counts()
-            # self.report_table(label_dist.head(20), title="Hapax Label Distribution (Top 20)")
-
             # == Report random instances of characters and their NNs ==
 
             nn_examples_html = '<div style="display: grid; gap: 30px;">'
@@ -657,55 +1210,6 @@ class graphClusteringSweep(AutoReport):
 
             self.report_raw_html(nn_examples_html, title="Random Nearest Neighbor Examples (10 samples)")
 
-            # == Report the communities ==
-
-            # a. Report each community's labels and stats
-            cluster_sizes = dataframe.groupby('membership').size().sort_values(ascending=False)
-            clusters_html = '<div style="display: grid; gap: 30px;">'
-            
-            min_cluster_size = 2
-
-            for cluster in tqdm(cluster_sizes[cluster_sizes >= min_cluster_size].index, 
-                                desc="Reporting clusters", colour='magenta'):
-                cluster_df = dataframe[dataframe['membership'] == cluster]
-
-                cluster_stats = purity_dataframe.loc[cluster]
-                label_representatives = representatives[cluster]
-
-                fig = report_community(cluster, cluster_stats, cluster_df, label_representatives, self.target_lbl)
-
-                img_tag = self._save_figure(fig, prefix="cluster")
-                
-                purity_display = f"{cluster_stats['Purity']:.2%}" if not np.isnan(cluster_stats['Purity']) else "N/A"
-                
-                clusters_html += f'''
-                <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <h3 style="color: #667eea; margin-top: 0;">Cluster {cluster} - Representatives</h3>
-                    <p><strong>Size:</strong> {cluster_stats["Size"]} | <strong>Purity:</strong> {purity_display}</p>
-                    {img_tag}
-                '''
-
-                if len(cluster_df) >= 10:
-                    fig = plot_community_tsne(
-                        cluster_id=cluster,
-                        dataframe=dataframe,
-                        graph=graph,
-                        target_lbl=self.target_lbl
-                    )
-
-                    tsne_img_tag = self._save_figure(fig, prefix="tsne")
-                    
-                    clusters_html += f'''
-                        <h4 style="color: #667eea; margin-top: 20px;">t-SNE Visualization</h4>
-                        {tsne_img_tag}
-                    '''
-                
-                clusters_html += '</div>'
-            clusters_html += '</div>'
-            self.report_raw_html(clusters_html, title=f"All Clusters Analysis ({len(cluster_sizes)} clusters)")
-
-
-            # b. Report some interesting 
 
             # == Report some examples on specific instances of Hanzi ==
 
@@ -735,9 +1239,6 @@ class graphClusteringSweep(AutoReport):
             self.report_raw_html(match_examples_html, title="Random Match Examples (10 samples)")
 
 
-                # self.report(fig1, title=f'Distribution for sample {idx}')
-                # self.report(fig2, title=f'Matches for sample {idx}')
-
             # == Hapax Report ==
 
             # a. NNs
@@ -754,7 +1255,6 @@ class graphClusteringSweep(AutoReport):
                     n_to_show=23
                 )
                 
-                # self.report(fig, title=f'Nearest neighbors for happax sample {idx}')
                 hapax_nn_html += f'''
                 <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                     <h3 style="color: #667eea; margin-top: 0;">Hapax Example - Sample {idx}</h3>
@@ -790,16 +1290,7 @@ class graphClusteringSweep(AutoReport):
             self.report_raw_html(''.join(html_parts), title=f"All Hapax ({len(hapax_df)} items)")
 
             #! == Save the label representatives for Edwin ==
-            #? This code section is a bit important
-            #? Which is the reason why
-            #? I am adding
-            #? So much
-            #? Useless
-            #? Coloured
-            #? Comments
             
-            # keep only the characters that are present more than a few times in the document
-            # for each "pseudo-gt" label, yield the most connected in the graph
             min_size = 2
 
             filtered_dataframe = dataframe[
@@ -809,8 +1300,6 @@ class graphClusteringSweep(AutoReport):
             label_representatives_dataframe = filtered_dataframe.loc[
                 filtered_dataframe.groupby(self.target_lbl)['degree_centrality'].idxmax()
             ]
-
-            #! Save these dataframes!
 
             return dataframe, filtered_dataframe, label_representatives_dataframe, graph, partition
     
@@ -854,7 +1343,7 @@ class graphClusteringSweep(AutoReport):
         plt.tight_layout()
         return fig
     
-    def report_executive_summary(self, dataframe, purity_dataframe, label_dataframe, best_epsilon, best_gamma):
+    def report_executive_summary(self, dataframe, purity_dataframe, label_dataframe, best_epsilon, best_gamma, best_split_threshold=None):
         """
         Generate an executive summary with key findings.
         """
@@ -896,7 +1385,7 @@ class graphClusteringSweep(AutoReport):
             <div style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 5px;">
                 <h3>Key Findings</h3>
                 <ul style="margin: 10px 0;">
-                    <li>Best Parameters: ε={best_epsilon:.4f}, γ={best_gamma:.4f}</li>
+                    <li>Best Parameters: ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_threshold={best_split_threshold}</li>
                     <li>Purest Cluster: #{best_cluster} ({purity_dataframe.loc[best_cluster, 'Purity']:.1%} purity)</li>
                     <li>Most Scattered Cluster: #{worst_cluster} ({purity_dataframe.loc[worst_cluster, 'Purity']:.1%} purity)</li>
                     <li>Largest Cluster: #{largest_cluster} ({purity_dataframe.loc[largest_cluster, 'Size']} patches)</li>
@@ -949,6 +1438,3 @@ class graphClusteringSweep(AutoReport):
                 plt.close(fig)
                 
                 return f'<img src="assets_{self.report_name}/{filename}" style="max-width: 100%; height: auto;" loading="lazy">'
-
-
-

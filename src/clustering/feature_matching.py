@@ -28,7 +28,7 @@ class featureMatching:
             standardized = (dissimilarities.sum(-1) - mu_tot[:, None]) / (var_tot[:, None]**.5 + 1e-15)
             nlfa = - log_ndtr(standardized)
 
-        return nlfa
+        return nlfa, mu_tot, var_tot
 
 
     def match(self, query_histograms, key_histograms, display_progress=False):
@@ -42,6 +42,8 @@ class featureMatching:
         if not self._params.partial_output:
             total_dissimilarities = torch.zeros((N1, N2), device='cpu')
             nlfa = torch.zeros_like(total_dissimilarities)
+            mu_tot = torch.zeros(N1, device='cpu')
+            var_tot = torch.zeros(N1, device='cpu')
 
         available_memory = torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_reserved(0) if device == 'cuda' else psutil.virtual_memory().available
         available_memory -= 100 * 2**20 # remove 100 MB to be sure everything fits in memory
@@ -65,10 +67,12 @@ class featureMatching:
             # Compute total dissimilarities D(a^i, b^j) for all pairs
             D = dissimilarities.sum(dim=-1)  # (N1, N2)
 
-            nlfa_batch = self.compute_delta(dissimilarities)
+            nlfa_batch, mu_tot_batch, var_tot_batch = self.compute_delta(dissimilarities)
 
             if not self._params.partial_output:
                 nlfa[idx_start:idx_start+batch_size] = nlfa_batch
+                mu_tot[idx_start:idx_start+batch_size] = mu_tot_batch
+                var_tot[idx_start:idx_start+batch_size] = var_tot_batch
                 total_dissimilarities[idx_start:idx_start+batch_size] = D
 
             # Find meaningfull matches 
@@ -84,7 +88,7 @@ class featureMatching:
         if self._params.partial_output:
             return matches
         
-        return matches, nlfa, total_dissimilarities
+        return matches, nlfa, total_dissimilarities, mu_tot, var_tot
     
 
     def nlfa_theshold(self, query_histograms, key_histograms):

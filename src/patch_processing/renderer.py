@@ -4,13 +4,11 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from tqdm import tqdm
-from .normalization import compute_moment
 
 from .svg import SVG
 
 from concurrent.futures import ProcessPoolExecutor
 import os
-
 
 @dataclass
 class CanvasDimensions:
@@ -19,6 +17,19 @@ class CanvasDimensions:
     height: int
     center_x: int
     center_y: int
+
+
+
+def _compute_moment(mask, p, q, cy=0, cx=0):
+    """
+    Compute the (p, q) moment of a binary image
+    """
+    H, W = mask.shape
+    y = np.linspace(-1, 1, H)[:, None]
+    x = np.linspace(-1, 1, W)[None, :]
+    
+    return (((y-cy)**p * (x-cx)**q)*mask).sum()
+
 
 
 # Add this at module level (outside the class)
@@ -36,15 +47,15 @@ def _process_single_svg(args):
     binary_svg = svg_rendered < bin_thresh
     
     # Compute barycenter
-    m00 = compute_moment(binary_svg, 0, 0)
+    m00 = _compute_moment(binary_svg, 0, 0)
     h, w = binary_svg.shape
     
     if m00 == 0:
         cy_pixel = h // 2
         cx_pixel = w // 2
     else:
-        cy = compute_moment(binary_svg, 1, 0) / m00
-        cx = compute_moment(binary_svg, 0, 1) / m00
+        cy = _compute_moment(binary_svg, 1, 0) / m00
+        cx = _compute_moment(binary_svg, 0, 1) / m00
         cy_pixel = (cy + 1) * (h - 1) / 2
         cx_pixel = (cx + 1) * (w - 1) / 2
     
@@ -286,45 +297,47 @@ class Renderer(Dataset):
         return torch.from_numpy(canvas_img).float()
 
 
-class GridDataset(Dataset):
-    def __init__(self, base_dataset, k, l):
-        self.base = base_dataset
-        self.k = k
-        self.l = l
-        self.n = k * l
+# ==== Deprecated code ====
+# 
+# class GridDataset(Dataset):
+#     def __init__(self, base_dataset, k, l):
+#         self.base = base_dataset
+#         self.k = k
+#         self.l = l
+#         self.n = k * l
     
-    def __len__(self):
-        # Return number of complete grids needed to cover all items
-        return (len(self.base) + self.n - 1) // self.n  # Ceiling division
+#     def __len__(self):
+#         # Return number of complete grids needed to cover all items
+#         return (len(self.base) + self.n - 1) // self.n  # Ceiling division
     
-    def __getitem__(self, idx):
-        # Add bounds checking
-        if idx >= len(self):
-            raise IndexError(f"Index {idx} out of range for dataset of length {len(self)}")
+#     def __getitem__(self, idx):
+#         # Add bounds checking
+#         if idx >= len(self):
+#             raise IndexError(f"Index {idx} out of range for dataset of length {len(self)}")
         
-        imgs = []
-        for j in range(self.k):
-            row_imgs = []
-            for i in range(self.l):
-                img_idx = idx * self.n + j * self.l + i
-                if img_idx < len(self.base):
-                    row_imgs.append(self.base[img_idx])
-                else:
-                    # Create zero-filled array with same shape as base dataset items
-                    sample_img = self.base[0]
-                    zero_img = torch.zeros_like(sample_img)
-                    row_imgs.append(zero_img)
-            imgs.append(row_imgs)
+#         imgs = []
+#         for j in range(self.k):
+#             row_imgs = []
+#             for i in range(self.l):
+#                 img_idx = idx * self.n + j * self.l + i
+#                 if img_idx < len(self.base):
+#                     row_imgs.append(self.base[img_idx])
+#                 else:
+#                     # Create zero-filled array with same shape as base dataset items
+#                     sample_img = self.base[0]
+#                     zero_img = torch.zeros_like(sample_img)
+#                     row_imgs.append(zero_img)
+#             imgs.append(row_imgs)
         
-        rows = []
-        for row_imgs in imgs:
-            row = torch.cat(row_imgs, dim=-1)
-            rows.append(row)
+#         rows = []
+#         for row_imgs in imgs:
+#             row = torch.cat(row_imgs, dim=-1)
+#             rows.append(row)
         
-        # Insert 1-pixel separators between rows
-        separator = torch.ones(1, rows[0].shape[-1])  # shape [1, width]
-        grid_with_sep = rows[0]
-        for r in rows[1:]:
-            grid_with_sep = torch.cat([grid_with_sep, separator, r], dim=0)
+#         # Insert 1-pixel separators between rows
+#         separator = torch.ones(1, rows[0].shape[-1])  # shape [1, width]
+#         grid_with_sep = rows[0]
+#         for r in rows[1:]:
+#             grid_with_sep = torch.cat([grid_with_sep, separator, r], dim=0)
         
-        return grid_with_sep
+#         return grid_with_sep

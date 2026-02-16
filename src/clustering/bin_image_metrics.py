@@ -206,7 +206,8 @@ reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
 def compute_distance_matrices_batched(
     reg_metric, renderer, subdf, 
     batch_size=64,   # pairs per batch — tune to your VRAM
-    device='cuda'
+    device='cuda',
+    use_tqdm=False
 ):
     """
     Batched pairwise distance matrix computation.
@@ -229,10 +230,10 @@ def compute_distance_matrices_batched(
     n_pairs = len(pairs)
     
     # ── Process in batches ──────────────────────────────────────────────
-    for start in tqdm.tqdm(range(0, n_pairs, batch_size), 
-                           total=(n_pairs + batch_size - 1) // batch_size,
-                           desc=f"Batched IC (B={batch_size})"):
-        
+    it = range(0, n_pairs, batch_size)
+    if use_tqdm:
+        it = tqdm.tqdm(it)
+    for start in it:
         batch_pairs = pairs[start : start + batch_size]
         B = len(batch_pairs)
         

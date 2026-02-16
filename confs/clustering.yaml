@@ -22,19 +22,28 @@ method:
   device: "cuda"
   
   # Parameter sweep ranges
-  # epsilons: [0.0005, 0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1, 10, 50, 200]
-  # gammas: [1, 1.5, 2, 2.5, 5, 10, 50]
+  epsilons: [0.000]
+  gammas: [2]
 
   # cell_sizes: [16, 24, 32]  # Cell size for HOG computation
   # grdt_sigmas: [5]       # Gradient sigma for smoothing
   # nums_bins: [8, 16]        # Number of orientation bins
 
   # epsilons: [0.00025, 0.00038, .0005]
-  epsilons: [0.0005]
+  # epsilons: [0.0005]
   # gammas: [1.0, 1.25]
-  gammas: [1.0]
+  # gammas: [1.0]
   
-  cell_sizes: [24]  # Cell size for HOG computation
+  cell_sizes: [22]  # Cell size for HOG computation
+  # cell_sizes: [48]  # Cell size for HOG computation
   normalization_methods : ['patch'] # patch >> all
   grdt_sigmas: [5]       # Gradient sigma for smoothing
   nums_bins: [16]        # Number of orientation bins
+
+
+  # ── Cluster splitting (hierarchical sub-clustering) ──
+  split_thresholds: [21.5] # Hausdorff distance threshold for cutting the dendrogram
+  split_linkage_method: "average" # scipy linkage method: average, complete, single, ward, ...
+  split_min_cluster_size: 5       # clusters smaller than this are not split
+  split_batch_size: 256           # batch size for Hausdorff distance computation
+  split_render_scale: 1         # SVG render scale for binary image distance

@@ -4,3 +4,13 @@ from .gradients import Gradients
 from .gaussian_pyramid import GaussianPyramid
 from .single_scale import InverseCompositional
 from .multiscale_registration import MultiscaleIC
+
+
+__all__ = [
+    "PlanarTransform",
+    "ERROR_FUNCTIONS",
+    "Gradients",
+    "GaussianPyramid",
+    "InverseCompositional",
+    "MultiscaleIC",
+]

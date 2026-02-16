@@ -39,12 +39,6 @@ def main(cfg: DictConfig):
     
     dataframe = load_dataframe(input_path)
 
-    # Convert to trad-ch
-
-    # for _, row in tqdm(dataframe.iterrows(), desc="Converting to tr-ch"):
-    #     if is_chinese_character(row['char_qwen']):
-    #         row['char_qwen'] = simplified_to_traditional(row['char_qwen'])
-
     logger.info(f"Loaded {len(dataframe)} patches")
     
     # Create clustering sweep
@@ -61,7 +55,13 @@ def main(cfg: DictConfig):
         metric=cfg.method.metric,
         keep_reciprocal=cfg.method.keep_reciprocal,
         device=cfg.method.device,
-        output_dir=cfg.data.output_path
+        output_dir=cfg.data.output_path,
+        # ── Cluster splitting ──
+        split_thresholds=list(cfg.method.split_thresholds),
+        split_linkage_method=cfg.method.split_linkage_method,
+        split_min_cluster_size=cfg.method.split_min_cluster_size,
+        split_batch_size=cfg.method.split_batch_size,
+        split_render_scale=cfg.method.split_render_scale,
     )
     
     # Run sweep
@@ -72,10 +72,6 @@ def main(cfg: DictConfig):
     logger.info("Generating HTML report...")
     html_path = sweep.generate_html()
     logger.info(f"HTML report saved to: {html_path}")
-    
-    # Optionally generate PDF (can be slow)
-    # pdf_path = sweep.generate_pdf()
-    # logger.info(f"PDF report saved to: {pdf_path}")
     
     logger.info("Clustering sweep complete!")
     logger.info(f"Report: file://{html_path.absolute()}")
@@ -88,8 +84,6 @@ def main(cfg: DictConfig):
 
     import pickle
     pickle.dump(graph, open(output_path / 'graph.gpickle', 'wb'))
-
-
 
 
 if __name__ == "__main__":
