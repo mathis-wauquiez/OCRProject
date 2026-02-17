@@ -1,5 +1,8 @@
 
 from .feature_matching import featureMatching
+from .algorithms import (
+    leiden_core, louvain_core, greedy_modularity_core, label_propagation_core
+)
 
 import numpy as np
 import torch
@@ -8,9 +11,6 @@ from abc import ABC, abstractmethod
 import networkx as nx
 
 from typing import List
-
-import igraph as ig
-import leidenalg as la
 
 Membership = List[int]
 
@@ -31,55 +31,32 @@ class leindenCommunityDetection(communityDetectionBase):
 
     def __init__(self, gamma: float):
         self.gamma = gamma
-    
-    def __call__(self, G: nx.Graph):
-        G_ig = ig.Graph.from_networkx(G)
-        partition = la.find_partition(
-            G_ig,
-            la.RBConfigurationVertexPartition,
-            resolution_parameter=self.gamma,
-            n_iterations=-1,
-            seed=42
-        )
 
-        return partition.membership
+    def __call__(self, G: nx.Graph):
+        return leiden_core(G, self.gamma)
 
 
 class louvainCommunityDetection(communityDetectionBase):
     """Fast, widely-used modularity optimization"""
     name = "louvain"
-    
+
     def __call__(self, G: nx.Graph) -> Membership:
-        import community.community_louvain as community_louvain
-        partition = community_louvain.best_partition(G, random_state=42)
-        return [partition[i] for i in range(len(G.nodes()))]
+        return louvain_core(G)
 
 
 class greedyModularityCommunityDetection(communityDetectionBase):
     """NetworkX built-in greedy modularity"""
     name = "greedy_modularity"
-    
+
     def __call__(self, G: nx.Graph) -> Membership:
-        from networkx.algorithms import community
-        communities = community.greedy_modularity_communities(G)
-        membership = [0] * len(G.nodes())
-        for comm_id, comm in enumerate(communities):
-            for node in comm:
-                membership[node] = comm_id
-        return membership
+        return greedy_modularity_core(G)
 
 class labelPropagationCommunityDetection(communityDetectionBase):
     """Fast, near-linear time algorithm"""
     name = "label_propagation"
-    
+
     def __call__(self, G: nx.Graph) -> Membership:
-        from networkx.algorithms import community
-        communities = community.label_propagation_communities(G)
-        membership = [0] * len(G.nodes())
-        for comm_id, comm in enumerate(communities):
-            for node in comm:
-                membership[node] = comm_id
-        return membership
+        return label_propagation_core(G)
 
 
 class graphClustering:

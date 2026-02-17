@@ -12,25 +12,13 @@ import cv2
 import numpy as np
 import torch
 
-from ..utils import connectedComponent
+from ..utils import connectedComponent, Timer
 from .distances import compute_mahalanobis_distance, l2
 from .params import imageComponentsParams
 from .detection.model_wrapper import craftWrapper
 from . import params
 
 from typing import NamedTuple
-
-import time
-
-class Timer:
-    def __init__(self):
-        self.time = time.time()
-    def __call__(self, string = None):
-        elapsed = time.time() - self.time
-        self.time = time.time()
-        if string is None:
-            string = 'elapsed time: {:.3f}'
-        # print(string.format(elapsed))
 
 class compsResult(NamedTuple):
     binary_img: np.ndarray

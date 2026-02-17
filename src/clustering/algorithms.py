@@ -119,11 +119,20 @@ def mean_shift(X, q):
     return clustering.labels_
 
 
-# ---- Graph-based clustering methods ----
+# ---- Graph-based core functions (unwrapped) ----
+# These can be reused directly by graph_clustering.py class-based wrappers.
 
-@graph_wrap
-def leiden(G, gamma):
-    """Leiden community detection"""
+def _communities_to_membership(communities, n_nodes):
+    """Convert a community iterator to a membership list."""
+    membership = [0] * n_nodes
+    for comm_id, comm in enumerate(communities):
+        for node in comm:
+            membership[node] = comm_id
+    return membership
+
+
+def leiden_core(G, gamma):
+    """Leiden community detection on a plain NetworkX graph."""
     G_ig = ig.Graph.from_networkx(G)
     partition = la.find_partition(
         G_ig,
@@ -135,53 +144,63 @@ def leiden(G, gamma):
     return partition.membership
 
 
-@graph_wrap
-def louvain(G):
-    """Louvain community detection"""
-    import community.community_louvain as community_louvain
+def louvain_core(G):
+    """Louvain community detection on a plain NetworkX graph."""
     partition = community_louvain.best_partition(G, random_state=42)
-    # Convert dict to list (assumes nodes are 0, 1, 2, ...)
     return [partition[i] for i in range(len(G.nodes()))]
 
 
-@graph_wrap
-def greedy_modularity(G):
-    """Greedy modularity optimization"""
-    from networkx.algorithms import community
+def greedy_modularity_core(G):
+    """Greedy modularity optimization on a plain NetworkX graph."""
     communities = community.greedy_modularity_communities(G)
-    membership = [0] * len(G.nodes())
-    for comm_id, comm in enumerate(communities):
-        for node in comm:
-            membership[node] = comm_id
-    return membership
+    return _communities_to_membership(communities, len(G.nodes()))
 
 
-@graph_wrap
-def label_propagation(G):
-    """Label propagation algorithm"""
-    from networkx.algorithms import community
+def label_propagation_core(G):
+    """Label propagation on a plain NetworkX graph."""
     communities = community.label_propagation_communities(G)
-    membership = [0] * len(G.nodes())
-    for comm_id, comm in enumerate(communities):
-        for node in comm:
-            membership[node] = comm_id
-    return membership
+    return _communities_to_membership(communities, len(G.nodes()))
 
 
-@graph_wrap
-def infomap(G):
-    """Infomap community detection"""
+def infomap_core(G):
+    """Infomap community detection on a plain NetworkX graph."""
     G_ig = ig.Graph.from_networkx(G)
     partition = G_ig.community_infomap()
     return partition.membership
 
 
-@graph_wrap  
-def walktrap(G, steps=4):
-    """Walktrap community detection"""
+def walktrap_core(G, steps=4):
+    """Walktrap community detection on a plain NetworkX graph."""
     G_ig = ig.Graph.from_networkx(G)
     partition = G_ig.community_walktrap(steps=steps).as_clustering()
     return partition.membership
+
+
+# ---- Graph-based clustering methods (wrapped for sweep API) ----
+
+@graph_wrap
+def leiden(G, gamma):
+    return leiden_core(G, gamma)
+
+@graph_wrap
+def louvain(G):
+    return louvain_core(G)
+
+@graph_wrap
+def greedy_modularity(G):
+    return greedy_modularity_core(G)
+
+@graph_wrap
+def label_propagation(G):
+    return label_propagation_core(G)
+
+@graph_wrap
+def infomap(G):
+    return infomap_core(G)
+
+@graph_wrap
+def walktrap(G, steps=4):
+    return walktrap_core(G, steps=steps)
 
 
 
