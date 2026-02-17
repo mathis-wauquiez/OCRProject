@@ -10,27 +10,8 @@ import cv2
 import numpy as np
 
 from einops import rearrange
-from ..utils import connectedComponent
+from ..utils import connectedComponent, GRADIENT_KERNELS, get_gradient_kernel
 from .params import HOGParameters, fullHOGOutput
-
-kernels = {
-    'central_differences':{
-        'k': np.array([0,1,0]),
-        'd': np.array([-.5,0,.5])
-    },
-    'hypomode':{
-        'k': np.array([0,0.5,0.5]),
-        'd': np.array([0,-1,1])
-    },
-    'farid_3x3': {
-        'k': np.array([0.229879, 0.540242, 0.229879]),
-        'd': np.array([-0.425287, 0, 0.425287])
-    },
-    'farid_5x5': {
-        'k': np.array([0.037659, 0.249153, 0.426375, 0.249153, 0.037659]),
-        'd': np.array([-0.109604, -0.276691, 0, 0.276691, 0.109604])
-    }
-}
 
 
 class HOG:
@@ -51,12 +32,11 @@ class HOG:
             ksize = int(self._params.grdt_sigma*self._params.ksize_factor) //2 * 2 + 1
             k = cv2.getGaussianKernel(ksize, self._params.grdt_sigma)
             d, _ = cv2.getDerivKernels(dx=1, dy=0, ksize=ksize, normalize=True)
-        elif self._params.method in kernels:
-            k = kernels[self._params.method]['k']
-            d = kernels[self._params.method]['d']
-            ksize = len(k)
         else:
-            raise ValueError(f'Gradient computation method not recognized: {self._params.method}')
+            kernel = get_gradient_kernel(self._params.method)
+            k = kernel['k']
+            d = kernel['d']
+            ksize = len(k)
 
 
         dx_conv = nn.Sequential(

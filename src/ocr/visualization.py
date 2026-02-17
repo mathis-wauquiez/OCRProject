@@ -15,21 +15,7 @@ import cv2
 import torch
 
 from .params import PipelineOutput
-from ..utils import connectedComponent
-
-import time
-class Timer:
-    def __init__(self, prefix=None):
-        self.time = time.time()
-        self.prefix = prefix
-        self.i = 1
-    def __call__(self, string = None):
-        elapsed = time.time() - self.time
-        self.time = time.time()
-        if string is None:
-            string = 'elapsed time: {:.3f}'
-        # print(self.prefix, self.i, string.format(elapsed))
-        self.i +=1
+from ..utils import connectedComponent, Timer
 
 
 # Consistent color scheme for deletion reasons across all visualizations

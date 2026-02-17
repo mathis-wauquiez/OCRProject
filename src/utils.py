@@ -9,9 +9,61 @@ from pathlib import Path
 from PIL import Image
 
 import torch.nn as nn
+import time
 
 def to_numpy(tensor):
     return tensor.permute(1,2,0).detach().cpu().numpy()
+
+
+class Timer:
+    """Reusable timer for profiling pipeline stages."""
+    def __init__(self, prefix=None):
+        self.time = time.time()
+        self.prefix = prefix
+        self.i = 1
+
+    def __call__(self, string=None):
+        elapsed = time.time() - self.time
+        self.time = time.time()
+        if string is None:
+            string = 'elapsed time: {:.3f}'
+        self.i += 1
+
+
+# Shared gradient kernel definitions used by both HOG (patch_processing)
+# and the registration module's Gradients class.
+GRADIENT_KERNELS = {
+    'central_differences': {
+        'k': np.array([0.0, 1.0, 0.0]),
+        'd': np.array([-0.5, 0.0, 0.5]),
+    },
+    'hypomode': {
+        'k': np.array([0.0, 0.5, 0.5]),
+        'd': np.array([0.0, -1.0, 1.0]),
+    },
+    'farid_3x3': {
+        'k': np.array([0.229879, 0.540242, 0.229879]),
+        'd': np.array([-0.425287, 0.0, 0.425287]),
+    },
+    'farid_5x5': {
+        'k': np.array([0.037659, 0.249153, 0.426375, 0.249153, 0.037659]),
+        'd': np.array([-0.109604, -0.276691, 0.0, 0.276691, 0.109604]),
+    },
+}
+
+# Alias mapping for backward compatibility with short names (used by registration module)
+GRADIENT_KERNEL_ALIASES = {
+    'central': 'central_differences',
+    'farid3': 'farid_3x3',
+    'farid5': 'farid_5x5',
+}
+
+def get_gradient_kernel(method: str) -> dict:
+    """Look up a gradient kernel by name, supporting both long and short aliases."""
+    canonical = GRADIENT_KERNEL_ALIASES.get(method, method)
+    if canonical in GRADIENT_KERNELS:
+        return GRADIENT_KERNELS[canonical]
+    raise ValueError(f'Unknown gradient method: {method}')
 
 
 @dataclass

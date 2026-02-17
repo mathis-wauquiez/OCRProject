@@ -9,25 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 
-
-KERNELS = {
-    'central': {
-        'k': np.array([0.0, 1.0, 0.0]),
-        'd': np.array([-0.5, 0.0, 0.5]),
-    },
-    'hypomode': {
-        'k': np.array([0.0, 0.5, 0.5]),
-        'd': np.array([0.0, -1.0, 1.0]),
-    },
-    'farid3': {
-        'k': np.array([0.229879, 0.540242, 0.229879]),
-        'd': np.array([-0.425287, 0.0, 0.425287]),
-    },
-    'farid5': {
-        'k': np.array([0.037659, 0.249153, 0.426375, 0.249153, 0.037659]),
-        'd': np.array([-0.109604, -0.276691, 0.0, 0.276691, 0.109604]),
-    },
-}
+from ..utils import get_gradient_kernel
 
 
 class Gradients(nn.Module):
@@ -38,6 +20,7 @@ class Gradients(nn.Module):
         """
         Args:
             method: ``'central'``, ``'hypomode'``, ``'farid3'``, ``'farid5'``,
+                    ``'central_differences'``, ``'farid_3x3'``, ``'farid_5x5'``,
                     or ``'gaussian'``.
             C: Number of image channels.
             device: Torch device.
@@ -53,12 +36,11 @@ class Gradients(nn.Module):
             k = cv2.getGaussianKernel(ksize, grdt_sigma).astype(np.float64)
             d, _ = cv2.getDerivKernels(dx=1, dy=0, ksize=ksize, normalize=True)
             d = np.asarray(d, dtype=np.float64)
-        elif method in KERNELS:
-            k = KERNELS[method]['k']
-            d = KERNELS[method]['d']
-            ksize = len(k)
         else:
-            raise ValueError(f'Unknown gradient method: {method}')
+            kernel = get_gradient_kernel(method)
+            k = kernel['k']
+            d = kernel['d']
+            ksize = len(k)
 
         self.C = C
         self.ksize = ksize

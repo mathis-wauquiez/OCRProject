@@ -1,5 +1,6 @@
 import numpy as np
 import networkx as nx
+import torch
 from sklearn.metrics import pairwise_distances
 from sklearn.cluster import DBSCAN, HDBSCAN, OPTICS, AffinityPropagation, estimate_bandwidth, MeanShift
 import igraph as ig
@@ -7,6 +8,12 @@ import leidenalg as la
 import community.community_louvain as community_louvain
 from networkx.algorithms import community
 from functools import partial
+from abc import ABC, abstractmethod
+from typing import List
+
+from .feature_matching import featureMatching
+
+Membership = List[int]
 
 def sklearn_wrap(function):
     def wrapped(subdf, subgraph, *args, min_size=2, metric='euclidean', **kwargs):
@@ -119,11 +126,19 @@ def mean_shift(X, q):
     return clustering.labels_
 
 
-# ---- Graph-based clustering methods ----
+# ---- Graph-based core functions (unwrapped) ----
 
-@graph_wrap
-def leiden(G, gamma):
-    """Leiden community detection"""
+def _communities_to_membership(communities, n_nodes):
+    """Convert a community iterator to a membership list."""
+    membership = [0] * n_nodes
+    for comm_id, comm in enumerate(communities):
+        for node in comm:
+            membership[node] = comm_id
+    return membership
+
+
+def leiden_core(G, gamma):
+    """Leiden community detection on a plain NetworkX graph."""
     G_ig = ig.Graph.from_networkx(G)
     partition = la.find_partition(
         G_ig,
@@ -135,53 +150,63 @@ def leiden(G, gamma):
     return partition.membership
 
 
-@graph_wrap
-def louvain(G):
-    """Louvain community detection"""
-    import community.community_louvain as community_louvain
+def louvain_core(G):
+    """Louvain community detection on a plain NetworkX graph."""
     partition = community_louvain.best_partition(G, random_state=42)
-    # Convert dict to list (assumes nodes are 0, 1, 2, ...)
     return [partition[i] for i in range(len(G.nodes()))]
 
 
-@graph_wrap
-def greedy_modularity(G):
-    """Greedy modularity optimization"""
-    from networkx.algorithms import community
+def greedy_modularity_core(G):
+    """Greedy modularity optimization on a plain NetworkX graph."""
     communities = community.greedy_modularity_communities(G)
-    membership = [0] * len(G.nodes())
-    for comm_id, comm in enumerate(communities):
-        for node in comm:
-            membership[node] = comm_id
-    return membership
+    return _communities_to_membership(communities, len(G.nodes()))
 
 
-@graph_wrap
-def label_propagation(G):
-    """Label propagation algorithm"""
-    from networkx.algorithms import community
+def label_propagation_core(G):
+    """Label propagation on a plain NetworkX graph."""
     communities = community.label_propagation_communities(G)
-    membership = [0] * len(G.nodes())
-    for comm_id, comm in enumerate(communities):
-        for node in comm:
-            membership[node] = comm_id
-    return membership
+    return _communities_to_membership(communities, len(G.nodes()))
 
 
-@graph_wrap
-def infomap(G):
-    """Infomap community detection"""
+def infomap_core(G):
+    """Infomap community detection on a plain NetworkX graph."""
     G_ig = ig.Graph.from_networkx(G)
     partition = G_ig.community_infomap()
     return partition.membership
 
 
-@graph_wrap  
-def walktrap(G, steps=4):
-    """Walktrap community detection"""
+def walktrap_core(G, steps=4):
+    """Walktrap community detection on a plain NetworkX graph."""
     G_ig = ig.Graph.from_networkx(G)
     partition = G_ig.community_walktrap(steps=steps).as_clustering()
     return partition.membership
+
+
+# ---- Graph-based clustering methods (wrapped for sweep API) ----
+
+@graph_wrap
+def leiden(G, gamma):
+    return leiden_core(G, gamma)
+
+@graph_wrap
+def louvain(G):
+    return louvain_core(G)
+
+@graph_wrap
+def greedy_modularity(G):
+    return greedy_modularity_core(G)
+
+@graph_wrap
+def label_propagation(G):
+    return label_propagation_core(G)
+
+@graph_wrap
+def infomap(G):
+    return infomap_core(G)
+
+@graph_wrap
+def walktrap(G, steps=4):
+    return walktrap_core(G, steps=steps)
 
 
 
@@ -227,3 +252,96 @@ def get_algorithms(quantiles, db_epsilons, leiden_gammas, optics_min_samples, me
     })
 
     return algorithms
+
+
+# ---- Class-based community detection (for graphClustering pipeline) ----
+
+class communityDetectionBase(ABC):
+    name: str = "abstract"
+
+    @abstractmethod
+    def __call__(self, graph: nx.Graph) -> Membership:
+        ...
+
+
+class leidenCommunityDetection(communityDetectionBase):
+    name = "leiden"
+
+    def __init__(self, gamma: float):
+        self.gamma = gamma
+
+    def __call__(self, G: nx.Graph) -> Membership:
+        return leiden_core(G, self.gamma)
+
+
+class louvainCommunityDetection(communityDetectionBase):
+    """Fast, widely-used modularity optimization"""
+    name = "louvain"
+
+    def __call__(self, G: nx.Graph) -> Membership:
+        return louvain_core(G)
+
+
+class greedyModularityCommunityDetection(communityDetectionBase):
+    """NetworkX built-in greedy modularity"""
+    name = "greedy_modularity"
+
+    def __call__(self, G: nx.Graph) -> Membership:
+        return greedy_modularity_core(G)
+
+
+class labelPropagationCommunityDetection(communityDetectionBase):
+    """Fast, near-linear time algorithm"""
+    name = "label_propagation"
+
+    def __call__(self, G: nx.Graph) -> Membership:
+        return label_propagation_core(G)
+
+
+class graphClustering:
+    def __init__(
+            self,
+            feature: str,
+            featureMatcher: featureMatching,
+            edges_type: str,
+            communityDetection: communityDetectionBase,
+            device: str = "cuda"
+    ):
+        self.feature = feature
+        self.featureMatcher = featureMatcher
+        self.edges_type = edges_type
+        self.communityDetection = communityDetection
+        self.device = device
+
+    def __call__(self, dataframe) -> Membership:
+
+        # -- Compute the matches thanks to the featureMatching class --
+
+        features = dataframe['feature']
+        features = torch.tensor(features, device=self.device)
+
+        matches, nlfa, dissimilarities = self.featureMatcher.match(features, features)
+
+        if self.edges_type == 'nlfa':
+            edge_weights = nlfa
+            del dissimilarities
+        elif self.edges_type in ['dissim', 'dissimilarities']:
+            edge_weights = dissimilarities
+            del nlfa
+        elif self.edges_type in ['link', 'constant']:
+            edge_weights = torch.ones_like(nlfa)
+            del nlfa, dissimilarities
+
+        # -- Build the networkx Graph --
+
+        N = nlfa.shape[0]
+        G = nx.Graph()
+        G.add_nodes_from(range(N))
+        edges = [(int(i.item()), int(j.item()), edge_weights[i, j].item()) for i, j in matches if i != j]
+        G.add_weighted_edges_from(edges)
+
+        # -- Run the community detection/graph clustering --
+
+        membership = self.communityDetection(G)
+
+        return membership

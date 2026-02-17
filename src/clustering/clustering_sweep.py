@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 # internal
-from .graph_clustering import communityDetectionBase
+from .algorithms import communityDetectionBase
 from .feature_matching import featureMatching
 from .params import featureMatchingParameters
 from .clustering_sweep_report import ClusteringSweepReporter, UNKNOWN_LABEL

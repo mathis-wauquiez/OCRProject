@@ -159,29 +159,12 @@ class SVG:
     
     def save(self, filepath: str):
         """Save SVG to file (auto-computes viewBox and dimensions from content)"""
-        viewBox = self._compute_bbox()
-        width = viewBox[2]
-        height = viewBox[3]
-        
-        root = ET.Element('svg', {
-            'xmlns': 'http://www.w3.org/2000/svg',
-            'width': f'{width:.2f}',
-            'height': f'{height:.2f}',
-            'viewBox': f'{viewBox[0]:.2f} {viewBox[1]:.2f} {viewBox[2]:.2f} {viewBox[3]:.2f}'
-        })
-        
-        for svg_path in self.paths:
-            ET.SubElement(root, 'path', {
-                'fill': svg_path.fill,
-                'stroke': svg_path.stroke,
-                'fill-rule': svg_path.fill_rule,
-                'd': _contours_to_path_d(svg_path.contours)
-            })
-        
+        svg_string = self.to_string()
+        root = ET.fromstring(svg_string)
         tree = ET.ElementTree(root)
         if hasattr(ET, 'indent'):  # Python 3.9+
             ET.indent(tree, space='  ')
-        
+
         # lxml uses 'utf-8', ElementTree uses 'unicode'
         try:
             tree.write(filepath, encoding='utf-8', xml_declaration=True)

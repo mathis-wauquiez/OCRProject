@@ -1,49 +1,32 @@
 
-
-from .params import craftComponentsParams
 from ..utils import connectedComponent
+from ..patch_processing.patch_extraction import extract_patches as _extract_patches_general
 
-import cv2
 import numpy as np
-import networkx as nx
 
-from scipy.spatial import distance_matrix
 
-def extract_patches(characterComponents: connectedComponent, border = None, image = None):
+def extract_patches(characterComponents: connectedComponent, border=None, image=None):
     """
-    Extracts patches arround each character in characterComponents.
+    Extracts patches around each character in characterComponents.
+
+    Thin wrapper around patch_processing.patch_extraction.extract_patches
+    for backward compatibility with the simpler OCR-specific API.
     """
-
-    if border is not None:
-        labels = np.pad(characterComponents.labels.copy(), border, mode='constant', constant_values=0)
-        if image is not None:
-            image = np.pad(image.copy(), ((border, border), (border, border), (0,0)), mode='median')
-    else:
-        labels = characterComponents.labels
-
-    patches = []
-
-    for region in characterComponents.regions:
-        h1, w1, h2, w2 = region.bbox
-        h2+=2*border; w2+=2*border
-
-        patch = labels[h1:h2, w1:w2]
-        patch = (patch == region.label).astype(np.float32)
-        patches.append(patch)
-    
+    images = []
     if image is not None:
+        if border is not None:
+            image = np.pad(image.copy(), ((border, border), (border, border), (0, 0)), mode='median')
+        images.append(image)
 
-        image_patches = []
-        for region in characterComponents.regions:
-            h1, w1, h2, w2 = region.bbox
-            h2+=2*border; w2+=2*border
-            patch = image[h1:h2, w1:w2]
-            image_patches.append(patch)
+    result = _extract_patches_general(characterComponents, images=images, return_bin=True, border=border)
 
-        return patches, image_patches
+    bin_patches = result[0]
 
-    return patches
+    # Cast bin patches to float32 to match original behavior
+    bin_patches = [p.astype(np.float32) for p in bin_patches]
 
+    if image is not None:
+        image_patches = result[1]
+        return bin_patches, image_patches
 
-# def normalize_patches(patches, target_shape):
-    
+    return bin_patches
