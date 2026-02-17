@@ -7,6 +7,10 @@ import logging
 import sys
 import os
 
+# disable warnings
+import warnings
+warnings.filterwarnings("ignore")
+
 os.environ["HYDRA_FULL_ERROR"] = "1"
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))

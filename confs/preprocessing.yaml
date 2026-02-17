@@ -8,7 +8,7 @@ data:
   comps_folder: "outputs/book1-complete"
   output_path: "outputs/processed_patches_book1complete"
 
-verbose: true
+verbose: false
 return_plots: false
 
 # === Patch Preprocessor ===
@@ -30,32 +30,29 @@ patch_preprocessor:
   # Vectorizer
   vectorizer: ${vectorizer}
 
-  # OCR Models
-  ocr_model_configs:
-    - _target_: src.ocr.wrappers.QwenOCRSingle
-      _partial_: true
-      max_pixels: 786432  # 768 x 1024 for better single char recognition
-      device_map: auto
+  # === CHAT column-level OCR (replaces Qwen + renderer) ===
+  chat_model:
+    _target_: src.ocr.chat.ModelWrapper
+    rec_model_path: "models/chat/chat_rec.mlmodel"
+    device: null    # auto-detect cuda/cpu
+    pad: 16
 
-    # - _target_: src.ocr.wrappers.QwenOCR
-    #   _partial_: true
-    #   nrows: 1
-    #   ncols: 4
-    #   max_pixels: 1048576 # '1024 x 1024' -> we will use less in practice
-    #   device_map: auto
-    # - _target_: src.ocr.wrappers.EasyOCRModel
-
+  # --- OLD: renderer-based OCR (commented out) ---
+  # ocr_model_configs:
+  #   - _target_: src.ocr.wrappers.QwenOCRSingle
+  #     _partial_: true
+  #     max_pixels: 786432
+  #     device_map: auto
+  #
+  # ocr_renderer:
+  #   _target_: src.patch_processing.Renderer
+  #   scale: 1.0
+  #   dpi: 256
+  #   bin_thresh: 128
+  #   pad_to_multiple: null
+  #   verbose: ${verbose}
   
-  # OCR Renderer
-  ocr_renderer:
-    _target_: src.patch_processing.Renderer
-    scale: 1.0
-    dpi: 256
-    bin_thresh: 128
-    pad_to_multiple: null
-    verbose: ${verbose}
-  
-  # HOG Renderer
+  # HOG Renderer (unchanged — still needed for HOG descriptors)
   hog_renderer:
     _target_: src.patch_processing.Renderer
     scale: 1.0
@@ -68,16 +65,16 @@ patch_preprocessor:
   hog_params:
     _target_: src.patch_processing.HOGParameters
     device: cpu
-    C: 1                          # Use grayscale images
-    partial_output: false         # Also output the resized images, their gradient orientation and magnitude
-    method: gaussian              # Use gaussian smoothing to compute the gradients
-    grdt_sigma: 5                 # Std of the smoothing
-    ksize_factor: 6               # Size of the smoothing kernel = factor * std
-    cell_height: 24               # Size of the cells to compute the histograms
+    C: 1
+    partial_output: false
+    method: gaussian
+    grdt_sigma: 5
+    ksize_factor: 6
+    cell_height: 24
     cell_width: 24
-    num_bins: 16                  # Number of bins
-    threshold: 0.2                # Clip the values of the descriptor
-    normalize: patch              # Normalize at patch-level. SIFT uses cell-level descriptor normalization
+    num_bins: 16
+    threshold: 0.2
+    normalize: patch
 
 # === Hydra ===
 hydra:

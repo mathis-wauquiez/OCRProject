@@ -108,10 +108,10 @@ class BinaryShapeVectorizer:
         self._save_counter = 0
         self._validate_config()
         
-        logger.info(f"Initialized vectorizer:")
-        logger.info(f"  output_size: {self.config.output_size}")
-        logger.info(f"  background_color: {self.config.background_color}")
-        logger.info(f"  output_format: {self.config.output_format}")
+        # logger.info(f"Initialized vectorizer:")
+        # logger.info(f"  output_size: {self.config.output_size}")
+        # logger.info(f"  background_color: {self.config.background_color}")
+        # logger.info(f"  output_format: {self.config.output_format}")
     
     def _validate_config(self):
         cfg = self.config
@@ -127,8 +127,8 @@ class BinaryShapeVectorizer:
         images_list = self._normalize_input(images)
         n_images = len(images_list)
         
-        logger.info(f"Processing {n_images} binarized images")
-        logger.info(f"First image shape: {images_list[0].shape}, dtype: {images_list[0].dtype}")
+        # logger.info(f"Processing {n_images} binarized images")
+        # logger.info(f"First image shape: {images_list[0].shape}, dtype: {images_list[0].dtype}")
         
         # Stream results for memory efficiency
         if cfg.stream_results:
@@ -158,7 +158,7 @@ class BinaryShapeVectorizer:
             raise TypeError(f"Unsupported type: {type(images)}")
         
         ndim = images.ndim
-        logger.info(f"Input shape: {images.shape}, ndim: {ndim}")
+        # logger.info(f"Input shape: {images.shape}, ndim: {ndim}")
         
         if ndim == 2:
             return [images]

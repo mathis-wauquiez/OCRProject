@@ -1,10 +1,10 @@
 from .ink_filter import InkFilter
 from .renderer import Renderer, GridDataset
 from .svg import SVG
-from .processor import PatchPreprocessing, create_dataframe
+from .processor import PatchPreprocessing
 from .hog import HOG
 from .params import HOGParameters, fullHOGOutput
-from .normalization import compute_moment
+# from .normalization import compute_moment
 from .patch_extraction import extract_patches
 
 __all__ = [
@@ -19,7 +19,6 @@ __all__ = [
     
     # Processing
     'PatchPreprocessing',
-    'create_dataframe',
     
     # HOG
     'HOG',
@@ -27,6 +26,6 @@ __all__ = [
     'fullHOGOutput',
     
     # Utilities
-    'compute_moment',
+    # 'compute_moment',
     'extract_patches',
 ]
