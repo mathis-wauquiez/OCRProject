@@ -8,6 +8,62 @@ Ref: Briand, Facciolo, Sánchez – IPOL 2018.
 
 THIS CODE VERSION IS AI-TWEAKED. ORIGINAL, HUMAN MADE FILE IN ARCHIVE
 
+Example
+-------
+>>> import torch
+>>> from single_scale import InverseCompositional
+>>> from transformations import PlanarTransform
+>>>
+>>> # ── Recover a known translation ───────────────────────────────────
+>>> H, W = 128, 128
+>>> I1 = torch.randn(1, 1, H, W)
+>>>
+>>> # Apply a 3-pixel shift in x (ground-truth)
+>>> T_gt = PlanarTransform('translation', params=torch.tensor([3.0, 0.0]))
+>>> I2 = T_gt.warp(I1)
+>>>
+>>> ic = InverseCompositional(
+...     transform_type='translation',
+...     error_function='lorentzian',
+...     max_iter=50,
+...     epsilon=1e-4,
+... )
+>>> T_est = ic.run(I1, I2)
+>>> print(T_est.matrix[0])          # should ≈ T_gt.matrix[0]
+>>>
+>>> # ── Batched estimation ────────────────────────────────────────────
+>>> B = 4
+>>> I1_batch = torch.randn(B, 1, 64, 64)
+>>> shifts = torch.stack([torch.tensor([float(i), 0.0]) for i in range(B)])
+>>> T_batch = PlanarTransform('translation', params=shifts)
+>>> I2_batch = T_batch.warp(I1_batch)
+>>>
+>>> T_est_batch = ic.run(I1_batch, I2_batch)
+>>> print(T_est_batch.batch_size)   # 4
+>>>
+>>> # ── Warm-start from an initial guess ──────────────────────────────
+>>> T_init = PlanarTransform('translation',
+...                          params=torch.tensor([[2.5, 0.1]]).expand(B, -1))
+>>> T_refined = ic.run(I1_batch, I2_batch, p_init=T_init)
+>>>
+>>> # ── Homography estimation on RGB input ────────────────────────────
+>>> ic_h = InverseCompositional(
+...     transform_type='homography',
+...     gradient_method='farid5',
+...     error_function='geman_mcclure',
+...     lambda_init=80.0,
+...     lambda_decay=0.9,
+...     dtype=torch.float64,
+... )
+>>> I1_rgb = torch.randn(1, 3, 128, 128, dtype=torch.float64)
+>>> T_h = PlanarTransform('homography',
+...                        params=torch.tensor([0.01, 0.0, 2.0,
+...                                             0.0, -0.01, 1.0,
+...                                             1e-5, 0.0],
+...                                            dtype=torch.float64))
+>>> I2_rgb = T_h.warp(I1_rgb)
+>>> T_est_h = ic_h.run(I1_rgb, I2_rgb)
+>>> print((T_est_h.matrix - T_h.matrix).abs().max().item() < 0.1)  # True
 """
 
 import torch
@@ -24,6 +80,21 @@ class InverseCompositional:
 
     Estimates *B* transformations ``p_b`` such that
     ``I1_b(x) ≈ I2_b(Ψ(x; p_b))``.
+
+    Example
+    -------
+    >>> import torch
+    >>> from single_scale import InverseCompositional
+    >>>
+    >>> ic = InverseCompositional(
+    ...     transform_type='affinity',
+    ...     error_function='charbonnier',
+    ...     max_iter=40,
+    ... )
+    >>> I1 = torch.randn(2, 1, 64, 64)
+    >>> I2 = torch.randn(2, 1, 64, 64)
+    >>> T = ic.run(I1, I2)
+    >>> print(T)   # PlanarTransform('affinity', B=2)
     """
 
     def __init__(self,

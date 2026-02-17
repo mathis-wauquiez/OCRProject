@@ -9,6 +9,56 @@ Ref: Briand, Facciolo, Sánchez – IPOL 2018.
 
 
 THIS CODE VERSION IS AI-TWEAKED. ORIGINAL, HUMAN MADE FILE IN ARCHIVE
+
+Example
+-------
+>>> import torch
+>>> from single_scale import InverseCompositional
+>>> from multiscale import MultiscaleIC
+>>> from gaussian_pyramid import GaussianPyramid
+>>> from transformations import PlanarTransform
+>>>
+>>> # ── Setup ─────────────────────────────────────────────────────────
+>>> ic = InverseCompositional(
+...     transform_type='homography',
+...     error_function='lorentzian',
+...     max_iter=30,
+...     epsilon=1e-3,
+... )
+>>> pyramid = GaussianPyramid(eta=0.5, sigma_0=1.0, N_scales=5)
+>>> aligner = MultiscaleIC(ic, pyramid, grayscale=True)
+>>>
+>>> # ── Align two RGB images ──────────────────────────────────────────
+>>> I1 = torch.randn(1, 3, 256, 256)
+>>> T_gt = PlanarTransform('homography',
+...                         params=torch.tensor([0.02, 0.0, 4.0,
+...                                              0.0, -0.01, 2.0,
+...                                              1e-5, 0.0]))
+>>> I2 = T_gt.warp(I1)
+>>> T_est = aligner.run(I1, I2)
+>>> print(T_est)   # PlanarTransform('homography', B=1)
+>>>
+>>> # ── Batched alignment ─────────────────────────────────────────────
+>>> B = 4
+>>> I1_batch = torch.randn(B, 3, 128, 128)
+>>> I2_batch = torch.randn(B, 3, 128, 128)   # e.g. real image pairs
+>>> T_batch = aligner.run(I1_batch, I2_batch)
+>>> print(T_batch.batch_size)                  # 4
+>>>
+>>> # ── Warm-start & per-scale diagnostics ────────────────────────────
+>>> T_init = PlanarTransform('homography', batch_size=B)
+>>> result = aligner.run(I1_batch, I2_batch,
+...                      p_init=T_init,
+...                      return_all_scales=True)
+>>> print(result.keys())
+... # dict_keys(['transform', 'transforms_per_scale', 'pyramid_sizes', 'n_scales'])
+>>> for i, (T_s, sz) in enumerate(zip(result['transforms_per_scale'],
+...                                    result['pyramid_sizes'])):
+...     print(f"Scale {i}: size={sz}, T={T_s}")
+>>>
+>>> # ── Skip finest scales for speed ──────────────────────────────────
+>>> fast_aligner = MultiscaleIC(ic, pyramid, first_scale=1, grayscale=True)
+>>> T_fast = fast_aligner.run(I1, I2)
 """
 
 import torch
@@ -24,6 +74,23 @@ class MultiscaleIC:
 
     Wraps a single-scale :class:`InverseCompositional` solver and iterates
     coarse → fine over a Gaussian pyramid.
+
+    Example
+    -------
+    >>> import torch
+    >>> from single_scale import InverseCompositional
+    >>> from multiscale import MultiscaleIC
+    >>> from gaussian_pyramid import GaussianPyramid
+    >>>
+    >>> # Minimal setup: translation-only, 3 pyramid levels
+    >>> ic = InverseCompositional(transform_type='translation', max_iter=20)
+    >>> pyr = GaussianPyramid(eta=0.5, N_scales=3)
+    >>> aligner = MultiscaleIC(ic, pyr)
+    >>>
+    >>> I1 = torch.randn(1, 1, 64, 64)
+    >>> I2 = torch.randn(1, 1, 64, 64)
+    >>> T = aligner.run(I1, I2)
+    >>> print(T)   # PlanarTransform('translation', B=1)
     """
 
     def __init__(self,

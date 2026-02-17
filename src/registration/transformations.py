@@ -5,6 +5,46 @@ All transforms store a (B, 3, 3) matrix internally.  B=1 is the
 "scalar" case and broadcasts automatically against any batch size.
 
 Ref: Briand, Facciolo, Sánchez – IPOL 2018, Table 1.
+
+Example
+-------
+>>> import torch
+>>> from transformations import PlanarTransform
+>>>
+>>> # ── Identity & basic warping ──────────────────────────────────────
+>>> T_id = PlanarTransform('homography', batch_size=2)
+>>> print(T_id)                          # PlanarTransform('homography', B=2)
+>>> img = torch.randn(2, 3, 64, 64)
+>>> warped = T_id.warp(img)              # identity ⇒ warped ≈ img
+>>>
+>>> # ── From parameters ───────────────────────────────────────────────
+>>> # pure translation (tx=3, ty=-1) for a single image
+>>> T_tr = PlanarTransform('translation', params=torch.tensor([3.0, -1.0]))
+>>> print(T_tr.matrix.shape)             # torch.Size([1, 3, 3])
+>>>
+>>> # ── From a 3×3 matrix ─────────────────────────────────────────────
+>>> H = torch.eye(3).unsqueeze(0).repeat(4, 1, 1)
+>>> H[:, 0, 2] = torch.linspace(0, 6, 4)           # increasing x-shift
+>>> T = PlanarTransform('homography', matrix=H)
+>>> print(T.batch_size)                              # 4
+>>>
+>>> # ── Composition & inversion ───────────────────────────────────────
+>>> T_ab = T_tr @ T_tr          # compose two translations
+>>> T_inv = T_tr.inv            # invert
+>>> round_trip = T_tr @ T_inv   # ≈ identity
+>>>
+>>> # ── Jacobian at identity (used internally by IC) ──────────────────
+>>> yy, xx = torch.meshgrid(torch.arange(32.), torch.arange(32.), indexing='ij')
+>>> J = PlanarTransform('affinity').jacobian(xx, yy)
+>>> print(J.shape)              # torch.Size([32, 32, 2, 6])
+>>>
+>>> # ── Visibility mask ───────────────────────────────────────────────
+>>> mask = T_tr.visibility_mask(64, 64, delta=5)
+>>> print(mask.shape, mask.dtype)   # torch.Size([1, 64, 64]) torch.bool
+>>>
+>>> # ── Pyramid rescaling ─────────────────────────────────────────────
+>>> T_coarse = T_tr.scale(0.5)      # halve translation for ×2 downscale
+>>> T_fine   = T_coarse.scale(2.0)  # recover original
 """
 
 from abc import ABC, abstractmethod
@@ -48,6 +88,25 @@ class PlanarTransform(Transformation):
     Internally stores ``self.matrix`` of shape **(B, 3, 3)**.
     B = 1 broadcasts against any other batch size in :meth:`compose` /
     :meth:`warp`.
+
+    Example
+    -------
+    >>> import torch
+    >>> from transformations import PlanarTransform
+    >>>
+    >>> # Construct from parameters (similarity: tx, ty, scale-1, rotation)
+    >>> p = torch.tensor([[2.0, -1.0, 0.05, 0.1],
+    ...                   [0.0,  3.0, 0.00, 0.0]])
+    >>> T = PlanarTransform('similarity', params=p)
+    >>> print(T)   # PlanarTransform('similarity', B=2)
+    >>>
+    >>> # Warp a batch of images
+    >>> imgs = torch.randn(2, 1, 128, 128)
+    >>> warped = T.warp(imgs)                   # (2, 1, 128, 128)
+    >>>
+    >>> # Compose with inverse ⇒ identity (up to numerics)
+    >>> residual = (T @ T.inv).matrix - torch.eye(3)
+    >>> print(residual.abs().max().item() < 1e-6)   # True
     """
 
     # ── Jacobian functions (evaluated at p = 0) ─────────────────────────────
