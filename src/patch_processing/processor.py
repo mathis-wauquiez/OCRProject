@@ -45,6 +45,11 @@ from src.patch_processing.renderer import Renderer
 from src.layout_analysis.parsing import ReadingOrder, split_to_rectangles, break_into_subcols
 from src.ocr.chat import ModelWrapper
 
+from kraken import rpred as kraken_rpred
+from kraken.containers import Segmentation, BaselineLine
+
+UNKNOWN_CHAR = "▯"
+
 
 # ------------------------------------------------------------------ #
 #  Pipeline data transfer                                              #
@@ -200,9 +205,10 @@ class PatchPreprocessing:
 
         For every subcolumn (from ``split_to_rectangles``):
           1. Crop the grayscale page image to the union bbox of its characters.
-          2. Build per-character bbox and centroid lists (relative to the crop).
-          3. Call ``self.chat_model.predict(crop, bboxes, centers)``.
-          4. Write ``char_chat`` / ``conf_chat`` back into *page_df*.
+          2. Binarize the crop (PIL mode ``"1"``).
+          3. Build a synthetic baseline from CRAFT centroids.
+          4. Run ``kraken.rpred.rpred()`` for proper line extraction + recognition.
+          5. Write ``char_chat`` / ``conf_chat`` back into *page_df*.
         """
         if rectangles is None or len(rectangles) == 0:
             return
@@ -232,7 +238,16 @@ class PatchPreprocessing:
         subcol_idx: int,
         label_to_idx: dict[int, int],
     ):
-        """Run the CHAT model on a single vertical subcolumn lane."""
+        """Run the CHAT model on a single vertical subcolumn lane.
+
+        Instead of calling ``ModelWrapper.predict()`` directly (which feeds
+        the raw image to ``net.predict()`` and gets 0 detections), we use
+        ``kraken.rpred.rpred()`` — the proper Kraken recognition pipeline
+        that handles line extraction, dewarping, and inference.
+
+        A synthetic baseline is built from the CRAFT barycenters so that
+        no separate segmentation model is needed.
+        """
         # Collect labels present in page_df for this lane
         subcol_labels = []
         for _, row in subcolumn.iterrows():
@@ -256,22 +271,59 @@ class PatchPreprocessing:
         subcol_image = image[y0:y1, x0:x1]
         if subcol_image.size == 0:
             return
+        h, w = subcol_image.shape[:2]
 
-        # Build bboxes (x0,y0,x1,y1) and CRAFT barycenters (cy,cx),
-        # both relative to the crop origin.
-        bboxes, centers = [], []
+        # Binarize → PIL mode "1" (as expected by the CHAT model — see demo)
+        pil_img = Image.fromarray(subcol_image).point(
+            lambda x: 0 if x < 128 else 255, "1"
+        )
+
+        # CRAFT barycenters relative to crop: (cy, cx)
+        centers_rel = []
         for _, r in subcol_df.iterrows():
-            left, top = int(r['left']), int(r['top'])
-            bboxes.append((left - x0, top - y0,
-                           left - x0 + int(r['width']),
-                           top  - y0 + int(r['height'])))
             cy, cx = r['centroid']
-            centers.append((float(cy) - y0, float(cx) - x0))
+            centers_rel.append((float(cy) - y0, float(cx) - x0))
 
-        result = self.chat_model.predict(subcol_image, bboxes, centers)
+        # Synthetic baseline: straight vertical line at the median x-coord,
+        # spanning the full crop height.  This tells rpred where the text
+        # column runs without needing a separate segmentation model.
+        cx_median = float(np.median([cx for _, cx in centers_rel]))
+        baseline = [(int(round(cx_median)), 0), (int(round(cx_median)), h)]
+        boundary = [(0, 0), (w, 0), (w, h), (0, h)]
 
-        # Write back
-        for lbl, char, conf in zip(subcol_labels, result.char, result.confidence):
+        line = BaselineLine(id="0", baseline=baseline, boundary=boundary)
+        seg = Segmentation(
+            type="baselines",
+            imagename="",
+            text_direction="vertical-rl",
+            script_detection=False,
+            lines=[line],
+        )
+
+        # Run Kraken recognition via rpred (line extraction + dewarping + inference)
+        pred_it = kraken_rpred.rpred(
+            self.chat_model.net, pil_img, seg, pad=self.chat_model.pad,
+        )
+
+        pred_chars, pred_confs = [], []
+        for record in pred_it:
+            pred_chars = list(record._prediction)
+            pred_confs = (
+                list(record._confidences)
+                if record._confidences else []
+            )
+
+        # Align predictions to CRAFT centroids
+        M = len(subcol_labels)
+        N = len(pred_chars)
+        if N > M:
+            pred_chars = pred_chars[:M]
+            pred_confs = pred_confs[:M]
+        elif N < M:
+            pred_chars += [UNKNOWN_CHAR] * (M - N)
+            pred_confs += [0.0] * (M - N)
+
+        for lbl, char, conf in zip(subcol_labels, pred_chars, pred_confs):
             idx = label_to_idx[lbl]
             page_df.at[idx, 'char_chat'] = char
             page_df.at[idx, 'conf_chat'] = conf
