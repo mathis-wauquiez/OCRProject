@@ -235,7 +235,7 @@ class PatchPreprocessing:
             from .svg import rotation
             row['svg'].apply_homography(rotation(-row['page_skew']))
 
-        # == Use OCR models like Qwen, Tesseract, EasyOCR, ... ==
+        # == Use OCR models like CHAT, Tesseract, EasyOCR, ... ==
 
         self._print('Getting the output from the OCR models')
         ocr_renderer = self.ocr_renderer(svg_imgs)

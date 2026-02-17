@@ -584,13 +584,64 @@ If unreadable: ▯"""
         return chars, uncertainties
 
 
+# ---------------- CHAT (kraken) OCR adapter ----------------
+
+class ChatOCR(OCRModel):
+    """Adapter that wraps the kraken-based CHAT ModelWrapper
+    (``src.ocr.chat.ModelWrapper``) behind the ``OCRModel`` interface
+    expected by the preprocessing pipeline.
+
+    Each rendered patch is treated as a single-character column image.
+    """
+
+    name = "chat"
+
+    def __init__(self, rec_model_path: str | None = None, device: str | None = None, pad: int = 16):
+        from src.ocr.chat import ModelWrapper
+        self.model = ModelWrapper(rec_model_path=rec_model_path, device=device, pad=pad)
+
+    @classmethod
+    def available(cls) -> bool:
+        try:
+            from kraken.lib.models import load_any
+            return True
+        except Exception:
+            return False
+
+    def predict_with_scores(self, patches) -> Tuple[List[str], List[float]]:
+        chars: List[str] = []
+        uncertainties: List[float] = []
+
+        for patch in tqdm_wrap(patches, self.name):
+            img = _ensure_np(patch)
+            if img.ndim == 3 and img.shape[2] == 1:
+                img = img[:, :, 0]
+
+            # Treat the whole patch as a single-character column
+            h, w = img.shape[:2]
+            bboxes = [(0, 0, w, h)]
+            centers = [(h / 2.0, w / 2.0)]
+
+            result = self.model.predict(image=img, bboxes=bboxes, centers=centers)
+
+            if result.char:
+                chars.append(result.char[0])
+                uncertainties.append(1.0 - result.confidence[0])
+            else:
+                chars.append("▯")
+                uncertainties.append(1.0)
+
+        return chars, uncertainties
+
+
 # ---------------- registry ----------------
 
 _ALL = [
     TesseractOCR,
     EasyOCRModel,
     CnOCRModel,
-    QwenOCR
+    QwenOCR,
+    ChatOCR,
 ]
 
 

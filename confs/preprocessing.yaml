@@ -32,10 +32,8 @@ patch_preprocessor:
 
   # OCR Models
   ocr_model_configs:
-    - _target_: src.ocr.wrappers.QwenOCRSingle
+    - _target_: src.ocr.wrappers.ChatOCR
       _partial_: true
-      max_pixels: 786432  # 768 x 1024 for better single char recognition
-      device_map: auto
 
     # - _target_: src.ocr.wrappers.QwenOCR
     #   _partial_: true
