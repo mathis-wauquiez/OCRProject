@@ -1,7 +1,7 @@
 # config/config.yaml
 defaults:
   - vectorizer: default
-  
+
 # === Data ===
 data:
   image_folder: "data/datasets/book_small"
@@ -26,30 +26,34 @@ patch_preprocessor:
     _target_: src.patch_processing.InkFilter
     min_size_black: 10
     min_size_white: 5
-  
+
   # Vectorizer
   vectorizer: ${vectorizer}
 
-  # OCR Models
-  ocr_model_configs:
-    - _target_: src.ocr.wrappers.QwenOCR
-      _partial_: true
-      nrows: 4
-      ncols: 4
-      max_pixels: 1048576 # '1024 x 1024' -> we will use less in practice
-      device_map: auto
-    # - _target_: src.ocr.wrappers.EasyOCRModel
+  # CHAT OCR model (Kraken-based column recogniser)
+  chat_model:
+    _target_: src.ocr.chat.ModelWrapper
+    rec_model_path: models/chat/chat_rec.mlmodel
 
-  
-  # OCR Renderer
-  ocr_renderer:
-    _target_: src.patch_processing.Renderer
-    scale: 1
-    dpi: 256
-    bin_thresh: 128
-    pad_to_multiple: null
-    verbose: ${verbose}
-  
+  # Old OCR Models (disabled — replaced by CHAT)
+  # ocr_model_configs:
+  #   - _target_: src.ocr.wrappers.QwenOCR
+  #     _partial_: true
+  #     nrows: 4
+  #     ncols: 4
+  #     max_pixels: 1048576
+  #     device_map: auto
+  #   - _target_: src.ocr.wrappers.EasyOCRModel
+
+  # Old OCR Renderer (disabled — not needed with CHAT)
+  # ocr_renderer:
+  #   _target_: src.patch_processing.Renderer
+  #   scale: 1
+  #   dpi: 256
+  #   bin_thresh: 128
+  #   pad_to_multiple: null
+  #   verbose: ${verbose}
+
   # HOG Renderer
   hog_renderer:
     _target_: src.patch_processing.Renderer
@@ -58,7 +62,7 @@ patch_preprocessor:
     bin_thresh: 128
     pad_to_multiple: 24
     verbose: ${verbose}
-  
+
   # HOG Parameters
   hog_params:
     _target_: src.patch_processing.HOGParameters

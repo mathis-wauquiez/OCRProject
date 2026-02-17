@@ -29,10 +29,9 @@ from ..layout_analysis.skew import get_document_orientation
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from contextlib import contextmanager
 from queue import Queue
 from threading import Thread
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 
@@ -41,13 +40,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-# type-hinting
 from src.vectorization.wrapper import BinaryShapeVectorizer
-from src.ocr.wrappers import OCRModel
 from src.patch_processing.renderer import Renderer
-from typing import List, Optional
-
-from src.layout_analysis.parsing import ReadingOrder
+from src.layout_analysis.parsing import ReadingOrder, split_to_rectangles, break_into_subcols
+from src.ocr.chat import ModelWrapper
 
 
 # ------------------------------------------------------------------ #
@@ -59,6 +55,10 @@ class PagePayload:
     """Data handed off from the CPU stage to the GPU stage."""
     page_df: pd.DataFrame
     svg_imgs: list
+    # Raw grayscale page image (H, W) uint8 — used by the CHAT model
+    image: np.ndarray = field(default=None)
+    # Subcolumn layout returned by split_to_rectangles — used for CHAT grouping
+    rectangles: pd.DataFrame = field(default=None)
 
 
 SENTINEL = None  # signals end of the producer stream
@@ -74,8 +74,7 @@ class PatchPreprocessing:
                  reading_order: ReadingOrder,
                  ink_filter: InkFilter,
                  vectorizer: BinaryShapeVectorizer,
-                 ocr_model_configs: List[dict],
-                 ocr_renderer: Renderer,
+                 chat_model: ModelWrapper,
                  hog_renderer: Renderer,
                  hog_params: HOGParameters,
                  output_viz: None | Path = None,
@@ -85,8 +84,7 @@ class PatchPreprocessing:
         self.vectorizer = vectorizer
         self.verbose = verbose
         self.output_viz = Path(output_viz) if output_viz is not None else None
-        self.ocr_model_configs = ocr_model_configs
-        self.ocr_renderer = ocr_renderer
+        self.chat_model = chat_model
         self.hog_renderer = hog_renderer
         self.hog = HOG(hog_params)
         self.reading_order = reading_order
@@ -101,36 +99,34 @@ class PatchPreprocessing:
 
     def __call__(self, image_folder, comps_folder):
         files = sorted(next(os.walk(image_folder))[2])
-        queue: Queue[Optional[PagePayload]] = Queue(maxsize=2)
+        queue: Queue[PagePayload | None] = Queue(maxsize=2)
 
-        with self._load_all_ocr_models() as ocr_models:
+        # --- Producer thread (CPU-bound work) ---
+        def cpu_worker():
+            for page_idx, file in enumerate(files):
+                payload = self._cpu_stage(
+                    page_idx, file, image_folder, comps_folder
+                )
+                queue.put(payload)
+            queue.put(SENTINEL)
 
-            # --- Producer thread (CPU-bound work) ---
-            def cpu_worker():
-                for page_idx, file in enumerate(files):
-                    payload = self._cpu_stage(
-                        page_idx, file, image_folder, comps_folder
-                    )
-                    queue.put(payload)
-                queue.put(SENTINEL)
+        producer = Thread(target=cpu_worker, daemon=True)
+        producer.start()
 
-            producer = Thread(target=cpu_worker, daemon=True)
-            producer.start()
+        # --- Consumer (GPU work, main thread) ---
+        page_dataframes = []
+        pbar = tqdm(total=len(files), desc="Pages")
 
-            # --- Consumer (GPU work, main thread) ---
-            page_dataframes = []
-            pbar = tqdm(total=len(files), desc="Pages")
+        while True:
+            payload = queue.get()
+            if payload is SENTINEL:
+                break
+            self._gpu_stage(payload)
+            page_dataframes.append(payload.page_df)
+            pbar.update(1)
 
-            while True:
-                payload = queue.get()
-                if payload is SENTINEL:
-                    break
-                self._gpu_stage(payload, ocr_models)
-                page_dataframes.append(payload.page_df)
-                pbar.update(1)
-
-            producer.join()
-            pbar.close()
+        producer.join()
+        pbar.close()
 
         # Concatenate and sort globally
         result = pd.concat(page_dataframes, ignore_index=True)
@@ -147,7 +143,7 @@ class PatchPreprocessing:
     def _cpu_stage(self, page_idx, file, image_folder, comps_folder
                    ) -> PagePayload:
         """All CPU-bound work for a single page."""
-        page_df = self._extract_page(
+        page_df, image, rectangles = self._extract_page(
             page_idx, file, image_folder, comps_folder
         )
 
@@ -169,40 +165,131 @@ class PatchPreprocessing:
         for svg in svg_imgs:
             svg.apply_homography(rotation(-page_skew))
 
-        return PagePayload(page_df=page_df, svg_imgs=svg_imgs)
+        return PagePayload(
+            page_df=page_df,
+            svg_imgs=svg_imgs,
+            image=image,
+            rectangles=rectangles,
+        )
 
     # ------------------------------------------------------------------ #
     #  GPU stage: OCR → HOG                                                #
     # ------------------------------------------------------------------ #
 
-    def _gpu_stage(self, payload: PagePayload, ocr_models: list):
+    def _gpu_stage(self, payload: PagePayload):
         """All GPU-bound work for a single page."""
-        page_df, svg_imgs = payload.page_df, payload.svg_imgs
-        file = page_df['file'].iloc[0]
+        file = payload.page_df['file'].iloc[0]
 
-        # OCR
-        self._print(f'  [{file}] Running OCR')
-        ocr_rendered = self.ocr_renderer(svg_imgs)
+        self._print(f'  [{file}] Running CHAT OCR')
+        self._run_chat_ocr(payload.page_df, payload.image, payload.rectangles)
 
-        for ocr_model in ocr_models:
-            if hasattr(ocr_model, 'predict_with_scores'):
-                chars, uncertainties = ocr_model.predict_with_scores(ocr_rendered)
-                page_df[f'unc_{ocr_model.name}'] = uncertainties
-            else:
-                chars = ocr_model(ocr_rendered)
-            page_df[f'char_{ocr_model.name}'] = chars
-
-        # HOG
         self._print(f'  [{file}] Computing HOG')
-        self._compute_hog(page_df, svg_imgs)
+        self._compute_hog(payload.page_df, payload.svg_imgs)
+
+    # ------------------------------------------------------------------ #
+    #  CHAT OCR (one page)                                                 #
+    # ------------------------------------------------------------------ #
+
+    def _run_chat_ocr(
+        self,
+        page_df: pd.DataFrame,
+        image: np.ndarray,
+        rectangles: pd.DataFrame,
+    ):
+        """Feed each subcolumn image + CRAFT barycenters to the CHAT model.
+
+        For every subcolumn (from ``split_to_rectangles``):
+          1. Crop the grayscale page image to the union bbox of its characters.
+          2. Build per-character bbox and centroid lists (relative to the crop).
+          3. Call ``self.chat_model.predict(crop, bboxes, centers)``.
+          4. Write ``char_chat`` / ``conf_chat`` back into *page_df*.
+        """
+        if rectangles is None or len(rectangles) == 0:
+            return
+
+        # label → DataFrame-row-index for O(1) write-back
+        label_to_idx: dict[int, int] = {
+            int(row['label']): i for i, row in page_df.iterrows()
+        }
+
+        page_df['char_chat'] = None
+        page_df['conf_chat'] = None
+
+        for _, col_rects in rectangles.groupby('col_idx'):
+            for subcolumn in break_into_subcols(col_rects):
+                n_subcols = len(subcolumn['labels'].iloc[0])
+
+                for subcol_idx in range(n_subcols):
+                    self._predict_subcol(
+                        page_df, image, subcolumn, subcol_idx, label_to_idx,
+                    )
+
+    def _predict_subcol(
+        self,
+        page_df: pd.DataFrame,
+        image: np.ndarray,
+        subcolumn: pd.DataFrame,
+        subcol_idx: int,
+        label_to_idx: dict[int, int],
+    ):
+        """Run the CHAT model on a single vertical subcolumn lane."""
+        # Collect labels present in page_df for this lane
+        subcol_labels = []
+        for _, row in subcolumn.iterrows():
+            labels_in_row = row['labels']
+            if subcol_idx < len(labels_in_row):
+                lbl = int(labels_in_row[subcol_idx])
+                if lbl != 0 and lbl in label_to_idx:
+                    subcol_labels.append(lbl)
+
+        if not subcol_labels:
+            return
+
+        subcol_df = page_df.loc[[label_to_idx[l] for l in subcol_labels]]
+
+        # Tight bounding box around all characters (full-page coords)
+        x0 = int(subcol_df['left'].min())
+        y0 = int(subcol_df['top'].min())
+        x1 = int((subcol_df['left'] + subcol_df['width']).max())
+        y1 = int((subcol_df['top'] + subcol_df['height']).max())
+
+        subcol_image = image[y0:y1, x0:x1]
+        if subcol_image.size == 0:
+            return
+
+        # Build bboxes (x0,y0,x1,y1) and CRAFT barycenters (cy,cx),
+        # both relative to the crop origin.
+        bboxes, centers = [], []
+        for _, r in subcol_df.iterrows():
+            left, top = int(r['left']), int(r['top'])
+            bboxes.append((left - x0, top - y0,
+                           left - x0 + int(r['width']),
+                           top  - y0 + int(r['height'])))
+            cy, cx = r['centroid']
+            centers.append((float(cy) - y0, float(cx) - x0))
+
+        result = self.chat_model.predict(subcol_image, bboxes, centers)
+
+        # Write back
+        for lbl, char, conf in zip(subcol_labels, result.char, result.confidence):
+            idx = label_to_idx[lbl]
+            page_df.at[idx, 'char_chat'] = char
+            page_df.at[idx, 'conf_chat'] = conf
 
     # ------------------------------------------------------------------ #
     #  Extraction (one page)                                               #
     # ------------------------------------------------------------------ #
 
     def _extract_page(self, page_idx, file, image_folder, comps_folder
-                      ) -> pd.DataFrame:
-        """Load components, extract patches, apply reading order."""
+                      ) -> tuple[pd.DataFrame, np.ndarray, pd.DataFrame]:
+        """Load components, extract patches, apply reading order.
+
+        Returns
+        -------
+        page_df : pd.DataFrame
+        image : np.ndarray  shape (H, W) uint8 — grayscale page image
+        rectangles : pd.DataFrame  — subcolumn layout from split_to_rectangles
+        """
         self._print(f'  [{file}] Extracting patches')
 
         img_np = np.array(Image.open(image_folder / file))
@@ -225,10 +312,10 @@ class PatchPreprocessing:
 
         lbls = [r.label for r in img_comp.regions
                  if not img_comp.is_deleted(r.label)]
-        
+
         centroids = [r.centroid for r in img_comp.regions
                      if not img_comp.is_deleted(r.label)]
-        
+
         stats = img_comp.stats[1:]
 
         page_skew = get_document_orientation(img_np)
@@ -248,6 +335,13 @@ class PatchPreprocessing:
         })
 
         # Reading order + optional visualisation
+        # split_to_rectangles is called here (same params as inside ReadingOrder)
+        # so we can reuse the subcolumn structure in the CHAT OCR stage.
+        rectangles = split_to_rectangles(
+            craft_comp.labels,
+            min_col_area=self.reading_order.min_col_area,
+        )
+
         if self.output_viz is not None:
             canvas1 = craft_comp.segm_img
             canvas2 = np.array(Image.open(image_folder / file))
@@ -257,7 +351,10 @@ class PatchPreprocessing:
         else:
             self.reading_order(craft_comp.labels, page_df)
 
-        return page_df
+        # Return (H, W) uint8 image — squeeze the trailing channel added above
+        image_hw = img_np[:, :, 0]
+
+        return page_df, image_hw, rectangles
 
     # ------------------------------------------------------------------ #
     #  HOG (one page)                                                      #
@@ -299,27 +396,6 @@ class PatchPreprocessing:
             start_idx += h.shape[0]
 
         page_df['histogram'] = list(histograms.cpu().numpy())
-
-    # ------------------------------------------------------------------ #
-    #  OCR model lifecycle                                                 #
-    # ------------------------------------------------------------------ #
-
-    @contextmanager
-    def _load_all_ocr_models(self):
-        """Load all OCR models for the duration of the run, then clean up."""
-        models = []
-        try:
-            for ocr_partial in self.ocr_model_configs:
-                model = ocr_partial()
-                self._print(f"Loaded OCR model: {model.name}")
-                models.append(model)
-            yield models
-        finally:
-            for model in models:
-                self._print(f"Unloading {model.name}")
-                del model
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
     # ------------------------------------------------------------------ #
     #  Visualisation helpers                                               #
