@@ -29,7 +29,6 @@ from ..layout_analysis.skew import get_document_orientation
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from contextlib import contextmanager
 from queue import Queue
 from threading import Thread
 from dataclasses import dataclass, field
@@ -46,7 +45,7 @@ from src.vectorization.wrapper import BinaryShapeVectorizer
 # from src.ocr.wrappers import OCRModel          # old Qwen/wrapper-based OCR — disabled
 # from src.patch_processing.renderer import Renderer  # only needed for old OCR renderer
 from src.patch_processing.renderer import Renderer   # still used for HOG renderer
-from typing import List, Optional
+from typing import Optional
 
 from src.layout_analysis.parsing import ReadingOrder, split_to_rectangles, break_into_subcols
 from src.ocr.chat import ModelWrapper
