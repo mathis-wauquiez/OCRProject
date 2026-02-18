@@ -493,11 +493,11 @@ class PatchPreprocessing:
                     ys = [pt[1] for pt in poly]
                     y_min, y_max = min(ys), max(ys)
                     axes[i][0].axhline(
-                        y_min, color='cyan', linewidth=0.6,
+                        y_min, color='cyan', linewidth=3,
                         linestyle='--', alpha=0.7,
                     )
                     axes[i][0].axhline(
-                        y_max, color='cyan', linewidth=0.6,
+                        y_max, color='cyan', linewidth=3,
                         linestyle='--', alpha=0.7,
                     )
 
@@ -505,7 +505,7 @@ class PatchPreprocessing:
             if data.centers_rel:
                 cx_med = float(np.median([cx for _, cx in data.centers_rel]))
                 axes[i][0].axvline(
-                    cx_med, color='yellow', linewidth=1.0,
+                    cx_med, color='yellow', linewidth=5,
                     linestyle='-', alpha=0.8,
                 )
 
@@ -513,7 +513,7 @@ class PatchPreprocessing:
             for (cy, cx) in data.centers_rel:
                 axes[i][0].plot(
                     cx, cy, '+',
-                    color='red', markersize=5, markeredgewidth=0.8,
+                    color='red', markersize=25, markeredgewidth=3.5,
                 )
 
             n_kraken = len(data.raw_pred_chars)

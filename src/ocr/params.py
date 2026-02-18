@@ -129,9 +129,6 @@ class PipelineOutput:
     score_text: torch.Tensor
     "Score map output for texts from the CRAFT model"
 
-    score_link: torch.Tensor = None
-    "Score map output for link/affinity regions from the CRAFT model"
-
     craft_components: connectedComponent
     "CRAFT text components after filtering and merging (check deletion/merge history for intermediate stages)"
 
@@ -143,7 +140,10 @@ class PipelineOutput:
 
     characters: connectedComponent
     "Final character components after all filtering (proximity, size, aspect ratio, etc.)"
-    
+
+    score_link: torch.Tensor = None
+    "Score map output for link/affinity regions from the CRAFT model"
+
     similarity_matrix: np.ndarray = None
     "Similarity matrix between filtered image components and CRAFT components"
     
