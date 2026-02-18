@@ -82,7 +82,9 @@ class graphClusteringSweep(AutoReport):
             jpeg_quality: int = 70,
     ):
         config = ReportConfig(
-            dpi=300,
+            dpi=image_dpi,
+            output_format='jpeg' if use_jpeg else 'png',
+            image_quality=jpeg_quality,
             theme=Theme.DEFAULT,
             show_progress=False,
             max_image_size=(1920, 1080),

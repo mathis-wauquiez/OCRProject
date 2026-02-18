@@ -17,7 +17,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 
 from notebook_utils.parquet_utils import save_dataframe
-from src.auto_report import AutoReport
+from src.auto_report import AutoReport, ReportConfig
 
 import numpy as np
 import pandas as pd
@@ -98,6 +98,7 @@ def main(cfg: DictConfig):
     report = AutoReport(
         title="Preprocessing Report",
         output_dir=str(report_dir),
+        config=ReportConfig(dpi=100, output_format='jpeg', image_quality=75),
     )
 
     # Instantiate - Hydra handles everything
