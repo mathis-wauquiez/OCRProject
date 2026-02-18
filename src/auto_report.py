@@ -1081,39 +1081,65 @@ class AutoReport:
             self.logger.error(f"Failed to add content to report: {e}")
             raise ReportError(f"Failed to add content: {e}")
     
-    def report_figure(self, 
-                      fig: plt.Figure, 
+    def report_figure(self,
+                      fig: plt.Figure,
                       title: Optional[str] = None,
                       width: Optional[float] = None,
                       height: Optional[float] = None,
                       **kwargs):
-        """Add a matplotlib figure to the report with validation."""
+        """Add a matplotlib figure to the report with validation.
+
+        The figure is rendered to base64 immediately and the matplotlib object
+        is closed right away, so that only the compact image bytes are held in
+        memory for the rest of the run (prevents OOM on multi-page datasets).
+        """
         if not MATPLOTLIB_AVAILABLE:
             raise MissingDependencyError(
                 "matplotlib not available. Install with: pip install matplotlib"
             )
-        
+
         if not isinstance(fig, plt.Figure):
             raise ValidationError(f"Expected plt.Figure, got {type(fig)}")
-        
+
         try:
             if title is None and fig._suptitle is not None:
                 title = fig._suptitle.get_text()
-            
-            item = ReportItem(
-                content_type='figure',
-                content=fig,
-                title=title or 'Untitled Figure',
-                width=width or fig.get_figwidth(),
-                height=height or fig.get_figheight(),
-                metadata={'kwargs': kwargs}
-            )
+            title = title or 'Untitled Figure'
 
+            # --- Eager render: convert to base64 now and free the figure ---
+            use_jpeg = self.config.output_format.lower() in ('jpeg', 'jpg')
+            fmt = 'jpeg' if use_jpeg else 'png'
+            buf = io.BytesIO()
+            save_kwargs: Dict = dict(bbox_inches='tight', dpi=self.config.dpi)
+            if use_jpeg:
+                save_kwargs['pil_kwargs'] = {
+                    'quality': self.config.image_quality,
+                    'optimize': True,
+                }
+            fig.savefig(buf, format=fmt, **save_kwargs)
+            buf.seek(0)
+            img_b64 = base64.b64encode(buf.read()).decode()
+            mime = 'jpeg' if use_jpeg else 'png'
+            html_snippet = (
+                f'<div class="figure">'
+                f'<img src="data:image/{mime};base64,{img_b64}" alt="{title}">'
+                f'</div>'
+            )
+            plt.close(fig)
+            # -----------------------------------------------------------------
+
+            item = ReportItem(
+                content_type='raw_html',
+                content=html_snippet,
+                title=title,
+                width=width,
+                height=height,
+                metadata={'kwargs': kwargs, 'pre_rendered': True},
+            )
             self._add_item(item)
-            self._figures_to_close.append(fig)
-            
-            self.logger.info(f"✓ Added figure: {item.title}")
-            
+
+            self.logger.info(f"✓ Added figure: {title}")
+
         except Exception as e:
             self.logger.error(f"Failed to add figure: {e}")
             raise ReportError(f"Failed to add figure: {e}")
