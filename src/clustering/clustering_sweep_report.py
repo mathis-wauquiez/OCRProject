@@ -785,10 +785,14 @@ class ClusteringSweepReporter:
                     best_split_log, best_threshold
                 )
                 self.report_split_visualization(dataframe, best_split_log, best_threshold)
+
+        # Section 2b: Post-split clusters (separate section)
+        if did_split:
+            with self._section("Clusters (Post-Split)"):
                 self.report_clusters_section(
                     dataframe, 'membership', purity_dataframe,
                     representatives, graph,
-                    title_prefix="All Clusters Analysis After Splitting"
+                    title_prefix="All Clusters Analysis (After Splitting)"
                 )
 
         # Section 3: Summary & metrics
