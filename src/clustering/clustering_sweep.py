@@ -144,7 +144,7 @@ class graphClusteringSweep(AutoReport):
 
     def _evaluate_membership(self, target_labels, membership, exclude_unknown=True):
         if exclude_unknown:
-            mask = target_labels != UNKNOWN_LABEL
+            mask = pd.Series(target_labels).fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
             target_labels = target_labels[mask]
             membership = [m for m, keep in zip(membership, mask) if keep]
 
@@ -326,7 +326,7 @@ class graphClusteringSweep(AutoReport):
 
         for cluster, cluster_data in dataframe.groupby(membership_col):
             cluster_size = len(cluster_data)
-            known_mask = cluster_data[self.target_lbl] != UNKNOWN_LABEL
+            known_mask = cluster_data[self.target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
             known_data = cluster_data[known_mask]
             unknown_count = (~known_mask).sum()
 

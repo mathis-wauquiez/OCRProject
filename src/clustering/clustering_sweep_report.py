@@ -508,7 +508,7 @@ class ClusteringSweepReporter:
 
             for sub_id, sub_df in orig_df.groupby('membership'):
                 sub_size = len(sub_df)
-                known = sub_df[sub_df[target_lbl] != UNKNOWN_LABEL]
+                known = sub_df[sub_df[target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL]
                 dom_label = known[target_lbl].value_counts().index[0] if len(known) else UNKNOWN_LABEL
                 sub_purity = (known[target_lbl].value_counts().iloc[0] / len(known)
                               if len(known) else float('nan'))

@@ -38,6 +38,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.optimize import linear_sum_assignment
 
 
 from src.vectorization.wrapper import BinaryShapeVectorizer
@@ -75,10 +76,14 @@ class _SubcolVizData:
     """Visualization payload collected by _predict_subcol for deferred rendering."""
     subcol_image: np.ndarray          # grayscale crop (H, W) uint8
     pil_img: Image.Image              # binarized PIL image (mode "1")
-    centers_rel: list                 # [(cy, cx), …] relative to crop
-    char_boxes_rel: list              # [(left, top, w, h), …] relative to crop
-    pred_chars: list
-    pred_confs: list
+    centers_rel: list                 # [(cy, cx), …] CRAFT centroids in crop coords
+    char_boxes_rel: list              # [(left, top, w, h), …] CRAFT bboxes in crop
+    pred_chars: list                  # matched prediction per CRAFT centroid
+    pred_confs: list                  # matched confidence per CRAFT centroid
+    # Raw Kraken output + spatial info from cuts
+    cut_polys: list = field(default_factory=list)   # 4-point quads in crop coords
+    raw_pred_chars: list = field(default_factory=list)
+    raw_pred_confs: list = field(default_factory=list)
 
 
 # ------------------------------------------------------------------ #
@@ -342,31 +347,63 @@ class PatchPreprocessing:
             self.chat_model.net, pil_img, seg, pad=self.chat_model.pad,
         )
 
-        pred_chars, pred_confs = [], []
+        raw_pred_chars, raw_pred_confs, cut_polys = [], [], []
         for record in pred_it:
-            pred_chars = list(record._prediction)
-            pred_confs = (
+            raw_pred_chars = list(record._prediction)
+            raw_pred_confs = (
                 list(record._confidences)
                 if record._confidences else []
             )
+            # record.cuts is a property returning 4-point polygons in the
+            # same coordinate system as the baseline/boundary (= crop coords).
+            try:
+                cut_polys = [list(poly) for poly in record.cuts]
+            except Exception:
+                cut_polys = []
 
-        # Ensure pred_confs is always aligned with pred_chars.
-        # When the model returns no confidences, default to 1.0 so the
-        # zip in the write-back loop is never cut short.
-        if len(pred_confs) < len(pred_chars):
-            pred_confs += [1.0] * (len(pred_chars) - len(pred_confs))
+        # Ensure confs aligned with chars
+        if len(raw_pred_confs) < len(raw_pred_chars):
+            raw_pred_confs += [1.0] * (len(raw_pred_chars) - len(raw_pred_confs))
 
-        # Align predictions to CRAFT centroids
+        # --- Spatial matching via Kraken cuts --------------------------------
+        # Each cut_polys[j] is a 4-point polygon [[x,y], …] in crop coords.
+        # Compute its center-y and match to the nearest CRAFT centroid-y.
         M = len(subcol_labels)
-        N = len(pred_chars)
-        if N > M:
-            pred_chars = pred_chars[:M]
-            pred_confs = pred_confs[:M]
-        elif N < M:
-            pred_chars += [UNKNOWN_CHAR] * (M - N)
-            pred_confs += [0.0] * (M - N)
+        N = len(raw_pred_chars)
 
-        for lbl, char, conf in zip(subcol_labels, pred_chars, pred_confs):
+        matched_chars = [UNKNOWN_CHAR] * M
+        matched_confs = [0.0] * M
+
+        if cut_polys and len(cut_polys) == N and N > 0 and M > 0:
+            # Center-y of each Kraken cut polygon
+            cut_cy = np.array([
+                float(np.mean([pt[1] for pt in poly]))
+                for poly in cut_polys
+            ])
+            # CRAFT centroid y-positions
+            craft_cy = np.array([cy for cy, _cx in centers_rel])
+
+            # Cost matrix: |craft_cy[i] - cut_cy[j]|
+            cost = np.abs(craft_cy[:, None] - cut_cy[None, :])
+
+            # Reject matches farther than 1.5× average character height
+            avg_h = float(np.mean([bh for _, _, _, bh in char_boxes_rel])) \
+                if char_boxes_rel else 50.0
+            max_dist = avg_h * 1.5
+
+            row_ind, col_ind = linear_sum_assignment(cost)
+            for ci, pi in zip(row_ind, col_ind):
+                if cost[ci, pi] <= max_dist:
+                    matched_chars[ci] = raw_pred_chars[pi]
+                    matched_confs[ci] = raw_pred_confs[pi]
+        else:
+            # Fallback: naive positional alignment (no cuts available)
+            for i in range(min(M, N)):
+                matched_chars[i] = raw_pred_chars[i]
+                matched_confs[i] = raw_pred_confs[i]
+
+        # Write back to page_df
+        for lbl, char, conf in zip(subcol_labels, matched_chars, matched_confs):
             idx = label_to_idx[lbl]
             page_df.at[idx, 'char_chat'] = char
             page_df.at[idx, 'conf_chat'] = conf
@@ -377,8 +414,11 @@ class PatchPreprocessing:
                 pil_img=pil_img,
                 centers_rel=centers_rel,
                 char_boxes_rel=char_boxes_rel,
-                pred_chars=pred_chars,
-                pred_confs=pred_confs,
+                pred_chars=matched_chars,
+                pred_confs=matched_confs,
+                cut_polys=cut_polys,
+                raw_pred_chars=raw_pred_chars,
+                raw_pred_confs=raw_pred_confs,
             )
         return None
 
@@ -442,28 +482,42 @@ class PatchPreprocessing:
 
         for i, data in enumerate(subcols):
             bin_arr = np.array(data.pil_img)
+            h_img, w_img = bin_arr.shape[:2]
 
-            # ---- Left: clean binarized image ----------------------------
+            # ---- Left: binarized image + cut boundaries -----------------
             axes[i][0].imshow(bin_arr, cmap='gray')
+            # Overlay cut polygon boundaries as horizontal dashed lines
+            for poly in data.cut_polys:
+                if poly and len(poly) >= 4:
+                    ys = [pt[1] for pt in poly]
+                    y_min, y_max = min(ys), max(ys)
+                    axes[i][0].axhline(
+                        y_min, color='cyan', linewidth=0.6,
+                        linestyle='--', alpha=0.7,
+                    )
+                    axes[i][0].axhline(
+                        y_max, color='cyan', linewidth=0.6,
+                        linestyle='--', alpha=0.7,
+                    )
+            n_kraken = len(data.raw_pred_chars)
+            n_craft = len(data.centers_rel)
             axes[i][0].set_title(
-                f'Subcol {i + 1}  ({len(data.pred_chars)} chars)',
+                f'Subcol {i + 1}  (CRAFT {n_craft}, Kraken {n_kraken})',
                 fontsize=8,
             )
             axes[i][0].axis('off')
 
             # ---- Right: predicted characters panel ----------------------
             self._draw_prediction_panel(
-                axes[i][1],
-                data.subcol_image,
-                data.char_boxes_rel,
-                data.centers_rel,
-                data.pred_chars,
-                data.pred_confs,
+                axes[i][1], data,
             )
-            chars_preview = ''.join(data.pred_chars[:12])
-            if len(data.pred_chars) > 12:
+            matched_known = [c for c in data.pred_chars if c != UNKNOWN_CHAR]
+            chars_preview = ''.join(matched_known[:12])
+            if len(matched_known) > 12:
                 chars_preview += '…'
-            avg_conf = float(np.mean(data.pred_confs)) if data.pred_confs else 0.0
+            avg_conf = float(np.mean([
+                c for c in data.pred_confs if c > 0
+            ])) if any(c > 0 for c in data.pred_confs) else 0.0
             axes[i][1].set_title(
                 f'"{chars_preview}"  avg conf {avg_conf:.0%}',
                 fontsize=8,
@@ -475,61 +529,129 @@ class PatchPreprocessing:
     def _draw_prediction_panel(
         self,
         ax: plt.Axes,
-        subcol_image: np.ndarray,
-        char_boxes_rel: list,
-        centers_rel: list,
-        pred_chars: list,
-        pred_confs: list,
+        data: '_SubcolVizData',
     ):
         """Fill *ax* with predicted characters on a white background.
 
-        Each character is drawn at the same (cx, cy) position as the
-        original character in the crop, so the two panels align visually.
-        A light-blue rectangle shows the original bounding box.  Text color
-        encodes confidence: green ≥ 0.8, orange ≥ 0.5, red < 0.5.
+        When Kraken cuts are available, each raw prediction is drawn at the
+        y-center of its cut polygon so the spatial alignment between CRAFT
+        centroids and Kraken detections is visible.  CRAFT bounding boxes
+        are shown as light-blue rectangles and a thin grey line connects
+        each matched prediction to the CRAFT centroid it was assigned to.
 
-        Font size is chosen so the rendered glyph roughly fills the
-        character bounding box height.  matplotlib's font size unit is
-        points; we approximate 1 pt ≈ 1 px for the typical figure DPI used
-        in these reports, so ``fontsize ≈ 0.65 * bh`` works well in practice.
+        When no cuts are available, predictions are drawn at the CRAFT
+        centroid positions (fallback).
         """
-        h, w = subcol_image.shape[:2]
+        h, w = data.subcol_image.shape[:2]
 
-        # White background at the same pixel extent as the original crop
         ax.imshow(np.full((h, w, 3), 255, dtype=np.uint8))
         ax.set_xlim(0, w)
-        ax.set_ylim(h, 0)   # image convention: y increases downward
+        ax.set_ylim(h, 0)  # image convention: y increases downward
         ax.set_aspect('equal')
         ax.axis('off')
 
-        for (cy, cx), (bx, by, bw, bh), char, conf in zip(
-            centers_rel, char_boxes_rel, pred_chars, pred_confs
-        ):
-            # Light bounding-box outline to show the original character area
+        # Draw light CRAFT bounding boxes for reference
+        for (bx, by, bw, bh) in data.char_boxes_rel:
             rect = plt.Rectangle(
                 (bx, by), bw, bh,
-                fill=False, edgecolor='lightsteelblue', linewidth=0.8,
+                fill=False, edgecolor='lightsteelblue', linewidth=0.6,
             )
             ax.add_patch(rect)
 
-            # Confidence color
-            if conf >= 0.8:
-                color = 'darkgreen'
-            elif conf >= 0.5:
-                color = 'darkorange'
-            else:
-                color = 'red'
+        # Small CRAFT centroid markers
+        for (cy, cx) in data.centers_rel:
+            ax.plot(cx, cy, 'x', color='lightsteelblue', markersize=4,
+                    markeredgewidth=0.8)
 
-            # Font size: ~0.65 × bh in points fills the box at typical DPI
-            fontsize = max(6, min(bh * 0.65, 32))
+        if data.cut_polys and len(data.cut_polys) == len(data.raw_pred_chars):
+            # --- Draw raw predictions at their cut y-centers -------------
+            # Precompute a CRAFT-centroid lookup for matched predictions
+            # (matched_chars[i] != UNKNOWN_CHAR ↔ CRAFT idx i was matched)
+            # Build reverse map: which raw pred idx → which CRAFT idx
+            craft_cy = np.array([cy for cy, _cx in data.centers_rel])
+            cut_cy = np.array([
+                float(np.mean([pt[1] for pt in poly]))
+                for poly in data.cut_polys
+            ])
+            # Re-derive the match for drawing connecting lines
+            cost = np.abs(craft_cy[:, None] - cut_cy[None, :])
+            avg_h = float(np.mean([
+                bh for _, _, _, bh in data.char_boxes_rel
+            ])) if data.char_boxes_rel else 50.0
+            max_dist = avg_h * 1.5
+            row_ind, col_ind = linear_sum_assignment(cost)
+            match_pred_to_craft = {}
+            for ci, pi in zip(row_ind, col_ind):
+                if cost[ci, pi] <= max_dist:
+                    match_pred_to_craft[pi] = ci
 
-            ax.text(
-                cx, cy, char,
-                ha='center', va='center',
-                color=color,
-                fontsize=fontsize,
-                fontweight='bold',
-            )
+            mid_x = w / 2.0
+            for j, (char, conf, poly) in enumerate(zip(
+                data.raw_pred_chars, data.raw_pred_confs, data.cut_polys
+            )):
+                cy_cut = float(np.mean([pt[1] for pt in poly]))
+
+                # Confidence color
+                if conf >= 0.8:
+                    color = 'darkgreen'
+                elif conf >= 0.5:
+                    color = 'darkorange'
+                else:
+                    color = 'red'
+
+                # Font size from cut polygon height
+                ys = [pt[1] for pt in poly]
+                cut_h = max(ys) - min(ys)
+                fontsize = max(6, min(cut_h * 0.65, 32))
+
+                ax.text(
+                    mid_x, cy_cut, char,
+                    ha='center', va='center',
+                    color=color, fontsize=fontsize, fontweight='bold',
+                )
+
+                # Thin connecting line to matched CRAFT centroid
+                if j in match_pred_to_craft:
+                    ci = match_pred_to_craft[j]
+                    craft_y = data.centers_rel[ci][0]
+                    ax.plot(
+                        [mid_x + fontsize * 0.6, w - 2],
+                        [cy_cut, craft_y],
+                        color='silver', linewidth=0.5, alpha=0.6,
+                    )
+
+            # Mark unmatched CRAFT centroids with a red '?'
+            matched_craft_set = set(match_pred_to_craft.values())
+            for ci, ((cy, cx), (_, _, _, bh)) in enumerate(zip(
+                data.centers_rel, data.char_boxes_rel
+            )):
+                if ci not in matched_craft_set:
+                    fs = max(6, min(bh * 0.5, 24))
+                    ax.text(
+                        mid_x, cy, '?',
+                        ha='center', va='center',
+                        color='red', fontsize=fs, fontstyle='italic',
+                        alpha=0.6,
+                    )
+        else:
+            # Fallback: draw matched predictions at CRAFT centroid positions
+            mid_x = w / 2.0
+            for (cy, cx), (_, _, _, bh), char, conf in zip(
+                data.centers_rel, data.char_boxes_rel,
+                data.pred_chars, data.pred_confs,
+            ):
+                if conf >= 0.8:
+                    color = 'darkgreen'
+                elif conf >= 0.5:
+                    color = 'darkorange'
+                else:
+                    color = 'red'
+                fontsize = max(6, min(bh * 0.65, 32))
+                ax.text(
+                    mid_x, cy, char,
+                    ha='center', va='center',
+                    color=color, fontsize=fontsize, fontweight='bold',
+                )
 
     # ------------------------------------------------------------------ #
     #  Extraction (one page)                                               #
