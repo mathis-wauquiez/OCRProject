@@ -9,7 +9,6 @@ data:
   output_path: "outputs/processed_patches_book1complete"
 
 verbose: false
-return_plots: false
 
 # === Patch Preprocessor ===
 patch_preprocessor:

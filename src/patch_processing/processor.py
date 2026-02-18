@@ -85,7 +85,8 @@ class PatchPreprocessing:
                  hog_params: HOGParameters,
                  output_viz: None | Path = None,
                  verbose=True,
-                 viz_report: AutoReport | None = None):
+                 viz_report: AutoReport | None = None,
+                 max_viz_per_page: int = 5):
 
         self.ink_filter = ink_filter
         self.vectorizer = vectorizer
@@ -96,6 +97,7 @@ class PatchPreprocessing:
         self.hog = HOG(hog_params)
         self.reading_order = reading_order
         self.viz_report = viz_report
+        self.max_viz_per_page = max_viz_per_page
         self._viz_counter = 0  # Counter for limiting visualizations
 
     def _print(self, *args, **kwargs):
@@ -367,9 +369,9 @@ class PatchPreprocessing:
           2. Binarized image (PIL mode "1" after threshold 128)
           3. Predictions overlaid with baseline + confidence colors
         """
-        # Limit to first 3 subcolumns to avoid clutter
+        # Limit visualizations per page to keep reports manageable
         self._viz_counter += 1
-        if self._viz_counter > 3:
+        if self._viz_counter > self.max_viz_per_page:
             return
 
         fig, axes = plt.subplots(1, 3, figsize=(15, 6))

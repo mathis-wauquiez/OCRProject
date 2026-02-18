@@ -62,6 +62,11 @@ def main(cfg: DictConfig):
         split_min_cluster_size=cfg.method.split_min_cluster_size,
         split_batch_size=cfg.method.split_batch_size,
         split_render_scale=cfg.method.split_render_scale,
+        # ── Reporting ──
+        embed_images=cfg.method.embed_images,
+        image_dpi=cfg.method.image_dpi,
+        use_jpeg=cfg.method.use_jpeg,
+        jpeg_quality=cfg.method.jpeg_quality,
     )
     
     # Run sweep
@@ -84,6 +89,36 @@ def main(cfg: DictConfig):
 
     import pickle
     pickle.dump(graph, open(output_path / 'graph.gpickle', 'wb'))
+
+    # Add "Output Files" section to the report
+    saved_files = [
+        output_path / "clustered_patches",
+        output_path / "filtered_patches",
+        output_path / "label_representatives",
+        output_path / "graph.gpickle",
+    ]
+    output_rows = []
+    for fp in saved_files:
+        # save_dataframe may append an extension — check common variants
+        actual = fp
+        for candidate in [fp, fp.with_suffix(".parquet"), fp.with_suffix(".pkl")]:
+            if candidate.exists():
+                actual = candidate
+                break
+        size_mb = actual.stat().st_size / (1024 * 1024) if actual.exists() else 0
+        output_rows.append({
+            "file": str(actual.relative_to(output_path)),
+            "size_MB": round(size_mb, 2),
+        })
+    with sweep.section("Output Files"):
+        sweep.report_table(
+            pd.DataFrame(output_rows),
+            title="Saved Artefacts",
+        )
+
+    # Regenerate HTML to include the new section
+    html_path = sweep.generate_html()
+    logger.info(f"Final report saved to: {html_path}")
 
 
 if __name__ == "__main__":
