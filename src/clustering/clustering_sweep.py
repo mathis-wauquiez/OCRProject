@@ -330,8 +330,12 @@ class graphClusteringSweep(AutoReport):
             known_data = cluster_data[known_mask]
             unknown_count = (~known_mask).sum()
 
-            if len(known_data) > 0:
-                label_counts = known_data[self.target_lbl].value_counts()
+            label_counts = (
+                known_data[self.target_lbl].value_counts()
+                if len(known_data) > 0
+                else pd.Series(dtype=int)
+            )
+            if len(label_counts) > 0:
                 known_size = len(known_data)
                 label_probs = label_counts / known_size
                 cluster_entropy = entropy(label_probs, base=2)
