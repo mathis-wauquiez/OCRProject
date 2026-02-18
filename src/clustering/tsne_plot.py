@@ -105,7 +105,7 @@ def plot_community_tsne(
         
     else:
         # Original label-based coloring
-        labels_in_cluster = cluster_df[target_lbl].tolist()
+        labels_in_cluster = cluster_df[target_lbl].fillna(UNKNOWN_LABEL).tolist()
         color_values = labels_in_cluster
         known_mask = [lbl != UNKNOWN_LABEL for lbl in labels_in_cluster]
         known_labels = [lbl for lbl in labels_in_cluster if lbl != UNKNOWN_LABEL]
