@@ -544,11 +544,14 @@ class PatchPreprocessing:
         """
         h, w = data.subcol_image.shape[:2]
 
-        ax.imshow(np.full((h, w, 3), 255, dtype=np.uint8))
+        ax.set_facecolor('white')
         ax.set_xlim(0, w)
         ax.set_ylim(h, 0)  # image convention: y increases downward
-        ax.set_aspect('equal')
         ax.axis('off')
+
+        avg_bh = (float(np.mean([bh for _, _, _, bh in data.char_boxes_rel]))
+                  if data.char_boxes_rel
+                  else h / max(len(data.raw_pred_chars), 1))
 
         # Draw light CRAFT bounding boxes for reference
         for (bx, by, bw, bh) in data.char_boxes_rel:
@@ -562,6 +565,8 @@ class PatchPreprocessing:
         for (cy, cx) in data.centers_rel:
             ax.plot(cx, cy, 'x', color='lightsteelblue', markersize=4,
                     markeredgewidth=0.8)
+
+        mid_x = w / 2.0
 
         if data.cut_polys and len(data.cut_polys) == len(data.raw_pred_chars):
             # --- Draw raw predictions at their cut y-centers -------------
@@ -585,7 +590,6 @@ class PatchPreprocessing:
                 if cost[ci, pi] <= max_dist:
                     match_pred_to_craft[pi] = ci
 
-            mid_x = w / 2.0
             for j, (char, conf, poly) in enumerate(zip(
                 data.raw_pred_chars, data.raw_pred_confs, data.cut_polys
             )):
@@ -599,10 +603,12 @@ class PatchPreprocessing:
                 else:
                     color = 'red'
 
-                # Font size from cut polygon height
+                # Font size: use cut polygon height when meaningful,
+                # otherwise fall back to average CRAFT bbox height
                 ys = [pt[1] for pt in poly]
                 cut_h = max(ys) - min(ys)
-                fontsize = max(6, min(cut_h * 0.65, 32))
+                effective_h = cut_h if cut_h > avg_bh * 0.4 else avg_bh
+                fontsize = max(8, min(effective_h * 0.65, 36))
 
                 ax.text(
                     mid_x, cy_cut, char,
@@ -635,7 +641,6 @@ class PatchPreprocessing:
                     )
         else:
             # Fallback: draw matched predictions at CRAFT centroid positions
-            mid_x = w / 2.0
             for (cy, cx), (_, _, _, bh), char, conf in zip(
                 data.centers_rel, data.char_boxes_rel,
                 data.pred_chars, data.pred_confs,
@@ -646,7 +651,7 @@ class PatchPreprocessing:
                     color = 'darkorange'
                 else:
                     color = 'red'
-                fontsize = max(6, min(bh * 0.65, 32))
+                fontsize = max(8, min(avg_bh * 0.65, 36))
                 ax.text(
                     mid_x, cy, char,
                     ha='center', va='center',
