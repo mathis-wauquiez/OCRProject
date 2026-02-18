@@ -902,6 +902,10 @@ class AutoReport:
         # Track opened figures for cleanup
         self._figures_to_close: List[plt.Figure] = []
 
+        # Cache rendered base64 strings keyed by figure id() to avoid
+        # re-rendering the same figure on repeated generate_html() calls.
+        self._figure_render_cache: Dict[int, str] = {}
+
         # Sections support: ordered content that may contain ReportSection or
         # standalone ReportItem entries.  The flat ``self.items`` list is kept
         # in sync for backward compatibility.
@@ -1522,10 +1526,20 @@ class AutoReport:
             # Write HTML file
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
-            
+
+            # Close figures and clear render cache after a successful write
+            if self.config.auto_close_figures:
+                for fig in self._figures_to_close:
+                    try:
+                        plt.close(fig)
+                    except Exception:
+                        pass
+                self._figures_to_close.clear()
+            self._figure_render_cache.clear()
+
             self.logger.info(f"✓ HTML report generated: {html_path}")
             return html_path
-            
+
         except Exception as e:
             self.logger.error(f"HTML generation failed: {e}")
             raise ReportGenerationError(f"Failed to generate HTML: {e}") from e
@@ -1577,12 +1591,20 @@ class AutoReport:
         """Render a single item to HTML"""
         try:
             if item.content_type == 'figure' and MATPLOTLIB_AVAILABLE:
-                buf = io.BytesIO()
-                item.content.savefig(buf, format='png', bbox_inches='tight', 
-                                    dpi=self.config.dpi)
-                buf.seek(0)
-                img_str = base64.b64encode(buf.read()).decode()
-                return f'<div class="figure"><img src="data:image/png;base64,{img_str}" alt="{item.title}"></div>'
+                fig_id = id(item.content)
+                if fig_id not in self._figure_render_cache:
+                    use_jpeg = self.config.output_format.lower() in ('jpeg', 'jpg')
+                    fmt = 'jpeg' if use_jpeg else 'png'
+                    buf = io.BytesIO()
+                    save_kwargs = dict(bbox_inches='tight', dpi=self.config.dpi)
+                    if use_jpeg:
+                        save_kwargs['quality'] = self.config.image_quality
+                    item.content.savefig(buf, format=fmt, **save_kwargs)
+                    buf.seek(0)
+                    self._figure_render_cache[fig_id] = base64.b64encode(buf.read()).decode()
+                img_str = self._figure_render_cache[fig_id]
+                mime = 'jpeg' if self.config.output_format.lower() in ('jpeg', 'jpg') else 'png'
+                return f'<div class="figure"><img src="data:image/{mime};base64,{img_str}" alt="{item.title}"></div>'
                 
             elif item.content_type == 'text':
                 if item.metadata.get('is_katex', False):

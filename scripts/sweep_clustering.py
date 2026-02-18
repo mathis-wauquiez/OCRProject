@@ -73,13 +73,7 @@ def main(cfg: DictConfig):
     logger.info("Starting clustering sweep...")
     dataframe, filtered_dataframe, label_representatives_dataframe, graph, partition = sweep(dataframe)
     
-    # Generate HTML report
-    logger.info("Generating HTML report...")
-    html_path = sweep.generate_html()
-    logger.info(f"HTML report saved to: {html_path}")
-    
     logger.info("Clustering sweep complete!")
-    logger.info(f"Report: file://{html_path.absolute()}")
     
     # save the three dataframes
     output_path = Path(cfg.data.output_path)
@@ -116,9 +110,9 @@ def main(cfg: DictConfig):
             title="Saved Artefacts",
         )
 
-    # Regenerate HTML to include the new section
+    # Generate HTML report (single call, includes all sections)
     html_path = sweep.generate_html()
-    logger.info(f"Final report saved to: {html_path}")
+    logger.info(f"Report: file://{html_path.absolute()}")
 
 
 if __name__ == "__main__":
