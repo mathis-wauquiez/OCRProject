@@ -44,6 +44,7 @@ from src.clustering.bin_image_metrics import (
 )
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from tqdm import tqdm
 
 
@@ -204,19 +205,37 @@ class graphClusteringSweep(AutoReport):
     def _compute_single_cluster_linkage(
         cid, idx, dataframe, reg_metric, renderer,
         batch_size, split_linkage_method, min_cluster_size,
+        gpu_semaphore=None,
     ):
-        """Compute Hausdorff distance matrix and linkage for one cluster."""
+        """Compute Hausdorff distance matrix and linkage for one cluster.
+
+        Args:
+            gpu_semaphore: Optional ``threading.Semaphore`` that gates
+                access to the GPU-intensive distance-matrix computation.
+                Threads that don't hold the semaphore can still do CPU
+                work (pair building, numpy/scipy linkage).
+        """
         size = len(idx)
 
         if size < min_cluster_size:
             return cid, dict(indices=idx, linkage=None, size=size)
 
         subdf = dataframe.iloc[idx]
-        D_dict = compute_distance_matrices_batched(
-            reg_metric, renderer, subdf,
-            batch_size=batch_size,
-            sym_registration=False,
-        )
+
+        # Gate GPU work so only a bounded number of clusters hit the GPU
+        # concurrently, preventing OOM from stacked VRAM allocations.
+        if gpu_semaphore is not None:
+            gpu_semaphore.acquire()
+        try:
+            D_dict = compute_distance_matrices_batched(
+                reg_metric, renderer, subdf,
+                batch_size=batch_size,
+                sym_registration=False,
+            )
+        finally:
+            if gpu_semaphore is not None:
+                gpu_semaphore.release()
+
         D = D_dict['hausdorff']
         condensed = squareform(D, checks=False)
         bad_mask = ~np.isfinite(condensed)
@@ -229,20 +248,25 @@ class graphClusteringSweep(AutoReport):
         return cid, dict(indices=idx, linkage=Z, size=size)
 
     def _compute_cluster_linkages(self, dataframe, partition_membership, renderer,
-                                  max_workers=None):
+                                  max_workers=None, max_concurrent_gpu=1):
         """
         Expensive step (done once): pairwise Hausdorff distances per
         Leiden cluster → linkage matrices.
 
-        Clusters are processed in parallel using threads.  PyTorch
-        releases the GIL during CUDA kernel execution, so threads
-        overlap CPU bookkeeping (pair generation, canvas placement,
-        numpy ops) with GPU work from other clusters.
+        Clusters are processed in parallel using threads.  A semaphore
+        limits the number of clusters that can run GPU-intensive IC
+        registration concurrently (preventing CUDA OOM), while still
+        allowing other threads to overlap CPU work (pair generation,
+        canvas placement, numpy/scipy linkage).
 
         Args:
             max_workers: Thread-pool size.  ``None`` lets the executor
-                pick a sensible default (usually ``min(32, os.cpu_count()+4)``).
-                Set to 1 for sequential execution (debugging).
+                pick a sensible default.  Set to 1 for sequential
+                execution (debugging).
+            max_concurrent_gpu: Maximum number of clusters allowed to
+                run ``compute_distance_matrices_batched`` on the GPU at
+                the same time.  Defaults to 1 (serialised GPU access)
+                to stay within VRAM limits.
         """
         metrics_dict = {'hausdorff': compute_hausdorff}
         if self.split_metrics is not None:
@@ -262,6 +286,7 @@ class graphClusteringSweep(AutoReport):
                              reverse=True)
 
         cluster_linkages = {}
+        gpu_semaphore = threading.Semaphore(max_concurrent_gpu)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
@@ -272,6 +297,7 @@ class graphClusteringSweep(AutoReport):
                     self.split_batch_size,
                     self.split_linkage_method,
                     self.split_min_cluster_size,
+                    gpu_semaphore,
                 ): cid
                 for cid in sorted_cids
             }
