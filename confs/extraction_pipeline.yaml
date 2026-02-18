@@ -22,9 +22,19 @@ craftComponentAnalysisParams:
   _target_: src.ocr.params.craftComponentsParams
   
   # Connected components extraction
-  text_threshold: 0.6  #! Threshold on CRAFT score map
+  text_threshold: 0.6  #! Threshold on CRAFT score map for seed detection
   connectivity: 8  #? 4 or 8
-  
+
+  # Dual-threshold watershed: allows basins to expand into moderate-score areas
+  # where radicals of composite characters (e.g. 蒸) may have lower CRAFT scores.
+  # Set to null to use text_threshold for both seeds and mask (original behavior).
+  mask_threshold: 0.3
+
+  # Link score combination: bridges gaps between sub-components of composite
+  # characters using CRAFT's affinity map. Set to null to disable (recommended
+  # until validated on your data). See craft_utils.py:29 for reference.
+  link_threshold: null
+
   #! Component filtering
   min_area: 18  #!Remove components smaller than this
   min_aspect_ratio: 0.2  #? Remove too elongated components

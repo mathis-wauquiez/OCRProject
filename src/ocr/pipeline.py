@@ -66,16 +66,34 @@ class GlobalPipeline:
 
         self._report_progress('CRAFT detection completed', score_text, "score_map")
 
+        # ============ Score Map Preparation ============
+        score_text_np = score_text.squeeze(0).cpu().numpy()
+        score_link_np = score_link.squeeze(0).cpu().numpy()
+
+        # Optionally combine text and link scores before watershed
+        score_for_watershed = score_text_np
+        if self.craftComponentAnalysisParams.link_threshold is not None:
+            self._report_progress('Combining text and link scores...')
+            score_for_watershed = craft_components.combine_text_link_scores(
+                score_text_np, score_link_np,
+                self.craftComponentAnalysisParams.link_threshold
+            )
+            self._report_progress(
+                'Text+Link scores combined',
+                score_for_watershed, "score_map"
+            )
+
         # ============ CRAFT Component Extraction ============
         self._report_progress('Detecting connected components from CRAFT score...')
 
         text_components = connectedComponent.from_image_watershed(
-            score_text.squeeze(0).cpu().numpy(),
+            score_for_watershed,
             min_distance=self.craftComponentAnalysisParams.min_dist,
             connectivity=1,
             use_intensity=True,
             compute_stats=True,
-            binary_threshold=self.craftComponentAnalysisParams.text_threshold
+            binary_threshold=self.craftComponentAnalysisParams.text_threshold,
+            mask_threshold=self.craftComponentAnalysisParams.mask_threshold,
         )
 
         initial_count = len(text_components.regions)
@@ -147,6 +165,7 @@ class GlobalPipeline:
             preprocessed=preprocessed,
             binary_img=image_result.binary_img,
             score_text=score_text,
+            score_link=score_link,
             craft_components=text_components,
             image_components=image_result.img_components,
             filtered_image_components=image_result.filtered_img_components,
