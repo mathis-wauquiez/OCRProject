@@ -70,6 +70,17 @@ class PagePayload:
 SENTINEL = None  # signals end of the producer stream
 
 
+@dataclass
+class _SubcolVizData:
+    """Visualization payload collected by _predict_subcol for deferred rendering."""
+    subcol_image: np.ndarray          # grayscale crop (H, W) uint8
+    pil_img: Image.Image              # binarized PIL image (mode "1")
+    centers_rel: list                 # [(cy, cx), …] relative to crop
+    char_boxes_rel: list              # [(left, top, w, h), …] relative to crop
+    pred_chars: list
+    pred_confs: list
+
+
 # ------------------------------------------------------------------ #
 #  Main class                                                          #
 # ------------------------------------------------------------------ #
@@ -98,7 +109,6 @@ class PatchPreprocessing:
         self.reading_order = reading_order
         self.viz_report = viz_report
         self.max_viz_per_page = max_viz_per_page
-        self._viz_counter = 0  # Counter for limiting visualizations
 
     def _print(self, *args, **kwargs):
         if self.verbose:
@@ -219,9 +229,6 @@ class PatchPreprocessing:
         if rectangles is None or len(rectangles) == 0:
             return
 
-        # Reset visualization counter for this page
-        self._viz_counter = 0
-
         # label → DataFrame-row-index for O(1) write-back
         label_to_idx: dict[int, int] = {
             int(row['label']): i for i, row in page_df.iterrows()
@@ -230,14 +237,25 @@ class PatchPreprocessing:
         page_df['char_chat'] = None
         page_df['conf_chat'] = None
 
-        for _, col_rects in rectangles.groupby('col_idx'):
+        # Collect viz data per column for deferred, structured report rendering
+        page_viz: dict[int, list[_SubcolVizData]] = {}
+
+        for col_idx, col_rects in rectangles.groupby('col_idx'):
+            col_subcols: list[_SubcolVizData] = []
             for subcolumn in break_into_subcols(col_rects):
                 n_subcols = len(subcolumn['labels'].iloc[0])
-
                 for subcol_idx in range(n_subcols):
-                    self._predict_subcol(
+                    viz = self._predict_subcol(
                         page_df, image, subcolumn, subcol_idx, label_to_idx,
                     )
+                    if viz is not None:
+                        col_subcols.append(viz)
+            if col_subcols:
+                page_viz[int(col_idx)] = col_subcols
+
+        if self.viz_report is not None and page_viz:
+            page_name = page_df['file'].iloc[0] if 'file' in page_df.columns else 'page'
+            self._add_page_to_report(page_name, page_viz)
 
     def _predict_subcol(
         self,
@@ -246,7 +264,7 @@ class PatchPreprocessing:
         subcolumn: pd.DataFrame,
         subcol_idx: int,
         label_to_idx: dict[int, int],
-    ):
+    ) -> '_SubcolVizData | None':
         """Run the CHAT model on a single vertical subcolumn lane.
 
         Instead of calling ``ModelWrapper.predict()`` directly (which feeds
@@ -256,6 +274,9 @@ class PatchPreprocessing:
 
         A synthetic baseline is built from the CRAFT barycenters so that
         no separate segmentation model is needed.
+
+        Returns a ``_SubcolVizData`` when ``self.viz_report`` is set,
+        otherwise returns ``None``.
         """
         # Collect labels present in page_df for this lane
         subcol_labels = []
@@ -267,7 +288,7 @@ class PatchPreprocessing:
                     subcol_labels.append(lbl)
 
         if not subcol_labels:
-            return
+            return None
 
         subcol_df = page_df.loc[[label_to_idx[l] for l in subcol_labels]]
 
@@ -279,7 +300,7 @@ class PatchPreprocessing:
 
         subcol_image = image[y0:y1, x0:x1]
         if subcol_image.size == 0:
-            return
+            return None
         h, w = subcol_image.shape[:2]
 
         # Binarize → PIL mode "1" (as expected by the CHAT model — see demo)
@@ -293,12 +314,19 @@ class PatchPreprocessing:
             cy, cx = r['centroid']
             centers_rel.append((float(cy) - y0, float(cx) - x0))
 
+        # Character bounding boxes relative to crop: (left, top, width, height)
+        char_boxes_rel = [
+            (int(r['left']) - x0, int(r['top']) - y0,
+             int(r['width']), int(r['height']))
+            for _, r in subcol_df.iterrows()
+        ]
+
         # Synthetic baseline: straight vertical line at the median x-coord,
         # spanning the full crop height.  This tells rpred where the text
         # column runs without needing a separate segmentation model.
         cx_median = float(np.median([cx for _, cx in centers_rel]))
-        baseline = [(int(round(cx_median)), 0), (int(round(cx_median)), h)]
-        boundary = [(0, 0), (w, 0), (w, h), (0, h)]
+        baseline = [(int(round(cx_median)), 0), (int(round(cx_median)), h - 1)]
+        boundary = [(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)]
 
         line = BaselineLine(id="0", baseline=baseline, boundary=boundary)
         seg = Segmentation(
@@ -338,102 +366,170 @@ class PatchPreprocessing:
             pred_chars += [UNKNOWN_CHAR] * (M - N)
             pred_confs += [0.0] * (M - N)
 
-        # Optional visualization
-        if self.viz_report is not None:
-            page_name = page_df['file'].iloc[0] if 'file' in page_df.columns else 'page'
-            self._visualize_subcol_pipeline(
-                subcol_image, pil_img, baseline, boundary, centers_rel,
-                pred_chars, pred_confs, page_name
-            )
-
         for lbl, char, conf in zip(subcol_labels, pred_chars, pred_confs):
             idx = label_to_idx[lbl]
             page_df.at[idx, 'char_chat'] = char
             page_df.at[idx, 'conf_chat'] = conf
 
-    def _visualize_subcol_pipeline(
+        if self.viz_report is not None:
+            return _SubcolVizData(
+                subcol_image=subcol_image,
+                pil_img=pil_img,
+                centers_rel=centers_rel,
+                char_boxes_rel=char_boxes_rel,
+                pred_chars=pred_chars,
+                pred_confs=pred_confs,
+            )
+        return None
+
+    def _add_page_to_report(
         self,
+        page_name: str,
+        page_viz: dict,
+    ):
+        """Add one report section per page, with one figure per column.
+
+        The section title is the page filename.  Inside, each column gets a
+        titled figure so they appear as visual subsections.  Each figure
+        contains one row per subcolumn (up to ``max_viz_per_page`` rows),
+        with two panels side-by-side:
+
+          - **Left**: clean binarized crop (no overlay)
+          - **Right**: white panel with predicted characters rendered at the
+            same spatial positions and approximate sizes as the originals
+        """
+        with self.viz_report.section(f'Page: {page_name}'):
+            for col_idx, subcols in sorted(page_viz.items()):
+                fig = self._make_col_figure(col_idx, subcols, page_name)
+                n = min(len(subcols), self.max_viz_per_page)
+                self.viz_report.report_figure(
+                    fig,
+                    title=f'Column {col_idx} ({n} subcolumn(s) shown)',
+                )
+
+    def _make_col_figure(
+        self,
+        col_idx: int,
+        subcols: list,
+        page_name: str,
+    ) -> plt.Figure:
+        """Build a figure showing all subcolumns in one column side-by-side.
+
+        Each row corresponds to one subcolumn.  Row heights are proportional
+        to the subcolumn crop height so the left and right panels are always
+        the same scale.
+        """
+        subcols = subcols[: self.max_viz_per_page]
+        n = len(subcols)
+
+        # Row heights proportional to crop height (minimum 20 px)
+        row_heights = [max(d.subcol_image.shape[0], 20) for d in subcols]
+        total_px = sum(row_heights)
+        # ~50 px per inch; at least 3 in tall so titles are readable
+        fig_h = max(3.0, total_px / 50.0)
+
+        gridspec_kw = {'height_ratios': row_heights} if n > 1 else {}
+        fig, axes = plt.subplots(
+            n, 2,
+            figsize=(11, fig_h),
+            gridspec_kw=gridspec_kw,
+            squeeze=False,
+        )
+        fig.suptitle(
+            f'{page_name} — Column {col_idx}',
+            fontsize=11, fontweight='bold',
+        )
+
+        for i, data in enumerate(subcols):
+            bin_arr = np.array(data.pil_img)
+
+            # ---- Left: clean binarized image ----------------------------
+            axes[i][0].imshow(bin_arr, cmap='gray')
+            axes[i][0].set_title(
+                f'Subcol {i + 1}  ({len(data.pred_chars)} chars)',
+                fontsize=8,
+            )
+            axes[i][0].axis('off')
+
+            # ---- Right: predicted characters panel ----------------------
+            self._draw_prediction_panel(
+                axes[i][1],
+                data.subcol_image,
+                data.char_boxes_rel,
+                data.centers_rel,
+                data.pred_chars,
+                data.pred_confs,
+            )
+            chars_preview = ''.join(data.pred_chars[:12])
+            if len(data.pred_chars) > 12:
+                chars_preview += '…'
+            avg_conf = float(np.mean(data.pred_confs)) if data.pred_confs else 0.0
+            axes[i][1].set_title(
+                f'"{chars_preview}"  avg conf {avg_conf:.0%}',
+                fontsize=8,
+            )
+
+        plt.tight_layout()
+        return fig
+
+    def _draw_prediction_panel(
+        self,
+        ax: plt.Axes,
         subcol_image: np.ndarray,
-        pil_img: Image.Image,
-        baseline: list,
-        boundary: list,
+        char_boxes_rel: list,
         centers_rel: list,
         pred_chars: list,
         pred_confs: list,
-        page_name: str,
     ):
-        """Create visualizations showing the CHAT preprocessing pipeline steps.
+        """Fill *ax* with predicted characters on a white background.
 
-        Generates 3 subplots:
-          1. Grayscale crop (raw subcolumn extraction)
-          2. Binarized image (PIL mode "1" after threshold 128)
-          3. Predictions overlaid with baseline + confidence colors
+        Each character is drawn at the same (cx, cy) position as the
+        original character in the crop, so the two panels align visually.
+        A light-blue rectangle shows the original bounding box.  Text color
+        encodes confidence: green ≥ 0.8, orange ≥ 0.5, red < 0.5.
+
+        Font size is chosen so the rendered glyph roughly fills the
+        character bounding box height.  matplotlib's font size unit is
+        points; we approximate 1 pt ≈ 1 px for the typical figure DPI used
+        in these reports, so ``fontsize ≈ 0.65 * bh`` works well in practice.
         """
-        # Limit visualizations per page to keep reports manageable
-        self._viz_counter += 1
-        if self._viz_counter > self.max_viz_per_page:
-            return
+        h, w = subcol_image.shape[:2]
 
-        fig, axes = plt.subplots(1, 3, figsize=(15, 6))
-        fig.suptitle(f'CHAT Pipeline: {page_name} (subcolumn {self._viz_counter})',
-                     fontsize=14, fontweight='bold')
+        # White background at the same pixel extent as the original crop
+        ax.imshow(np.full((h, w, 3), 255, dtype=np.uint8))
+        ax.set_xlim(0, w)
+        ax.set_ylim(h, 0)   # image convention: y increases downward
+        ax.set_aspect('equal')
+        ax.axis('off')
 
-        # 1. Grayscale crop
-        axes[0].imshow(subcol_image, cmap='gray')
-        axes[0].set_title('1. Grayscale Crop', fontsize=12)
-        axes[0].axis('off')
+        for (cy, cx), (bx, by, bw, bh), char, conf in zip(
+            centers_rel, char_boxes_rel, pred_chars, pred_confs
+        ):
+            # Light bounding-box outline to show the original character area
+            rect = plt.Rectangle(
+                (bx, by), bw, bh,
+                fill=False, edgecolor='lightsteelblue', linewidth=0.8,
+            )
+            ax.add_patch(rect)
 
-        # Plot CRAFT centroids
-        if centers_rel:
-            cy_vals, cx_vals = zip(*centers_rel)
-            axes[0].scatter(cx_vals, cy_vals, c='red', s=20, marker='x',
-                          alpha=0.7, label='CRAFT centroids')
-            axes[0].legend(fontsize=8)
+            # Confidence color
+            if conf >= 0.8:
+                color = 'darkgreen'
+            elif conf >= 0.5:
+                color = 'darkorange'
+            else:
+                color = 'red'
 
-        # 2. Binarized image
-        # Convert PIL "1" mode back to numpy for display
-        bin_array = np.array(pil_img)
-        axes[1].imshow(bin_array, cmap='gray')
-        axes[1].set_title('2. Binarized (threshold=128)', fontsize=12)
-        axes[1].axis('off')
+            # Font size: ~0.65 × bh in points fills the box at typical DPI
+            fontsize = max(6, min(bh * 0.65, 32))
 
-        # 3. Predictions + baseline
-        axes[2].imshow(bin_array, cmap='gray')
-        axes[2].set_title('3. Baseline + Predictions', fontsize=12)
-        axes[2].axis('off')
-
-        # Draw synthetic baseline (vertical line)
-        if baseline and len(baseline) >= 2:
-            bl_x, bl_y = zip(*baseline)
-            axes[2].plot(bl_x, bl_y, 'b-', linewidth=2, label='Baseline', alpha=0.8)
-
-        # Draw boundary
-        if boundary and len(boundary) >= 3:
-            bd_x, bd_y = zip(*boundary)
-            bd_x = bd_x + (bd_x[0],)  # close polygon
-            bd_y = bd_y + (bd_y[0],)
-            axes[2].plot(bd_x, bd_y, 'g--', linewidth=1, label='Boundary', alpha=0.5)
-
-        # Draw predictions with confidence-based colors
-        if pred_chars and centers_rel:
-            for (cy, cx), char, conf in zip(centers_rel, pred_chars, pred_confs):
-                # Color: green (high conf) → yellow (medium) → red (low)
-                if conf >= 0.8:
-                    color = 'green'
-                elif conf >= 0.5:
-                    color = 'orange'
-                else:
-                    color = 'red'
-
-                axes[2].text(cx, cy, char, fontsize=10, color=color,
-                           ha='center', va='center', fontweight='bold',
-                           bbox=dict(boxstyle='round,pad=0.3',
-                                   facecolor='white', alpha=0.7, edgecolor=color))
-
-        axes[2].legend(fontsize=8, loc='upper right')
-
-        plt.tight_layout()
-        self.viz_report.report_figure(fig, title=f'Subcolumn {self._viz_counter} - {page_name}')
+            ax.text(
+                cx, cy, char,
+                ha='center', va='center',
+                color=color,
+                fontsize=fontsize,
+                fontweight='bold',
+            )
 
     # ------------------------------------------------------------------ #
     #  Extraction (one page)                                               #
