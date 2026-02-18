@@ -484,9 +484,10 @@ class PatchPreprocessing:
             bin_arr = np.array(data.pil_img)
             h_img, w_img = bin_arr.shape[:2]
 
-            # ---- Left: binarized image + cut boundaries -----------------
+            # ---- Left: binarized image + overlays -----------------------
             axes[i][0].imshow(bin_arr, cmap='gray')
-            # Overlay cut polygon boundaries as horizontal dashed lines
+
+            # Kraken cut boundaries (cyan dashed horizontals)
             for poly in data.cut_polys:
                 if poly and len(poly) >= 4:
                     ys = [pt[1] for pt in poly]
@@ -499,6 +500,22 @@ class PatchPreprocessing:
                         y_max, color='cyan', linewidth=0.6,
                         linestyle='--', alpha=0.7,
                     )
+
+            # Synthetic baseline (vertical line at median CRAFT x)
+            if data.centers_rel:
+                cx_med = float(np.median([cx for _, cx in data.centers_rel]))
+                axes[i][0].axvline(
+                    cx_med, color='yellow', linewidth=1.0,
+                    linestyle='-', alpha=0.8,
+                )
+
+            # CRAFT centroid markers
+            for (cy, cx) in data.centers_rel:
+                axes[i][0].plot(
+                    cx, cy, '+',
+                    color='red', markersize=5, markeredgewidth=0.8,
+                )
+
             n_kraken = len(data.raw_pred_chars)
             n_craft = len(data.centers_rel)
             axes[i][0].set_title(
@@ -616,15 +633,6 @@ class PatchPreprocessing:
                     color=color, fontsize=fontsize, fontweight='bold',
                 )
 
-                # Thin connecting line to matched CRAFT centroid
-                if j in match_pred_to_craft:
-                    ci = match_pred_to_craft[j]
-                    craft_y = data.centers_rel[ci][0]
-                    ax.plot(
-                        [mid_x + fontsize * 0.6, w - 2],
-                        [cy_cut, craft_y],
-                        color='silver', linewidth=0.5, alpha=0.6,
-                    )
 
             # Mark unmatched CRAFT centroids with a red '?'
             matched_craft_set = set(match_pred_to_craft.values())
