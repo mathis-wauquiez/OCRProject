@@ -320,6 +320,12 @@ class PatchPreprocessing:
                 if record._confidences else []
             )
 
+        # Ensure pred_confs is always aligned with pred_chars.
+        # When the model returns no confidences, default to 1.0 so the
+        # zip in the write-back loop is never cut short.
+        if len(pred_confs) < len(pred_chars):
+            pred_confs += [1.0] * (len(pred_chars) - len(pred_confs))
+
         # Align predictions to CRAFT centroids
         M = len(subcol_labels)
         N = len(pred_chars)
@@ -361,9 +367,6 @@ class PatchPreprocessing:
           2. Binarized image (PIL mode "1" after threshold 128)
           3. Predictions overlaid with baseline + confidence colors
         """
-        if self.viz_report is None:
-            return
-
         # Limit to first 3 subcolumns to avoid clutter
         self._viz_counter += 1
         if self._viz_counter > 3:
