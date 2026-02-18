@@ -132,6 +132,11 @@ class ClusteringSweepReporter:
                         pivot, title=f'{metric} (gamma × epsilon) — {config_name}'
                     )
 
+                # Per-config parameter heatmaps (ε × γ grids for all metrics)
+                heatmap_subset = subset[['epsilon', 'gamma'] + metric_names]
+                fig = self.report_parameter_heatmaps(heatmap_subset)
+                self._report_figure(fig, title=f"Parameter Heatmaps — {config_name}")
+
             fig = self._hog_comparison_heatmaps(results_df)
             self._report_figure(fig, title="HOG Configuration Comparison")
 
@@ -222,6 +227,74 @@ class ClusteringSweepReporter:
 
         plt.tight_layout()
         return fig
+
+    # ================================================================
+    #  Graph topology section
+    # ================================================================
+
+    def report_graph_topology(self, graph, best_epsilon, best_gamma):
+        """Summary card + degree distribution for the similarity graph."""
+        import networkx as nx
+
+        n_nodes = graph.number_of_nodes()
+        n_edges = graph.number_of_edges()
+        density = nx.density(graph)
+        n_components = nx.number_connected_components(graph)
+        isolated = nx.number_of_isolates(graph)
+        degrees = [d for _, d in graph.degree()]
+        avg_degree = np.mean(degrees) if degrees else 0.0
+
+        topo_html = f"""
+        <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+                    color: white; padding: 30px; border-radius: 10px; margin: 20px 0;">
+            <h2 style="margin: 0 0 15px 0;">Graph Topology</h2>
+            <p>Best parameters: &epsilon;={best_epsilon:.4f}, &gamma;={best_gamma:.4f}</p>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px;">
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Nodes</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{n_nodes:,}</p></div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Edges</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{n_edges:,}</p></div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Density</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{density:.4f}</p></div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Components</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{n_components:,}</p></div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Isolated</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{isolated:,}</p></div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Avg Degree</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{avg_degree:.1f}</p></div>
+            </div>
+        </div>
+        """
+        self._report_raw_html(topo_html, title="Graph Topology Summary")
+
+        # Degree distribution histogram
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        ax = axes[0]
+        ax.hist(degrees, bins=min(50, max(degrees) + 1) if degrees else 1,
+                color='#11998e', edgecolor='white', alpha=0.8)
+        ax.set_xlabel('Degree')
+        ax.set_ylabel('Count')
+        ax.set_title('Degree Distribution')
+        ax.grid(alpha=0.3)
+
+        ax = axes[1]
+        ax.hist(degrees, bins=min(50, max(degrees) + 1) if degrees else 1,
+                color='#38ef7d', edgecolor='white', alpha=0.8)
+        ax.set_xlabel('Degree')
+        ax.set_ylabel('Count (log scale)')
+        ax.set_title('Degree Distribution (Log Scale)')
+        ax.set_yscale('log')
+        ax.grid(alpha=0.3)
+
+        plt.tight_layout()
+        self._report_figure(fig, title="Degree Distribution")
 
     # ================================================================
     #  Executive summary card
@@ -579,11 +652,12 @@ class ClusteringSweepReporter:
     # ================================================================
 
     def report_examples(self, dataframe, dissimilarities, graph, best_epsilon):
+        rng = np.random.RandomState(42)
         with self._section("Examples"):
             # Nearest-neighbor examples
             nn_html = '<div style="display: grid; gap: 30px;">'
             for i in tqdm(range(30), desc="Random NN examples", colour='cyan'):
-                idx = np.random.randint(len(dataframe))
+                idx = rng.randint(len(dataframe))
                 fig = plot_nearest_neighbors(query_idx=idx, dataframe=dataframe,
                                              dissimilarities=dissimilarities,
                                              graph=graph, n_to_show=23)
@@ -621,9 +695,10 @@ class ClusteringSweepReporter:
 
     def report_hapax(self, dataframe, hapax_df, dissimilarities, graph):
         target_lbl = self.sweep.target_lbl
+        rng = np.random.RandomState(42)
 
         with self._section("Hapax Analysis"):
-            idxs = list(np.random.permutation(hapax_df.index))[:10]
+            idxs = list(rng.permutation(hapax_df.index))[:10]
             hapax_nn_html = '<div style="display: grid; gap: 30px;">'
             for idx in tqdm(idxs, desc="Hapax NN examples", colour='red'):
                 fig = plot_nearest_neighbors(query_idx=idx, dataframe=dataframe,
@@ -669,6 +744,29 @@ class ClusteringSweepReporter:
         Single entry-point producing every report section for a given
         graph + partition.  Called once ALL computation is done.
         """
+        # Section 0: Graph topology + best-config summary
+        with self._section("Graph Topology"):
+            self.report_graph_topology(graph, best_epsilon, best_gamma)
+
+            # Best-config parameter summary for quick reference
+            config_html = f"""
+            <div style="background: #f8f9fa; border-left: 4px solid #667eea;
+                        padding: 15px; border-radius: 4px; margin: 15px 0;">
+                <h3 style="margin: 0 0 10px 0; color: #667eea;">Best Configuration</h3>
+                <table style="border-collapse: collapse; width: auto;">
+                    <tr><td style="padding: 4px 12px; font-weight:bold;">Epsilon (&epsilon;)</td>
+                        <td style="padding: 4px 12px;">{best_epsilon:.4f}</td></tr>
+                    <tr><td style="padding: 4px 12px; font-weight:bold;">Gamma (&gamma;)</td>
+                        <td style="padding: 4px 12px;">{best_gamma:.4f}</td></tr>
+                    <tr><td style="padding: 4px 12px; font-weight:bold;">Split Threshold</td>
+                        <td style="padding: 4px 12px;">{best_threshold}</td></tr>
+                    <tr><td style="padding: 4px 12px; font-weight:bold;">Best ARI</td>
+                        <td style="padding: 4px 12px;">{best_metrics.get('adjusted_rand_index', 'N/A')}</td></tr>
+                </table>
+            </div>
+            """
+            self._report_raw_html(config_html, title="Best Configuration Parameters")
+
         # Section 1: Pre-split clusters
         with self._section("Clusters (Pre-Split)"):
             self.report_clusters_section(
