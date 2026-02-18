@@ -43,6 +43,7 @@ from src.clustering.bin_image_metrics import (
     compute_hausdorff, registeredMetric, compute_distance_matrices_batched
 )
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
 
@@ -199,10 +200,49 @@ class graphClusteringSweep(AutoReport):
     #  CLUSTER SPLITTING
     # ================================================================
 
-    def _compute_cluster_linkages(self, dataframe, partition_membership, renderer):
+    @staticmethod
+    def _compute_single_cluster_linkage(
+        cid, idx, dataframe, reg_metric, renderer,
+        batch_size, split_linkage_method, min_cluster_size,
+    ):
+        """Compute Hausdorff distance matrix and linkage for one cluster."""
+        size = len(idx)
+
+        if size < min_cluster_size:
+            return cid, dict(indices=idx, linkage=None, size=size)
+
+        subdf = dataframe.iloc[idx]
+        D_dict = compute_distance_matrices_batched(
+            reg_metric, renderer, subdf,
+            batch_size=batch_size,
+            sym_registration=False,
+        )
+        D = D_dict['hausdorff']
+        condensed = squareform(D, checks=False)
+        bad_mask = ~np.isfinite(condensed)
+        if bad_mask.any():
+            finite_max = np.nanmax(condensed[np.isfinite(condensed)]) \
+                if np.isfinite(condensed).any() else 1.0
+            condensed[bad_mask] = finite_max * 10
+        Z = linkage(condensed, method=split_linkage_method)
+
+        return cid, dict(indices=idx, linkage=Z, size=size)
+
+    def _compute_cluster_linkages(self, dataframe, partition_membership, renderer,
+                                  max_workers=None):
         """
         Expensive step (done once): pairwise Hausdorff distances per
         Leiden cluster → linkage matrices.
+
+        Clusters are processed in parallel using threads.  PyTorch
+        releases the GIL during CUDA kernel execution, so threads
+        overlap CPU bookkeeping (pair generation, canvas placement,
+        numpy ops) with GPU work from other clusters.
+
+        Args:
+            max_workers: Thread-pool size.  ``None`` lets the executor
+                pick a sensible default (usually ``min(32, os.cpu_count()+4)``).
+                Set to 1 for sequential execution (debugging).
         """
         metrics_dict = {'hausdorff': compute_hausdorff}
         if self.split_metrics is not None:
@@ -210,32 +250,39 @@ class graphClusteringSweep(AutoReport):
 
         reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
         membership = np.asarray(partition_membership)
+        cluster_ids = np.unique(membership)
+
+        # ── Build per-cluster index arrays ──────────────────────────────
+        cluster_indices = {
+            cid: np.where(membership == cid)[0] for cid in cluster_ids
+        }
+
+        # ── Sort clusters largest-first so big jobs start early ─────────
+        sorted_cids = sorted(cluster_ids, key=lambda c: len(cluster_indices[c]),
+                             reverse=True)
+
         cluster_linkages = {}
 
-        for cid in tqdm(np.unique(membership),
-                        desc="Computing cluster linkages (Hausdorff)", colour="yellow"):
-            idx = np.where(membership == cid)[0]
-            size = len(idx)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._compute_single_cluster_linkage,
+                    cid, cluster_indices[cid], dataframe,
+                    reg_metric, renderer,
+                    self.split_batch_size,
+                    self.split_linkage_method,
+                    self.split_min_cluster_size,
+                ): cid
+                for cid in sorted_cids
+            }
 
-            if size < self.split_min_cluster_size:
-                cluster_linkages[cid] = dict(indices=idx, linkage=None, size=size)
-                continue
-
-            subdf = dataframe.iloc[idx]
-            D_dict = compute_distance_matrices_batched(
-                reg_metric, renderer, subdf,
-                batch_size=self.split_batch_size,
-            )
-            D = D_dict['hausdorff']
-            condensed = squareform(D, checks=False)
-            bad_mask = ~np.isfinite(condensed)
-            if bad_mask.any():
-                finite_max = np.nanmax(condensed[np.isfinite(condensed)]) \
-                    if np.isfinite(condensed).any() else 1.0
-                condensed[bad_mask] = finite_max * 10
-            Z = linkage(condensed, method=self.split_linkage_method)
-
-            cluster_linkages[cid] = dict(indices=idx, linkage=Z, size=size)
+            with tqdm(total=len(futures),
+                      desc="Computing cluster linkages (Hausdorff)",
+                      colour="yellow") as pbar:
+                for future in as_completed(futures):
+                    cid, result = future.result()
+                    cluster_linkages[cid] = result
+                    pbar.update(1)
 
         return cluster_linkages
 
