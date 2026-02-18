@@ -44,6 +44,7 @@ from src.vectorization.wrapper import BinaryShapeVectorizer
 from src.patch_processing.renderer import Renderer
 from src.layout_analysis.parsing import ReadingOrder, split_to_rectangles, break_into_subcols
 from src.ocr.chat import ModelWrapper
+from src.auto_report import AutoReport
 
 from kraken import rpred as kraken_rpred
 from kraken.containers import Segmentation, BaselineLine
@@ -83,7 +84,8 @@ class PatchPreprocessing:
                  hog_renderer: Renderer,
                  hog_params: HOGParameters,
                  output_viz: None | Path = None,
-                 verbose=True):
+                 verbose=True,
+                 viz_report: AutoReport | None = None):
 
         self.ink_filter = ink_filter
         self.vectorizer = vectorizer
@@ -93,6 +95,8 @@ class PatchPreprocessing:
         self.hog_renderer = hog_renderer
         self.hog = HOG(hog_params)
         self.reading_order = reading_order
+        self.viz_report = viz_report
+        self._viz_counter = 0  # Counter for limiting visualizations
 
     def _print(self, *args, **kwargs):
         if self.verbose:
@@ -213,6 +217,9 @@ class PatchPreprocessing:
         if rectangles is None or len(rectangles) == 0:
             return
 
+        # Reset visualization counter for this page
+        self._viz_counter = 0
+
         # label → DataFrame-row-index for O(1) write-back
         label_to_idx: dict[int, int] = {
             int(row['label']): i for i, row in page_df.iterrows()
@@ -323,10 +330,105 @@ class PatchPreprocessing:
             pred_chars += [UNKNOWN_CHAR] * (M - N)
             pred_confs += [0.0] * (M - N)
 
+        # Optional visualization
+        if self.viz_report is not None:
+            page_name = page_df['file'].iloc[0] if 'file' in page_df.columns else 'page'
+            self._visualize_subcol_pipeline(
+                subcol_image, pil_img, baseline, boundary, centers_rel,
+                pred_chars, pred_confs, page_name
+            )
+
         for lbl, char, conf in zip(subcol_labels, pred_chars, pred_confs):
             idx = label_to_idx[lbl]
             page_df.at[idx, 'char_chat'] = char
             page_df.at[idx, 'conf_chat'] = conf
+
+    def _visualize_subcol_pipeline(
+        self,
+        subcol_image: np.ndarray,
+        pil_img: Image.Image,
+        baseline: list,
+        boundary: list,
+        centers_rel: list,
+        pred_chars: list,
+        pred_confs: list,
+        page_name: str,
+    ):
+        """Create visualizations showing the CHAT preprocessing pipeline steps.
+
+        Generates 3 subplots:
+          1. Grayscale crop (raw subcolumn extraction)
+          2. Binarized image (PIL mode "1" after threshold 128)
+          3. Predictions overlaid with baseline + confidence colors
+        """
+        if self.viz_report is None:
+            return
+
+        # Limit to first 3 subcolumns to avoid clutter
+        self._viz_counter += 1
+        if self._viz_counter > 3:
+            return
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 6))
+        fig.suptitle(f'CHAT Pipeline: {page_name} (subcolumn {self._viz_counter})',
+                     fontsize=14, fontweight='bold')
+
+        # 1. Grayscale crop
+        axes[0].imshow(subcol_image, cmap='gray')
+        axes[0].set_title('1. Grayscale Crop', fontsize=12)
+        axes[0].axis('off')
+
+        # Plot CRAFT centroids
+        if centers_rel:
+            cy_vals, cx_vals = zip(*centers_rel)
+            axes[0].scatter(cx_vals, cy_vals, c='red', s=20, marker='x',
+                          alpha=0.7, label='CRAFT centroids')
+            axes[0].legend(fontsize=8)
+
+        # 2. Binarized image
+        # Convert PIL "1" mode back to numpy for display
+        bin_array = np.array(pil_img)
+        axes[1].imshow(bin_array, cmap='gray')
+        axes[1].set_title('2. Binarized (threshold=128)', fontsize=12)
+        axes[1].axis('off')
+
+        # 3. Predictions + baseline
+        axes[2].imshow(bin_array, cmap='gray')
+        axes[2].set_title('3. Baseline + Predictions', fontsize=12)
+        axes[2].axis('off')
+
+        # Draw synthetic baseline (vertical line)
+        if baseline and len(baseline) >= 2:
+            bl_x, bl_y = zip(*baseline)
+            axes[2].plot(bl_x, bl_y, 'b-', linewidth=2, label='Baseline', alpha=0.8)
+
+        # Draw boundary
+        if boundary and len(boundary) >= 3:
+            bd_x, bd_y = zip(*boundary)
+            bd_x = bd_x + (bd_x[0],)  # close polygon
+            bd_y = bd_y + (bd_y[0],)
+            axes[2].plot(bd_x, bd_y, 'g--', linewidth=1, label='Boundary', alpha=0.5)
+
+        # Draw predictions with confidence-based colors
+        if pred_chars and centers_rel:
+            for (cy, cx), char, conf in zip(centers_rel, pred_chars, pred_confs):
+                # Color: green (high conf) → yellow (medium) → red (low)
+                if conf >= 0.8:
+                    color = 'green'
+                elif conf >= 0.5:
+                    color = 'orange'
+                else:
+                    color = 'red'
+
+                axes[2].text(cx, cy, char, fontsize=10, color=color,
+                           ha='center', va='center', fontweight='bold',
+                           bbox=dict(boxstyle='round,pad=0.3',
+                                   facecolor='white', alpha=0.7, edgecolor=color))
+
+        axes[2].legend(fontsize=8, loc='upper right')
+
+        plt.tight_layout()
+        self.viz_report.report_figure(fig, title=f'Subcolumn {self._viz_counter} - {page_name}')
 
     # ------------------------------------------------------------------ #
     #  Extraction (one page)                                               #

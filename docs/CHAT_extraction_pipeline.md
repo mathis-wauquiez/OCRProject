@@ -246,6 +246,53 @@ Write-back:
 
 ---
 
+## Visualization
+
+The pipeline supports optional visualizations via the `AutoReport` class. When enabled, it generates HTML reports showing:
+
+1. **Grayscale Crop**: Raw subcolumn extraction (tight bbox around characters)
+2. **Binarized Image**: PIL mode "1" output after threshold 128
+3. **Baseline + Predictions**: Synthetic baseline, CRAFT centroids, and recognized characters with confidence-based colors
+
+### Usage
+
+```python
+from src.auto_report import AutoReport, ReportConfig, Theme
+from src.patch_processing.processor import PatchPreprocessing
+
+# Initialize report
+report = AutoReport(
+    title="CHAT Pipeline Visualization",
+    author="Your Name",
+    output_dir="./reports",
+    config=ReportConfig(theme=Theme.DEFAULT),
+)
+
+# Pass report to processor
+processor = PatchPreprocessing(
+    reading_order=reading_order,
+    ink_filter=ink_filter,
+    vectorizer=vectorizer,
+    chat_model=chat_model,
+    hog_renderer=hog_renderer,
+    hog_params=hog_params,
+    viz_report=report,  # <-- Enable visualizations
+)
+
+# Run processing (visualizations added automatically)
+result_df = processor(image_folder, comps_folder)
+
+# Generate HTML report
+html_path = report.generate_html()
+print(f"Report saved to: {html_path}")
+```
+
+**Visualization Limits**: Only the first 3 subcolumns per page are visualized to keep report size manageable.
+
+**Demo**: See `examples/chat_viz_demo.py` for a complete example.
+
+---
+
 ## Future Improvements
 
 - [ ] Use actual segmentation model (CHAT's `chat_seg.mlmodel`) instead of synthetic baselines
@@ -253,3 +300,4 @@ Write-back:
 - [ ] Implement character-level alignment (CTC-style) instead of simple truncate/pad
 - [ ] Handle curved baselines by fitting splines to CRAFT centroids
 - [ ] Add confidence-based filtering (reject chars with conf < threshold)
+- [ ] Add more visualization options (e.g., line-level aggregation, error analysis)
