@@ -475,13 +475,11 @@ class graphClusteringSweep(AutoReport):
             index=dataframe.index
         )
 
-        # ── 3. Pre-split membership & purity ──
+        # ── 3. Pre-split membership ──
         pre_split_membership = np.array(partition.membership)
         dataframe.loc[:, 'membership_pre_split'] = pd.Series(
             pre_split_membership, index=dataframe.index
         )
-        pre_purity_df, pre_representatives = \
-            self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
 
         # ── 4. Cluster splitting ──
         did_split = renderer is not None and self.split_thresholds is not None
@@ -493,8 +491,6 @@ class graphClusteringSweep(AutoReport):
             dataframe.loc[:, 'membership'] = pd.Series(
                 post_split_membership, index=dataframe.index
             )
-            purity_dataframe, representatives = \
-                self._compute_purity_and_representatives(dataframe, 'membership')
         else:
             best_threshold = None
             post_split_membership = pre_split_membership
@@ -503,14 +499,24 @@ class graphClusteringSweep(AutoReport):
             dataframe.loc[:, 'membership'] = pd.Series(
                 partition.membership, index=dataframe.index
             )
-            purity_dataframe = pre_purity_df
-            representatives = pre_representatives
 
         # ── 5. Reorder by membership ──
         dataframe = dataframe.sort_values(
             by=['membership', 'degree_centrality'],
             ascending=[True, False]
         ).reset_index(drop=True)
+
+        # ── 5b. Compute purity & representatives AFTER index reset ──
+        #     so that stored representative indices match the new index.
+        pre_purity_df, pre_representatives = \
+            self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
+
+        if did_split:
+            purity_dataframe, representatives = \
+                self._compute_purity_and_representatives(dataframe, 'membership')
+        else:
+            purity_dataframe = pre_purity_df
+            representatives = pre_representatives
 
         # ── 6. Post-split metrics & label completeness ──
         best_metrics = self._evaluate_membership(
