@@ -297,8 +297,8 @@ class PatchPreprocessing:
         # spanning the full crop height.  This tells rpred where the text
         # column runs without needing a separate segmentation model.
         cx_median = float(np.median([cx for _, cx in centers_rel]))
-        baseline = [(int(round(cx_median)), 0), (int(round(cx_median)), h)]
-        boundary = [(0, 0), (w, 0), (w, h), (0, h)]
+        baseline = [(int(round(cx_median)), 0), (int(round(cx_median)), h - 1)]
+        boundary = [(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)]
 
         line = BaselineLine(id="0", baseline=baseline, boundary=boundary)
         seg = Segmentation(
