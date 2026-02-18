@@ -1598,7 +1598,7 @@ class AutoReport:
                     buf = io.BytesIO()
                     save_kwargs = dict(bbox_inches='tight', dpi=self.config.dpi)
                     if use_jpeg:
-                        save_kwargs['quality'] = self.config.image_quality
+                        save_kwargs['pil_kwargs'] = {'quality': self.config.image_quality, 'optimize': True}
                     item.content.savefig(buf, format=fmt, **save_kwargs)
                     buf.seek(0)
                     self._figure_render_cache[fig_id] = base64.b64encode(buf.read()).decode()
