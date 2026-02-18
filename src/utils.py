@@ -344,41 +344,71 @@ class connectedComponent:
 
     @classmethod
     def from_image_watershed(cls, image, min_distance=10, connectivity=1, compute_stats=False,
-                            binary_threshold=None, use_intensity=False):
+                            binary_threshold=None, mask_threshold=None, use_intensity=False):
+        """Segment image using watershed with optional dual-threshold support.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Input score map (e.g. CRAFT text confidence).
+        min_distance : int
+            Minimum distance between watershed seeds.
+        connectivity : int
+            Connectivity for watershed.
+        compute_stats : bool
+            Whether to compute region stats.
+        binary_threshold : float or None
+            Threshold for seed detection (peak_local_max). High value ensures
+            seeds are only placed at strong character regions.
+        mask_threshold : float or None
+            Lower threshold for watershed basin expansion. When set, basins can
+            grow into moderate-score areas (e.g. radicals with score 0.3-0.5)
+            while seeds remain precise. Set to None to use binary_threshold for
+            both (original behavior).
+        use_intensity : bool
+            If True, use image intensity as elevation; otherwise use distance
+            transform.
+        """
         from scipy import ndimage
         from skimage.feature import peak_local_max
         from skimage.segmentation import watershed
         from skimage.filters import threshold_otsu
-                
+
         # Convert to float for processing
         if image.dtype == np.uint8:
             image = image.astype(np.float32) / 255.0
 
         min_distance = int(min_distance)
-        
-        # Create binary mask
+
+        # Create binary mask for seed detection (high threshold)
         if binary_threshold is not None:
-            binary = image > binary_threshold
+            binary_peaks = image > binary_threshold
         else:
             thresh = threshold_otsu(image)
-            binary = image > thresh
-        
+            binary_peaks = image > thresh
+
+        # Separate mask for watershed basin expansion (lower threshold = wider basins)
+        if mask_threshold is not None:
+            binary_mask = image > mask_threshold
+        else:
+            binary_mask = binary_peaks  # Original behavior: same threshold for both
+
         if use_intensity:
             elevation = -image
-            coords = peak_local_max(image, min_distance=min_distance, labels=binary)
+            coords = peak_local_max(image, min_distance=min_distance, labels=binary_peaks)
         else:
-            distance = ndimage.distance_transform_edt(binary)
+            distance = ndimage.distance_transform_edt(binary_peaks)
             elevation = -distance
-            coords = peak_local_max(distance, min_distance=min_distance, labels=binary)
-        
+            coords = peak_local_max(distance, min_distance=min_distance, labels=binary_peaks)
+
         # Create markers from peaks
-        mask = np.zeros(binary.shape, dtype=bool)
+        mask = np.zeros(binary_peaks.shape, dtype=bool)
         mask[tuple(coords.T)] = True
         markers, _ = ndimage.label(mask)
-        
-        # Apply watershed
-        labels = watershed(elevation, markers, mask=binary, connectivity=connectivity)
-        
+
+        # Apply watershed (uses wider mask so basins can expand into moderate-score areas)
+        labels = watershed(elevation, markers, mask=binary_mask, connectivity=connectivity)
+
         return cls.from_labels(labels, intensity_image=image, compute_stats=compute_stats)
 
 
