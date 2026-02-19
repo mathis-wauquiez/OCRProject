@@ -2,16 +2,18 @@
 Generate an HTML methodology report for the character extraction pipeline.
 
 Produces a self-contained HTML file (with KaTeX math rendering) that can be
-opened in a browser and printed to PDF.  Figure placeholders are included for
-the user to add their own visualizations.
+opened in a browser and printed to PDF.  When ``--viz-dir`` is supplied the
+report embeds real pipeline visualisations instead of figure placeholders.
 
 Usage:
     python scripts/generate_extraction_report.py [--output-dir ./reports]
+    python scripts/generate_extraction_report.py --viz-dir outputs/book1/visualizations
 """
 
 import sys
 import argparse
 from pathlib import Path
+from typing import Dict, Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -19,7 +21,81 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.auto_report import AutoReport, ReportConfig, Theme
 
 
-def build_report(output_dir: str = "./reports/extraction_methodology"):
+# ======================================================================
+# Figure discovery helpers
+# ======================================================================
+
+def find_figures(viz_dir: Optional[str]) -> Dict[str, Path]:
+    """Scan a visualisations directory and return a mapping of figure keys
+    to file paths.  Returns an empty dict when *viz_dir* is ``None`` or
+    does not exist.
+
+    The directory layout produced by ``visualize_extraction_result()``::
+
+        viz_dir/
+        ├── inputs/<prefix>.png
+        ├── binary/<prefix>.png
+        ├── craft/<prefix>_{segmentation,deletion,labeled}.png
+        ├── craft_merged/<prefix>_groups.png
+        ├── image_components/<prefix>_{all,filtered}.png
+        ├── similarities/<prefix>_{matrix,matching}.png
+        ├── contour_filtering/<prefix>.png
+        ├── characters/<prefix>_{segmentation,deletion,labeled}.png
+        └── summary/<prefix>_complete.png
+    """
+    if not viz_dir:
+        return {}
+    vd = Path(viz_dir)
+    if not vd.exists():
+        return {}
+
+    # Detect first available prefix from the inputs sub-directory
+    inputs = sorted((vd / "inputs").glob("*.png")) if (vd / "inputs").exists() else []
+    if not inputs:
+        return {}
+    prefix = inputs[0].stem
+
+    candidates = {
+        "input":                     vd / "inputs"           / f"{prefix}.png",
+        "binary":                    vd / "binary"           / f"{prefix}.png",
+        "craft_segmentation":        vd / "craft"            / f"{prefix}_segmentation.png",
+        "craft_deletion":            vd / "craft"            / f"{prefix}_deletion.png",
+        "craft_labeled":             vd / "craft"            / f"{prefix}_labeled.png",
+        "craft_merged_groups":       vd / "craft_merged"     / f"{prefix}_groups.png",
+        "image_components_all":      vd / "image_components" / f"{prefix}_all.png",
+        "image_components_filtered": vd / "image_components" / f"{prefix}_filtered.png",
+        "similarity_matrix":         vd / "similarities"     / f"{prefix}_matrix.png",
+        "similarity_matching":       vd / "similarities"     / f"{prefix}_matching.png",
+        "contour_filtering":         vd / "contour_filtering"/ f"{prefix}.png",
+        "characters_segmentation":   vd / "characters"       / f"{prefix}_segmentation.png",
+        "characters_deletion":       vd / "characters"       / f"{prefix}_deletion.png",
+        "characters_labeled":        vd / "characters"       / f"{prefix}_labeled.png",
+        "summary":                   vd / "summary"          / f"{prefix}_complete.png",
+    }
+    return {k: p for k, p in candidates.items() if p.exists()}
+
+
+def _fig(report, figures: Dict[str, Path], key: str, title: str,
+         placeholder: str):
+    """Embed an image figure if available, else add the placeholder text."""
+    if key in figures:
+        report.report_img(str(figures[key]), title=title)
+    else:
+        report.report_text(placeholder, title=f"Figure: {title}")
+
+
+# ======================================================================
+# Report builder
+# ======================================================================
+
+def build_report(output_dir: str = "./reports/extraction_methodology",
+                 viz_dir: Optional[str] = None):
+    figures = find_figures(viz_dir)
+    if figures:
+        print(f"Found {len(figures)} pipeline figures in {viz_dir}")
+    else:
+        print("No visualisation directory provided — using figure placeholders.")
+
     report = AutoReport(
         title="Character Extraction Pipeline — Methodology Report",
         author="OCR Project",
@@ -86,6 +162,10 @@ def build_report(output_dir: str = "./reports/extraction_methodology"):
             title="Pipeline Architecture",
         )
 
+        _fig(report, figures, "summary",
+             "Pipeline Summary",
+             "*[Figure placeholder: comprehensive 3×4 pipeline summary]*")
+
     with report.section("2.1 CRAFT Detection"):
         report.report_text(
             "CRAFT (Character Region Awareness For Text detection) is a "
@@ -105,11 +185,10 @@ def build_report(output_dir: str = "./reports/extraction_methodology"):
             title="CRAFT Model Outputs",
             is_katex=True,
         )
-        report.report_text(
-            "*[Figure placeholder: CRAFT score_text and score_link heatmaps "
-            "for a sample page with composite characters]*",
-            title="Figure: CRAFT Score Maps",
-        )
+        _fig(report, figures, "craft_segmentation",
+             "CRAFT Score Maps",
+             "*[Figure placeholder: CRAFT score_text and score_link heatmaps "
+             "for a sample page with composite characters]*")
 
     with report.section("2.2 Watershed Segmentation"):
         report.report_text(
@@ -132,11 +211,10 @@ def build_report(output_dir: str = "./reports/extraction_methodology"):
             title="Watershed Algorithm",
             is_katex=True,
         )
-        report.report_text(
-            "*[Figure placeholder: Watershed segmentation result showing CRAFT "
-            "component boundaries overlaid on score_text heatmap]*",
-            title="Figure: Watershed Result",
-        )
+        _fig(report, figures, "craft_labeled",
+             "Watershed Result",
+             "*[Figure placeholder: Watershed segmentation result showing CRAFT "
+             "component boundaries overlaid on score_text heatmap]*")
 
     with report.section("2.3 CRAFT Component Post-Processing"):
         report.report_text(
@@ -154,6 +232,12 @@ def build_report(output_dir: str = "./reports/extraction_methodology"):
             "- All labels in a group are mapped to a single representative",
             title="Filtering and Merging",
         )
+        _fig(report, figures, "craft_deletion",
+             "CRAFT Component Filtering",
+             "*[Figure placeholder: CRAFT components coloured by deletion reason]*")
+        _fig(report, figures, "craft_merged_groups",
+             "CRAFT Merge Groups",
+             "*[Figure placeholder: merged CRAFT components with group colours]*")
 
     with report.section("2.4 Image Binarization & Connected Components"):
         report.report_text(
@@ -167,6 +251,15 @@ def build_report(output_dir: str = "./reports/extraction_methodology"):
             "not characters)",
             title="Image Processing",
         )
+        _fig(report, figures, "binary",
+             "Binary Image",
+             "*[Figure placeholder: Otsu-binarized image]*")
+        _fig(report, figures, "image_components_all",
+             "All Image Connected Components",
+             "*[Figure placeholder: all extracted image connected components]*")
+        _fig(report, figures, "image_components_filtered",
+             "Filtered Image Components",
+             "*[Figure placeholder: image components after line removal]*")
 
     with report.section("2.5 Similarity Computation & Assignment"):
         report.report_text(
@@ -192,12 +285,14 @@ def build_report(output_dir: str = "./reports/extraction_methodology"):
             title="Mahalanobis Distance Assignment",
             is_katex=True,
         )
-        report.report_text(
-            "*[Figure placeholder: Similarity matching visualization showing "
-            "lines connecting image CCs to their assigned CRAFT components, "
-            "color-coded by match quality]*",
-            title="Figure: Similarity Matching",
-        )
+        _fig(report, figures, "similarity_matrix",
+             "Similarity Matrix",
+             "*[Figure placeholder: similarity matrix heatmap]*")
+        _fig(report, figures, "similarity_matching",
+             "Similarity Matching",
+             "*[Figure placeholder: Similarity matching visualization showing "
+             "lines connecting image CCs to their assigned CRAFT components, "
+             "color-coded by match quality]*")
 
     with report.section("2.6 Post-Filtering"):
         report.report_text(
@@ -214,6 +309,15 @@ def build_report(output_dir: str = "./reports/extraction_methodology"):
             "< 200 px",
             title="Character Filtering",
         )
+        _fig(report, figures, "contour_filtering",
+             "Contour Proximity Filtering",
+             "*[Figure placeholder: contour proximity filter result]*")
+        _fig(report, figures, "characters_segmentation",
+             "Final Character Segmentation",
+             "*[Figure placeholder: final extracted characters]*")
+        _fig(report, figures, "characters_deletion",
+             "Character Deletion Reasons",
+             "*[Figure placeholder: characters coloured by deletion reason]*")
 
     # ==================================================================
     # Section 3: Problem Analysis
@@ -503,5 +607,12 @@ if __name__ == "__main__":
         default="./reports/extraction_methodology",
         help="Output directory for the report",
     )
+    parser.add_argument(
+        "--viz-dir",
+        default=None,
+        help="Path to pipeline visualisations directory "
+             "(e.g. outputs/book1/visualizations).  When provided, "
+             "real figures are embedded instead of placeholders.",
+    )
     args = parser.parse_args()
-    build_report(args.output_dir)
+    build_report(args.output_dir, args.viz_dir)

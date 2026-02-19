@@ -1,5 +1,6 @@
 import os
 import io
+import re
 import base64
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -90,6 +91,150 @@ def setup_logger(name: str = __name__, level: int = logging.INFO) -> logging.Log
 
 
 logger = setup_logger()
+
+
+# ============================================================================
+# MARKDOWN → HTML CONVERSION
+# ============================================================================
+
+def _markdown_to_html(text: str) -> str:
+    """Convert basic Markdown to HTML, preserving KaTeX math delimiters.
+
+    Handles fenced code blocks, inline code, bold, italic, Markdown tables,
+    unordered / ordered lists, and line breaks.  KaTeX expressions
+    (``$$…$$``, ``\\(…\\)``, ``\\[…\\]``) are protected from conversion
+    and restored verbatim so the browser-side auto-render pass can handle them.
+    """
+    # ---- 1. Protect KaTeX math ----
+    _protected: dict = {}
+    _ctr = [0]
+
+    def _protect(m):
+        key = f"\x00M{_ctr[0]}\x00"
+        _protected[key] = m.group(0)
+        _ctr[0] += 1
+        return key
+
+    text = re.sub(r'\$\$.+?\$\$', _protect, text, flags=re.DOTALL)
+    text = re.sub(r'\\\(.+?\\\)', _protect, text, flags=re.DOTALL)
+    text = re.sub(r'\\\[.+?\\\]', _protect, text, flags=re.DOTALL)
+
+    # ---- 2. Extract fenced code blocks ----
+    _code: dict = {}
+    _cctr = [0]
+
+    def _extract_code(m):
+        key = f"\x00C{_cctr[0]}\x00"
+        body = m.group(1)
+        body = body.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        _code[key] = f'<pre><code>{body}</code></pre>'
+        _cctr[0] += 1
+        return key
+
+    text = re.sub(r'```\w*\n(.*?)```', _extract_code, text, flags=re.DOTALL)
+
+    # ---- 3. Inline formatting ----
+    text = re.sub(r'``(.+?)``', r'<code>\1</code>', text)
+    text = re.sub(r'`([^`\n]+)`', r'<code>\1</code>', text)
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text, flags=re.DOTALL)
+    text = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'<em>\1</em>', text)
+
+    # ---- 4. Block-level elements ----
+    lines = text.split('\n')
+    out: list = []
+    i = 0
+
+    while i < len(lines):
+        stripped = lines[i].strip()
+
+        # Markdown table
+        if (stripped.startswith('|') and stripped.endswith('|')
+                and stripped.count('|') >= 3):
+            table_lines: list = []
+            while i < len(lines):
+                s = lines[i].strip()
+                if s.startswith('|') and s.endswith('|'):
+                    table_lines.append(s)
+                    i += 1
+                else:
+                    break
+            out.append(_markdown_table_to_html(table_lines))
+            continue
+
+        # Unordered list
+        if stripped.startswith('- '):
+            items: list = []
+            while i < len(lines) and lines[i].strip().startswith('- '):
+                items.append(lines[i].strip()[2:])
+                i += 1
+            out.append(
+                '<ul>' + ''.join(f'<li>{it}</li>' for it in items) + '</ul>'
+            )
+            continue
+
+        # Ordered list
+        if re.match(r'^\d+\.\s+', stripped):
+            items = []
+            while i < len(lines):
+                m = re.match(r'^\s*(\d+)\.\s+(.+)', lines[i])
+                if m:
+                    items.append(m.group(2))
+                    i += 1
+                elif (lines[i].strip() == ''
+                      and i + 1 < len(lines)
+                      and re.match(r'^\s*\d+\.\s+', lines[i + 1])):
+                    i += 1          # blank line between items
+                elif lines[i].startswith('   ') and lines[i].strip() and items:
+                    items[-1] += '<br>' + lines[i].strip()
+                    i += 1
+                else:
+                    break
+            out.append(
+                '<ol>' + ''.join(f'<li>{it}</li>' for it in items) + '</ol>'
+            )
+            continue
+
+        out.append(lines[i])
+        i += 1
+
+    text = '\n'.join(out)
+
+    # ---- 5. Line breaks & spacing ----
+    text = text.replace('  ', ' &nbsp;')
+    text = text.replace('\n', '<br>\n')
+
+    # ---- 6. Restore code blocks (newlines inside <pre> stay as-is) ----
+    for key, val in _code.items():
+        text = text.replace(key, val)
+
+    # ---- 7. Restore math expressions ----
+    for key, val in _protected.items():
+        text = text.replace(key, val)
+
+    return text
+
+
+def _markdown_table_to_html(lines: list) -> str:
+    """Convert a sequence of Markdown table lines into an HTML ``<table>``."""
+    if len(lines) < 2:
+        return ''.join(lines)
+
+    header = [c.strip() for c in lines[0].strip('|').split('|')]
+
+    data_start = 1
+    if len(lines) > 1 and re.match(r'^[\|\s\-:]+$', lines[1]):
+        data_start = 2
+
+    parts = ['<div class="table-container"><table><thead><tr>']
+    parts.extend(f'<th>{c}</th>' for c in header)
+    parts.append('</tr></thead><tbody>')
+
+    for line in lines[data_start:]:
+        cells = [c.strip() for c in line.strip('|').split('|')]
+        parts.append('<tr>' + ''.join(f'<td>{c}</td>' for c in cells) + '</tr>')
+
+    parts.append('</tbody></table></div>')
+    return ''.join(parts)
 
 
 # ============================================================================
@@ -1633,11 +1778,8 @@ class AutoReport:
                 return f'<div class="figure"><img src="data:image/{mime};base64,{img_str}" alt="{item.title}"></div>'
                 
             elif item.content_type == 'text':
-                if item.metadata.get('is_katex', False):
-                    return f'<div class="katex-equation">{item.content}</div>'
-                else:
-                    content = item.content.replace('\n', '<br>').replace('  ', ' &nbsp;')
-                    return f'<div class="text-content">{content}</div>'
+                content = _markdown_to_html(item.content)
+                return f'<div class="text-content">{content}</div>'
                     
             elif item.content_type == 'image' and PIL_AVAILABLE:
                 if isinstance(item.content, (str, Path)):
