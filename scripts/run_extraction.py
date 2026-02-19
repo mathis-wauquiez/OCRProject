@@ -5,11 +5,13 @@ Outputs are saved in the format expected by downstream PatchPreprocessing:
   <save_folder>/components/<image_filename>.npz
   <save_folder>/craft_components/<image_filename>.npz
   <save_folder>/visualizations/  (pipeline summary figures)
+  <save_folder>/extraction_methodology.html  (auto-generated report)
 
 Usage:
     python scripts/run_extraction.py
     python scripts/run_extraction.py --image-folder data/datasets/book1 --save-folder outputs/extraction/book1
     python scripts/run_extraction.py --workers 2 --config extraction_pipeline
+    python scripts/run_extraction.py --no-report  # skip report generation
 """
 
 import argparse
@@ -29,6 +31,7 @@ from tqdm import tqdm
 
 from src.ocr.pipeline import GlobalPipeline
 from src.ocr.visualization import visualize_extraction_result
+from scripts.generate_extraction_report import build_report
 
 
 def setup_pipeline(config_name="extraction_pipeline"):
@@ -85,6 +88,8 @@ def main():
                         help='Hydra config name (default: extraction_pipeline)')
     parser.add_argument('--workers', type=int, default=1,
                         help='Number of parallel workers (default: 1)')
+    parser.add_argument('--no-report', action='store_true',
+                        help='Skip automatic report generation')
     args = parser.parse_args()
 
     # Resolve paths relative to project root
@@ -130,6 +135,19 @@ def main():
         print("Failed:")
         for info in failed:
             print(f"  {info}")
+
+    # Generate extraction methodology report with embedded figures
+    if not args.no_report and successful > 0:
+        viz_dir = save_folder / 'visualizations'
+        print(f"\nGenerating extraction report in {save_folder} ...")
+        try:
+            html_path = build_report(
+                output_dir=str(save_folder),
+                viz_dir=str(viz_dir),
+            )
+            print(f"Report saved: {html_path}")
+        except Exception as e:
+            print(f"Warning: report generation failed: {e}")
 
 
 if __name__ == "__main__":

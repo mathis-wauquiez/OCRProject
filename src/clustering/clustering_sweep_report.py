@@ -739,7 +739,9 @@ class ClusteringSweepReporter:
                              sweep_results_df, did_split,
                              purity_dataframe, representatives,
                              pre_purity_df, pre_representatives,
-                             best_metrics, label_dataframe):
+                             best_metrics, label_dataframe,
+                             chat_split_log=None, hapax_log=None,
+                             glossary_df=None):
         """
         Single entry-point producing every report section for a given
         graph + partition.  Called once ALL computation is done.
@@ -806,3 +808,222 @@ class ClusteringSweepReporter:
 
         # Section 5: Hapax
         self.report_hapax(dataframe, hapax_df, dissimilarities, graph)
+
+        # Section 6: CHAT-based cluster splitting (optional)
+        if chat_split_log is not None:
+            self.report_chat_split(dataframe, chat_split_log)
+
+        # Section 7: Hapax association (optional)
+        if hapax_log is not None:
+            self.report_hapax_association(dataframe, hapax_log)
+
+        # Section 8: Glossary (optional)
+        if glossary_df is not None:
+            self.report_glossary(glossary_df, dataframe)
+
+    # ================================================================
+    #  CHAT-based cluster splitting section
+    # ================================================================
+
+    def report_chat_split(self, dataframe, split_log):
+        target_lbl = self.sweep.target_lbl
+
+        with self._section("CHAT-Based Cluster Splitting"):
+            if not split_log:
+                self._report_raw_html(
+                    '<p style="color:#666;">No clusters were split — all were '
+                    'pure w.r.t. CHAT predictions.</p>',
+                    title="No Splits Required",
+                )
+                return
+
+            # Summary table
+            rows = []
+            for entry in split_log:
+                labels_str = ', '.join(
+                    f'{l} ({c})' for l, c in entry['labels_found'].items()
+                )
+                rows.append({
+                    'Original Cluster': entry['original_cluster'],
+                    'Original Size': entry['original_size'],
+                    'Labels Found': labels_str,
+                    'Sub-clusters': len(entry['sub_sizes']),
+                    'Sub-cluster Sizes': str(entry['sub_sizes']),
+                })
+            self._report_table(
+                pd.DataFrame(rows),
+                title=f"Clusters Split ({len(split_log)} clusters affected)",
+            )
+
+            # Visual examples: show SVG thumbnails for up to 3 split clusters
+            n_examples = min(3, len(split_log))
+            examples_html = '<div style="display: grid; gap: 20px;">'
+
+            if 'membership_pre_chat_split' in dataframe.columns:
+                for entry in split_log[:n_examples]:
+                    old_cid = entry['original_cluster']
+                    # Find patches that belonged to this cluster before the split
+                    pre_mask = dataframe['membership_pre_chat_split'] == old_cid
+                    sub_df = dataframe[pre_mask]
+
+                    examples_html += f'''
+                    <div style="background: white; padding: 15px; border-radius: 8px;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <h4 style="margin-top:0;">Cluster {old_cid} (size {entry["original_size"]})</h4>
+                        <div style="display: flex; flex-wrap: wrap; gap: 20px;">'''
+
+                    # Group by new membership
+                    for new_cid, grp in sub_df.groupby('membership'):
+                        lbl_counts = grp[target_lbl].fillna(UNKNOWN_LABEL).value_counts()
+                        dom_lbl = lbl_counts.index[0]
+                        examples_html += f'''
+                        <div style="border: 1px solid #ddd; padding: 10px; border-radius: 5px;">
+                            <div style="font-weight:bold; margin-bottom: 5px;">
+                                Sub-cluster {new_cid}: "{dom_lbl}" ({len(grp)} patches)
+                            </div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 5px;">'''
+
+                        for _, row in grp.head(8).iterrows():
+                            examples_html += f'''
+                                <div style="width:50px; height:50px; display:flex;
+                                            align-items:center; justify-content:center;">
+                                    {row["svg"].to_string() if hasattr(row.get("svg", None), "to_string") else ""}
+                                </div>'''
+
+                        if len(grp) > 8:
+                            examples_html += f'<div style="padding:15px; color:#999;">+{len(grp)-8} more</div>'
+                        examples_html += '</div></div>'
+
+                    examples_html += '</div></div>'
+
+            examples_html += '</div>'
+            self._report_raw_html(examples_html,
+                                  title=f"Split Examples (showing {n_examples})")
+
+    # ================================================================
+    #  Hapax association section
+    # ================================================================
+
+    def report_hapax_association(self, dataframe, hapax_log):
+        target_lbl = self.sweep.target_lbl
+
+        with self._section("Hapax-to-Cluster Association"):
+            accepted = [e for e in hapax_log if e['accepted']]
+            rejected = [e for e in hapax_log if not e['accepted']]
+
+            reason_counts = {}
+            for e in rejected:
+                r = e.get('reason', 'unknown')
+                reason_counts[r] = reason_counts.get(r, 0) + 1
+
+            summary_rows = [{
+                'Total Hapax': len(hapax_log),
+                'Matched': len(accepted),
+                'Remaining': len(rejected),
+                'Match Rate': f'{100 * len(accepted) / max(len(hapax_log), 1):.1f}%',
+            }]
+            self._report_table(pd.DataFrame(summary_rows), title="Association Summary")
+
+            if reason_counts:
+                self._report_table(
+                    pd.DataFrame([{'Reason': k, 'Count': v}
+                                  for k, v in sorted(reason_counts.items(),
+                                                     key=lambda x: -x[1])]),
+                    title="Rejection Reasons",
+                )
+
+            # Show accepted matches (up to 30)
+            if accepted:
+                match_html = ('<div style="display: grid; '
+                              'grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;">')
+                for entry in accepted[:30]:
+                    h_idx = entry['hapax_idx']
+                    row = dataframe.iloc[h_idx] if h_idx < len(dataframe) else None
+                    svg_str = ''
+                    if row is not None and hasattr(row.get('svg', None), 'to_string'):
+                        svg_str = row['svg'].to_string()
+                    match_html += f'''
+                    <div style="border: 1px solid #ddd; padding: 8px; border-radius: 5px; text-align:center;">
+                        <div style="width:60px; height:60px; margin:0 auto;
+                                    display:flex; align-items:center; justify-content:center;">
+                            {svg_str}
+                        </div>
+                        <div style="font-weight:bold; font-size:18px;">{entry["char_chat"]}</div>
+                        <div style="font-size:10px; color:#666;">
+                            &rarr; cluster {entry["target_cluster"]}<br>
+                            dissim: {entry["mean_dissim"]:.2f}
+                        </div>
+                    </div>'''
+                match_html += '</div>'
+                if len(accepted) > 30:
+                    match_html += f'<p style="color:#999;">... and {len(accepted)-30} more</p>'
+                self._report_raw_html(match_html,
+                                      title=f"Matched Hapax ({len(accepted)} total)")
+
+    # ================================================================
+    #  Glossary section
+    # ================================================================
+
+    def report_glossary(self, glossary_df, dataframe):
+        with self._section("Character Glossary"):
+            # Summary statistics
+            n_entries = len(glossary_df)
+            total_patches = glossary_df['count'].sum()
+            known_entries = len(glossary_df[glossary_df['character'] != UNKNOWN_LABEL])
+            mean_purity = glossary_df['purity'].dropna().mean()
+
+            summary = pd.DataFrame([{
+                'Glossary Entries': n_entries,
+                'Known Characters': known_entries,
+                'Total Patches': int(total_patches),
+                'Mean Purity': f'{mean_purity:.3f}' if not np.isnan(mean_purity) else 'N/A',
+            }])
+            self._report_table(summary, title="Glossary Summary")
+
+            # Top entries table
+            top_n = min(50, len(glossary_df))
+            top = glossary_df.head(top_n)[
+                ['character', 'count', 'purity', 'mean_confidence', 'n_unknown']
+            ].copy()
+            top.index = range(1, len(top) + 1)
+            top.index.name = 'Rank'
+            self._report_table(top, title=f"Top {top_n} Characters by Frequency")
+
+            # Visual glossary grid
+            grid_html = ('<div style="display: grid; '
+                         'grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); '
+                         'gap: 8px;">')
+
+            for _, grow in glossary_df.iterrows():
+                rep_idx = grow.get('representative_idx')
+                svg_str = ''
+                if rep_idx is not None and rep_idx in dataframe.index:
+                    row = dataframe.loc[rep_idx]
+                    if hasattr(row.get('svg', None), 'to_string'):
+                        svg_str = row['svg'].to_string()
+
+                char_display = grow['character']
+                count = grow['count']
+                purity = grow['purity']
+                purity_str = f'{purity:.0%}' if not (isinstance(purity, float) and np.isnan(purity)) else '?'
+
+                border_color = '#4caf50' if purity_str != '?' and purity >= 0.9 else (
+                    '#ff9800' if purity_str != '?' and purity >= 0.7 else '#f44336')
+
+                grid_html += f'''
+                <div style="border: 2px solid {border_color}; padding: 6px;
+                            border-radius: 5px; text-align: center;">
+                    <div style="width:60px; height:60px; margin:0 auto;
+                                display:flex; align-items:center; justify-content:center;">
+                        {svg_str}
+                    </div>
+                    <div style="font-size:20px; font-weight:bold; margin-top:3px;">
+                        {char_display}
+                    </div>
+                    <div style="font-size:10px; color:#666;">
+                        n={count} | {purity_str}
+                    </div>
+                </div>'''
+
+            grid_html += '</div>'
+            self._report_raw_html(grid_html, title="Visual Glossary")
