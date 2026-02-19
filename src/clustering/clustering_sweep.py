@@ -82,6 +82,18 @@ class graphClusteringSweep(AutoReport):
             thumbnail_dpi: int = 50,
             use_jpeg: bool = True,
             jpeg_quality: int = 70,
+
+            # ── Post-clustering refinement (optional) ──
+            enable_chat_split: bool = False,
+            chat_split_purity_threshold: float = 0.90,
+            chat_split_min_size: int = 3,
+            chat_split_min_label_count: int = 2,
+
+            enable_hapax_association: bool = False,
+            hapax_min_confidence: float = 0.3,
+            hapax_max_dissimilarity: Optional[float] = None,
+
+            enable_glossary: bool = False,
     ):
         config = ReportConfig(
             dpi=image_dpi,
@@ -126,6 +138,18 @@ class graphClusteringSweep(AutoReport):
         self.split_batch_size       = split_batch_size
         self.split_render_scale     = split_render_scale
         self.split_metrics          = split_metrics
+
+        # ── Post-clustering refinement (optional) ──
+        self.enable_chat_split          = enable_chat_split
+        self.chat_split_purity_threshold = chat_split_purity_threshold
+        self.chat_split_min_size        = chat_split_min_size
+        self.chat_split_min_label_count = chat_split_min_label_count
+
+        self.enable_hapax_association    = enable_hapax_association
+        self.hapax_min_confidence        = hapax_min_confidence
+        self.hapax_max_dissimilarity     = hapax_max_dissimilarity
+
+        self.enable_glossary             = enable_glossary
 
         self.embed_images   = embed_images
         self.image_dpi      = image_dpi
@@ -550,7 +574,34 @@ class graphClusteringSweep(AutoReport):
         pre_split_membership = pre_split_membership[perm]
         post_split_membership = np.asarray(post_split_membership)[perm]
 
-        # ── 5b. Compute purity & representatives AFTER index reset ──
+        # ── 5b. Post-clustering refinement (optional) ──
+        from .post_clustering import chat_split_clusters, associate_hapax, build_glossary
+
+        chat_split_log = None
+        hapax_log = None
+        glossary_df = None
+
+        if self.enable_chat_split and self.target_lbl in dataframe.columns:
+            dataframe, chat_split_log = chat_split_clusters(
+                dataframe, dissimilarities,
+                purity_threshold=self.chat_split_purity_threshold,
+                min_split_size=self.chat_split_min_size,
+                min_label_count=self.chat_split_min_label_count,
+                target_lbl=self.target_lbl,
+            )
+
+        if self.enable_hapax_association and self.target_lbl in dataframe.columns:
+            dataframe, hapax_log = associate_hapax(
+                dataframe, dissimilarities,
+                target_lbl=self.target_lbl,
+                min_confidence=self.hapax_min_confidence,
+                max_dissimilarity=self.hapax_max_dissimilarity,
+            )
+
+        if self.enable_glossary and self.target_lbl in dataframe.columns:
+            glossary_df = build_glossary(dataframe, target_lbl=self.target_lbl)
+
+        # ── 5c. Compute purity & representatives AFTER index reset ──
         #     so that stored representative indices match the new index.
         pre_purity_df, pre_representatives = \
             self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
@@ -590,6 +641,9 @@ class graphClusteringSweep(AutoReport):
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
+            chat_split_log=chat_split_log,
+            hapax_log=hapax_log,
+            glossary_df=glossary_df,
         )
 
         # ── 8. Build filtered / representative dataframes ──
