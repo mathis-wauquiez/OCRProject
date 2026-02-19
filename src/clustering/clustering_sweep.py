@@ -527,10 +527,28 @@ class graphClusteringSweep(AutoReport):
             )
 
         # ── 5. Reorder by membership ──
+        dataframe['_graph_node_id'] = range(len(dataframe))
         dataframe = dataframe.sort_values(
             by=['membership', 'degree_centrality'],
             ascending=[True, False]
         ).reset_index(drop=True)
+
+        # ── 5a. Realign graph, matrices, and membership arrays ──
+        # After sorting + reset_index the dataframe has new 0..N-1 indices,
+        # but the graph nodes, distance matrices, and raw membership arrays
+        # still use the OLD row order.  Re-map everything to the new order
+        # so that downstream code (subgraph extraction, NN lookup, etc.)
+        # can use dataframe indices directly as graph node IDs.
+        perm = dataframe.pop('_graph_node_id').values
+        old_to_new = {int(old): new for new, old in enumerate(perm)}
+        graph = nx.relabel_nodes(graph, old_to_new)
+
+        perm_t = torch.tensor(perm, device=nlfa.device, dtype=torch.long)
+        nlfa = nlfa[perm_t][:, perm_t]
+        dissimilarities = dissimilarities[perm_t][:, perm_t]
+
+        pre_split_membership = pre_split_membership[perm]
+        post_split_membership = np.asarray(post_split_membership)[perm]
 
         # ── 5b. Compute purity & representatives AFTER index reset ──
         #     so that stored representative indices match the new index.
