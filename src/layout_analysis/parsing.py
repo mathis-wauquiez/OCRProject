@@ -110,9 +110,13 @@ def split_to_rectangles(labels, min_col_area, threshold_cols=1, canvas=None, thr
             crop_labels = []
 
             for subcol_left, subcol_right in zip(subcol_lefts, subcol_rights):
-                # Add the dominant label of the subcolumn to the crop
+                # Add the dominant (most frequent non-zero) label of the subcolumn
                 unique_labels, counts = np.unique(lbl_slice[:, subcol_left:subcol_right], return_counts=True)
-                dominant_label = unique_labels[-1]
+                nonzero = unique_labels != 0
+                if nonzero.any():
+                    dominant_label = unique_labels[nonzero][np.argmax(counts[nonzero])]
+                else:
+                    dominant_label = 0
                 crop_labels.append(dominant_label)
             
             # Add the row to the dataframe
