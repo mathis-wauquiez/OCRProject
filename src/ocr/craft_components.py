@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 import networkx as nx
 
-from scipy.spatial import distance_matrix
+from scipy.spatial import cKDTree
 
 
 def combine_text_link_scores(score_text: np.ndarray,
@@ -86,9 +86,14 @@ def merge_craft_components(params: craftComponentsParams, components: connectedC
     # Get centroids for active regions
     centroids = np.array([label_to_region[label].centroid for label in active_labels])
     
-    # Calculate distance matrix and linking matrix
-    dist_matrix = distance_matrix(centroids, centroids)
-    link_matrix = dist_matrix < params.min_dist
+    # Radius search via k-d tree — O(N log N) instead of dense O(N^2)
+    tree = cKDTree(centroids)
+    pairs = tree.query_pairs(r=params.min_dist)
+    n = len(active_labels)
+    link_matrix = np.zeros((n, n), dtype=bool)
+    for i, j in pairs:
+        link_matrix[i, j] = True
+        link_matrix[j, i] = True
     
     # Merge the components
     components.merge(link_matrix, labels_list=active_labels)
