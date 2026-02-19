@@ -73,7 +73,7 @@ class ValidationError(ReportError):
 # LOGGING SETUP
 # ============================================================================
 
-def setup_logger(name: str = __name__, level: int = logging.INFO) -> logging.Logger:
+def setup_logger(name: str = __name__, level: int = logging.WARNING) -> logging.Logger:
     """Setup logger with custom formatting"""
     logger = logging.getLogger(name)
     logger.setLevel(level)

@@ -7,7 +7,7 @@ hydra:
 # Data paths
 data:
   # input_path: "outputs/processed_test"
-  target_lbl: "char_qwen_single"
+  target_lbl: "char_chat"
   # output_path: "outputs/clustering_results"
   input_path: "outputs/processed_patches_book1complete"
   output_path: "outputs/clustering_results_full"
@@ -22,17 +22,15 @@ method:
   device: "cuda"
   
   # Parameter sweep ranges
-  epsilons: [0.000]
-  gammas: [2]
 
   # cell_sizes: [16, 24, 32]  # Cell size for HOG computation
   # grdt_sigmas: [5]       # Gradient sigma for smoothing
   # nums_bins: [8, 16]        # Number of orientation bins
 
   # epsilons: [0.00025, 0.00038, .0005]
-  # epsilons: [0.0005]
+  epsilons: [0.0005]
   # gammas: [1.0, 1.25]
-  # gammas: [1.0]
+  gammas: [1.0]
   
   cell_sizes: [22]  # Cell size for HOG computation
   # cell_sizes: [48]  # Cell size for HOG computation
