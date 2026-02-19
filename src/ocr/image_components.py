@@ -126,7 +126,7 @@ class imageComponentsPipeline:
         active_img_regions = [r for r in imageComponents.regions
                              if not imageComponents.is_deleted(r.label)]
 
-        img_centroids = torch.tensor([r.centroid for r in active_img_regions]).to(params.device)
+        img_centroids = torch.tensor([r.centroid for r in active_img_regions], dtype=torch.float32).to(params.device)
         img_centroids = torch.flip(img_centroids, dims=[1])
         img_centroids = self.craftDetector.map_original_to_preprocessed(
             img_centroids, original_shape=imageComponents._labels.shape) / 2
