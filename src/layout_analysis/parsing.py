@@ -83,21 +83,43 @@ def find_columns_by_label(label_image, threshold=None, min_col_area=None, pad=Tr
     
     return left_cols[sort_idx], right_cols[sort_idx]
 
+def _merge_close_subcolumns(lefts, rights, min_gap):
+    """Merge adjacent subcolumns separated by gaps smaller than min_gap.
+
+    Prevents internal character stroke gaps (typically 1-5 px) from being
+    mistaken for real subcolumn boundaries.
+    """
+    if len(lefts) <= 1:
+        return lefts, rights
+    merged_lefts = [lefts[0]]
+    merged_rights = [rights[0]]
+    for k in range(1, len(lefts)):
+        gap = lefts[k] - merged_rights[-1]
+        if gap < min_gap:
+            merged_rights[-1] = rights[k]
+        else:
+            merged_lefts.append(lefts[k])
+            merged_rights.append(rights[k])
+    return np.array(merged_lefts), np.array(merged_rights)
+
+
 def split_to_rectangles(labels, min_col_area, threshold_cols=1, canvas=None, threshold_label_area=10):
     """ Returns a dataframe containing every col/row of the document and the labels in it """
-    
-    
+
+
     bin_image = labels != 0
 
     rectangles = []
     left_cols, right_cols = find_columns(bin_image, threshold = threshold_cols, min_col_area=min_col_area)
+
+    seen_labels = set()  # global dedup: each label appears in at most one cell
 
     # For every column
     for col_idx, (left, right) in enumerate(zip(left_cols, right_cols)):
         column_slice = bin_image[:, left:right]
         lbls_slice = labels[:, left:right]
 
-        # For every row in the column        
+        # For every row in the column
         top_rows, bottom_rows = find_columns(column_slice.T)
 
         for row_idx, (top, bottom) in enumerate(zip(top_rows, bottom_rows)):
@@ -107,18 +129,36 @@ def split_to_rectangles(labels, min_col_area, threshold_cols=1, canvas=None, thr
 
             # For every subcolumn of the row
             subcol_lefts, subcol_rights = find_columns(crop, threshold=1)
+
+            # Merge subcolumns whose gap is too narrow to be a real text
+            # column separator (likely an internal stroke gap).
+            row_height = bottom - top
+            min_gap = max(row_height * 0.3, 3)
+            subcol_lefts, subcol_rights = _merge_close_subcolumns(
+                subcol_lefts, subcol_rights, min_gap
+            )
+
             crop_labels = []
 
             for subcol_left, subcol_right in zip(subcol_lefts, subcol_rights):
-                # Add the dominant (most frequent non-zero) label of the subcolumn
                 unique_labels, counts = np.unique(lbl_slice[:, subcol_left:subcol_right], return_counts=True)
                 nonzero = unique_labels != 0
                 if nonzero.any():
-                    dominant_label = unique_labels[nonzero][np.argmax(counts[nonzero])]
+                    # Pick the most frequent non-zero label not yet assigned
+                    sorted_indices = np.argsort(-counts[nonzero])
+                    dominant_label = 0
+                    for idx in sorted_indices:
+                        candidate = int(unique_labels[nonzero][idx])
+                        if candidate not in seen_labels:
+                            dominant_label = candidate
+                            break
                 else:
                     dominant_label = 0
+
+                if dominant_label != 0:
+                    seen_labels.add(dominant_label)
                 crop_labels.append(dominant_label)
-            
+
             # Add the row to the dataframe
             rectangle = {
                 'col_idx': col_idx,
@@ -131,7 +171,7 @@ def split_to_rectangles(labels, min_col_area, threshold_cols=1, canvas=None, thr
             # Optionally, plot the box on the canvas
             if canvas is not None:
                 plot_box(canvas, rectangle)
-            
+
     rectangles = pd.DataFrame(rectangles)
     return rectangles
 
@@ -174,8 +214,9 @@ def get_reading_order(rectangles):
             for subcol_idx in range(n_elems):
                 # For every row of the column of the subcolumn
                 for idx, row in subcolumn.iterrows():
-                    # Add the label to the list
-                    ordered_labels.append(row['labels'][subcol_idx])
+                    lbl = row['labels'][subcol_idx]
+                    if lbl != 0:
+                        ordered_labels.append(lbl)
 
 
     return ordered_labels
