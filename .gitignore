@@ -1,27 +1,39 @@
 
-/data/extracted
+# ── Python ──
 *.pyc
-/data/datasets/databases
+__pycache__/
+
+# ── Data (large binary files) ──
+/data
 *.pkl
 *.gz
-caches/hog_cache/params.json
-/code_tests
-/outputs
-/saved figures
-/saved_figures
-OCR_Pipeline_Results.pptx
-/outputs_svg
-/tests
-/tests_2
 *.npz
 *.json
 *.parquet
 *.fth
-/data
+*.mlmodel
+
+# ── All pipeline outputs (extraction, preprocessing, clustering, etc.) ──
+/outputs
+
+# ── Legacy output directories (kept for safety, can be removed) ──
+/tests
+/tests_2
+/outputs_svg
+/code_tests
+/preprocessing_outputs
+/saved figures
+/saved_figures
+/report_figures
+/data/extracted
+/clustering_evaluation
+
+# ── Hydra run metadata ──
 /.hydra_outputs
 /hydra_outputs
-/report_figures
-/preprocessing_outputs
+
+# ── Misc ──
+OCR_Pipeline_Results.pptx
+caches/hog_cache/params.json
 /codesave
-*.mlmodel
 /notebooks/codesave

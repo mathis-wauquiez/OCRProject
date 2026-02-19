@@ -492,4 +492,4 @@ if __name__ == "__main__":
             print(f"  - {algo}")
     
     # Generate complete report
-    figs = generate_report(results_df, output_dir='./clustering_evaluation')
+    figs = generate_report(results_df, output_dir='./outputs/evaluation/clustering')

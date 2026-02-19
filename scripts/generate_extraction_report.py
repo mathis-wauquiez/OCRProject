@@ -7,7 +7,7 @@ report embeds real pipeline visualisations instead of figure placeholders.
 
 Usage:
     python scripts/generate_extraction_report.py [--output-dir ./reports]
-    python scripts/generate_extraction_report.py --viz-dir outputs/book1/visualizations
+    python scripts/generate_extraction_report.py --viz-dir outputs/extraction/book1/visualizations
 """
 
 import sys
@@ -611,7 +611,7 @@ if __name__ == "__main__":
         "--viz-dir",
         default=None,
         help="Path to pipeline visualisations directory "
-             "(e.g. outputs/book1/visualizations).  When provided, "
+             "(e.g. outputs/extraction/book1/visualizations).  When provided, "
              "real figures are embedded instead of placeholders.",
     )
     args = parser.parse_args()

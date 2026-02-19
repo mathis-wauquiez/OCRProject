@@ -62,7 +62,7 @@ class graphClusteringSweep(AutoReport):
             metric: str = "CEMD",
             keep_reciprocal: bool = True,
             device: str = "cuda",
-            output_dir: str = "./outputs/clustering_results",
+            output_dir: str = "./outputs/clustering/results",
 
             cell_sizes: None | List[int] = None,
             normalization_methods: None | List[None | str] = ['patch'],

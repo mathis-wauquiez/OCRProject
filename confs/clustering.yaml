@@ -6,11 +6,11 @@ hydra:
 
 # Data paths
 data:
-  # input_path: "outputs/processed_test"
+  # input_path: "outputs/preprocessing/book_small"
   target_lbl: "char_chat"
-  # output_path: "outputs/clustering_results"
-  input_path: "outputs/processed_patches_book1complete"
-  output_path: "outputs/clustering_results_full"
+  # output_path: "outputs/clustering/book_small"
+  input_path: "outputs/preprocessing/book1"
+  output_path: "outputs/clustering/book1"
 
   
 # Clustering method
