@@ -2,10 +2,11 @@
 # ==========================================================================
 #  Master script — run the full OCR pipeline end-to-end
 #
+#  Assumes images are already in data/datasets/<book>/.
+#
 #  Usage:
 #    bash run_pipeline.sh                     # run all stages
 #    bash run_pipeline.sh --book book1        # specify book name
-#    bash run_pipeline.sh --skip-download     # skip image download
 #    bash run_pipeline.sh --skip-build        # skip C++ vectorizer build
 #    bash run_pipeline.sh --only extraction   # run a single stage
 #    bash run_pipeline.sh --from clustering   # resume from a stage
@@ -18,7 +19,6 @@ cd "$SCRIPT_DIR"
 
 # ── Defaults ──
 BOOK="book1"
-SKIP_DOWNLOAD=false
 SKIP_BUILD=false
 ONLY=""
 FROM=""
@@ -30,7 +30,6 @@ PREPROCESSING_CONFIG="preprocessing"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --book)          BOOK="$2"; shift 2 ;;
-        --skip-download) SKIP_DOWNLOAD=true; shift ;;
         --skip-build)    SKIP_BUILD=true; shift ;;
         --only)          ONLY="$2"; shift 2 ;;
         --from)          FROM="$2"; shift 2 ;;
@@ -42,7 +41,6 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --book NAME              Book name (default: book1)"
-            echo "  --skip-download          Skip image download step"
             echo "  --skip-build             Skip C++ vectorizer build"
             echo "  --only STAGE             Run only one stage"
             echo "  --from STAGE             Resume from a stage (inclusive)"
@@ -50,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --extraction-config NAME Hydra config for extraction (default: extraction_pipeline)"
             echo "  --preprocessing-config N Hydra config for preprocessing (default: preprocessing)"
             echo ""
-            echo "Stages: download, build, extraction, preprocessing, clustering"
+            echo "Stages: build, extraction, preprocessing, clustering"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -65,7 +63,7 @@ should_run() {
         return
     fi
     if [[ -n "$FROM" ]]; then
-        local stages=(download build extraction preprocessing clustering)
+        local stages=(build extraction preprocessing clustering)
         local from_idx=-1 stage_idx=-1
         for i in "${!stages[@]}"; do
             [[ "${stages[$i]}" == "$FROM" ]] && from_idx=$i
@@ -83,16 +81,16 @@ echo "  Book: $BOOK"
 echo "=========================================="
 echo ""
 
-# ── Stage 0: Download data ──
-if should_run "download" && [[ "$SKIP_DOWNLOAD" == false ]]; then
-    echo ">> Stage 0: Downloading images..."
-    python scripts/download_data.py
-    echo ""
+# Check that images exist
+if [[ ! -d "data/datasets/${BOOK}" ]]; then
+    echo "ERROR: Image directory data/datasets/${BOOK} not found."
+    echo "Place your scanned page images there before running the pipeline."
+    exit 1
 fi
 
-# ── Stage 0b: Build C++ vectorizer ──
+# ── Stage 0: Build C++ vectorizer ──
 if should_run "build" && [[ "$SKIP_BUILD" == false ]]; then
-    echo ">> Stage 0b: Building C++ vectorizer..."
+    echo ">> Stage 0: Building C++ vectorizer..."
     if [[ ! -f src/vectorization/build/main ]]; then
         (cd src/vectorization && bash build_script.sh)
     else
