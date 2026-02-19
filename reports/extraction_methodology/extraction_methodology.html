@@ -219,7 +219,7 @@
         <div class="metadata">
             <p><strong>Generated:</strong> 2026-02-18 23:57:39</p>
             <p><strong>Author:</strong> OCR Project</p>
-            <p><strong>Items:</strong> 24</p>
+            <p><strong>Items:</strong> 34</p>
         </div>
     </div>
     
@@ -243,7 +243,10 @@
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Scope</h3>
-<div class="text-content">This report documents the character extraction methodology used in the OCR pipeline for historical Chinese books. The pipeline takes scanned page images as input and produces per-character segmentation masks, bounding boxes, and downstream OCR predictions.<br><br>The document covers:<br>- The complete extraction pipeline (CRAFT detection → watershed segmentation → binarization → component assignment → filtering)<br>- A known failure mode for composite characters with vertically-stacked radicals<br>- A proposed improvement: dual-threshold watershed with optional link score enhancement<br>- Configuration reference and alternative approaches considered</div>
+<div class="text-content">This report documents the character extraction methodology used in the OCR pipeline for historical Chinese books. The pipeline takes scanned page images as input and produces per-character segmentation masks, bounding boxes, and downstream OCR predictions.<br>
+<br>
+The document covers:<br>
+<ul><li>The complete extraction pipeline (CRAFT detection → watershed segmentation → binarization → component assignment → filtering)</li><li>A known failure mode for composite characters with vertically-stacked radicals</li><li>A proposed improvement: dual-threshold watershed with optional link score enhancement</li><li>Configuration reference and alternative approaches considered</li></ul></div>
             </div>
         </div>
     </div>
@@ -261,7 +264,26 @@
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Overview</h3>
 <div class="text-content">The extraction pipeline has two main stages: (1) character detection and segmentation (GPU), and (2) patch processing and OCR recognition (CPU + GPU). This report focuses on stage 1, which is where the character boundaries are determined.</div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Pipeline Architecture</h3>
-<div class="text-content">**Stage 1 — Character Detection Pipeline**<br><br>```<br>PIL Image<br> &nbsp;→ CRAFT neural network inference<br> &nbsp; &nbsp; &nbsp;→ score_text (H/2, W/2) &nbsp; [character region confidence]<br> &nbsp; &nbsp; &nbsp;→ score_link (H/2, W/2) &nbsp; [affinity between regions]<br> &nbsp;→ Watershed segmentation on score_text<br> &nbsp; &nbsp; &nbsp;→ CRAFT components (one blob per detected character)<br> &nbsp;→ Filter CRAFT components (area, aspect ratio)<br> &nbsp;→ Merge nearby CRAFT components (centroid distance < min_dist)<br> &nbsp;→ Binarize original image (Otsu threshold)<br> &nbsp; &nbsp; &nbsp;→ Image connected components (ink blobs)<br> &nbsp;→ Filter image components (remove lines)<br> &nbsp;→ Compute similarity: image CCs ↔ CRAFT components<br> &nbsp;→ Assign each image CC to nearest CRAFT component<br> &nbsp;→ Filter by contour proximity, size, aspect ratio, fill area<br> &nbsp;→ Final character components<br>```</div>
+<div class="text-content"><strong>Stage 1 — Character Detection Pipeline</strong><br>
+<br>
+<pre><code>PIL Image
+  → CRAFT neural network inference
+      → score_text (H/2, W/2)   [character region confidence]
+      → score_link (H/2, W/2)   [affinity between regions]
+  → Watershed segmentation on score_text
+      → CRAFT components (one blob per detected character)
+  → Filter CRAFT components (area, aspect ratio)
+  → Merge nearby CRAFT components (centroid distance &lt; min_dist)
+  → Binarize original image (Otsu threshold)
+      → Image connected components (ink blobs)
+  → Filter image components (remove lines)
+  → Compute similarity: image CCs ↔ CRAFT components
+  → Assign each image CC to nearest CRAFT component
+  → Filter by contour proximity, size, aspect ratio, fill area
+  → Final character components
+</code></pre></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Pipeline Summary</h3>
+<div class="text-content"><em>[Figure placeholder: comprehensive 3×4 pipeline summary]</em></div>
             </div>
         </div>
     </div>
@@ -277,16 +299,15 @@
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">CRAFT Model Outputs</h3>
-<div class="katex-equation">CRAFT (Character Region Awareness For Text detection) is a convolutional neural network that produces two score maps at half the input resolution:
-
-- **score_text**: per-pixel confidence that a pixel belongs to a character region (values in [0, 1])
-- **score_link**: per-pixel affinity confidence between adjacent character sub-components (values in [0, 1])
-
-The input image is preprocessed by resizing to fit within \(\texttt{canvas\_size} = 1280\) pixels (with \(\texttt{mag\_ratio} = 5.0\)) and normalizing with ImageNet statistics. The model checkpoint is ``craft_mlt_25k.pth`` (multi-lingual text, 25k iterations).
-
-**Important**: In the current pipeline, ``score_link`` is computed but not used. This is relevant to the proposed improvement.</div>
+<div class="text-content">CRAFT (Character Region Awareness For Text detection) is a convolutional neural network that produces two score maps at half the input resolution:<br>
+<br>
+<ul><li><strong>score_text</strong>: per-pixel confidence that a pixel belongs to a character region (values in [0, 1])</li><li><strong>score_link</strong>: per-pixel affinity confidence between adjacent character sub-components (values in [0, 1])</li></ul><br>
+<br>
+The input image is preprocessed by resizing to fit within \(\texttt{canvas\_size} = 1280\) pixels (with \(\texttt{mag\_ratio} = 5.0\)) and normalizing with ImageNet statistics. The model checkpoint is <code>craft_mlt_25k.pth</code> (multi-lingual text, 25k iterations).<br>
+<br>
+<strong>Important</strong>: In the current pipeline, <code>score_link</code> is computed but not used. This is relevant to the proposed improvement.</div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: CRAFT Score Maps</h3>
-<div class="text-content">*[Figure placeholder: CRAFT score_text and score_link heatmaps for a sample page with composite characters]*</div>
+<div class="text-content"><em>[Figure placeholder: CRAFT score_text and score_link heatmaps for a sample page with composite characters]</em></div>
             </div>
         </div>
     </div>
@@ -302,16 +323,14 @@ The input image is preprocessed by resizing to fit within \(\texttt{canvas\_size
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Watershed Algorithm</h3>
-<div class="katex-equation">CRAFT components are extracted from ``score_text`` using watershed segmentation (``connectedComponent.from_image_watershed()``).
-
-The algorithm:
-1. **Binarize**: Create a foreground mask where \(\texttt{score\_text} > \tau_t\) (``text_threshold``, default 0.6)
-2. **Find seeds**: Detect local maxima in the score map within the foreground mask (``peak_local_max``, ``min_distance`` = ``min_dist``)
-3. **Watershed**: Using elevation surface \(E = -\texttt{score\_text}\), expand each seed basin within the foreground mask
-
-**Critical observation**: The same threshold \(\tau_t = 0.6\) is used for both seed detection (step 2) and basin expansion mask (step 3). This means areas with moderate CRAFT scores (0.3–0.5) are excluded from the watershed entirely — they receive no CRAFT label.</div>
+<div class="text-content">CRAFT components are extracted from <code>score_text</code> using watershed segmentation (<code>connectedComponent.from_image_watershed()</code>).<br>
+<br>
+The algorithm:<br>
+<ol><li><strong>Binarize</strong>: Create a foreground mask where \(\texttt{score\_text} > \tau_t\) (<code>text_threshold</code>, default 0.6)</li><li><strong>Find seeds</strong>: Detect local maxima in the score map within the foreground mask (<code>peak_local_max</code>, <code>min_distance</code> = <code>min_dist</code>)</li><li><strong>Watershed</strong>: Using elevation surface \(E = -\texttt{score\_text}\), expand each seed basin within the foreground mask</li></ol><br>
+<br>
+<strong>Critical observation</strong>: The same threshold \(\tau_t = 0.6\) is used for both seed detection (step 2) and basin expansion mask (step 3). This means areas with moderate CRAFT scores (0.3–0.5) are excluded from the watershed entirely — they receive no CRAFT label.</div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Watershed Result</h3>
-<div class="text-content">*[Figure placeholder: Watershed segmentation result showing CRAFT component boundaries overlaid on score_text heatmap]*</div>
+<div class="text-content"><em>[Figure placeholder: Watershed segmentation result showing CRAFT component boundaries overlaid on score_text heatmap]</em></div>
             </div>
         </div>
     </div>
@@ -327,7 +346,17 @@ The algorithm:
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Filtering and Merging</h3>
-<div class="text-content">After watershed, CRAFT components are refined in two steps:<br><br>**Filtering** — Remove spurious detections:<br>- Components with area < ``min_area`` (18 px)<br>- Components with aspect ratio outside [``min_aspect_ratio``, ``max_aspect_ratio``] = [0.2, 5.0]<br><br>**Merging** — Combine nearby components:<br>- Compute pairwise centroid distances in CRAFT space<br>- Build a graph where edges connect components with distance < ``min_dist`` (8.0 px in CRAFT space ≈ 16 px in image space)<br>- Find connected components → merge groups<br>- All labels in a group are mapped to a single representative</div>
+<div class="text-content">After watershed, CRAFT components are refined in two steps:<br>
+<br>
+<strong>Filtering</strong> — Remove spurious detections:<br>
+<ul><li>Components with area < <code>min_area</code> (18 px)</li><li>Components with aspect ratio outside [<code>min_aspect_ratio</code>, <code>max_aspect_ratio</code>] = [0.2, 5.0]</li></ul><br>
+<br>
+<strong>Merging</strong> — Combine nearby components:<br>
+<ul><li>Compute pairwise centroid distances in CRAFT space</li><li>Build a graph where edges connect components with distance < <code>min_dist</code> (8.0 px in CRAFT space ≈ 16 px in image space)</li><li>Find connected components → merge groups</li><li>All labels in a group are mapped to a single representative</li></ul></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: CRAFT Component Filtering</h3>
+<div class="text-content"><em>[Figure placeholder: CRAFT components coloured by deletion reason]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: CRAFT Merge Groups</h3>
+<div class="text-content"><em>[Figure placeholder: merged CRAFT components with group colours]</em></div>
             </div>
         </div>
     </div>
@@ -343,7 +372,15 @@ The algorithm:
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Image Processing</h3>
-<div class="text-content">In parallel with CRAFT analysis, the original image is:<br><br>1. **Binarized** using Otsu's method (foreground = ink, background = paper)<br>2. **Connected components** extracted via ``cv2.connectedComponentsWithStats(connectivity=4)``<br>3. **Filtered**: elongated components with aspect ratio > 20 and major axis > 100 px are removed (these are ruling lines, not characters)</div>
+<div class="text-content">In parallel with CRAFT analysis, the original image is:<br>
+<br>
+<ol><li><strong>Binarized</strong> using Otsu's method (foreground = ink, background = paper)</li><li><strong>Connected components</strong> extracted via <code>cv2.connectedComponentsWithStats(connectivity=4)</code></li><li><strong>Filtered</strong>: elongated components with aspect ratio > 20 and major axis > 100 px are removed (these are ruling lines, not characters)</li></ol></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Binary Image</h3>
+<div class="text-content"><em>[Figure placeholder: Otsu-binarized image]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: All Image Connected Components</h3>
+<div class="text-content"><em>[Figure placeholder: all extracted image connected components]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Filtered Image Components</h3>
+<div class="text-content"><em>[Figure placeholder: image components after line removal]</em></div>
             </div>
         </div>
     </div>
@@ -359,17 +396,19 @@ The algorithm:
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Mahalanobis Distance Assignment</h3>
-<div class="katex-equation">Each ink connected component (image CC) is assigned to the nearest CRAFT component using centroid-based distance.
-
-For each CRAFT component \(j\) with centroid \(\boldsymbol{\mu}_j\) and inertia tensor \(\Sigma_j\), and each image CC \(i\) with centroid \(\mathbf{c}_i\), the Mahalanobis distance is:
-
-$$d_M(i, j) = (\mathbf{c}_i - \boldsymbol{\mu}_j)^T \, \Sigma_j^{-1} \, (\mathbf{c}_i - \boldsymbol{\mu}_j)$$
-
-The similarity is \(s(i, j) = -d_M(i, j)\). Each image CC is assigned to the CRAFT component with the highest similarity (lowest Mahalanobis distance). CCs with \(\max_j s(i,j) < \tau_s\) (``similarity_threshold`` = −15) are discarded as background.
-
+<div class="text-content">Each ink connected component (image CC) is assigned to the nearest CRAFT component using centroid-based distance.<br>
+<br>
+For each CRAFT component \(j\) with centroid \(\boldsymbol{\mu}_j\) and inertia tensor \(\Sigma_j\), and each image CC \(i\) with centroid \(\mathbf{c}_i\), the Mahalanobis distance is:<br>
+<br>
+$$d_M(i, j) = (\mathbf{c}_i - \boldsymbol{\mu}_j)^T \, \Sigma_j^{-1} \, (\mathbf{c}_i - \boldsymbol{\mu}_j)$$<br>
+<br>
+The similarity is \(s(i, j) = -d_M(i, j)\). Each image CC is assigned to the CRAFT component with the highest similarity (lowest Mahalanobis distance). CCs with \(\max_j s(i,j) < \tau_s\) (<code>similarity_threshold</code> = −15) are discarded as background.<br>
+<br>
 The inertia tensor \(\Sigma_j\) encodes the shape of the CRAFT blob: for a vertically-elongated character, \(\Sigma_j\) has a large eigenvalue in the vertical direction, making the Mahalanobis distance smaller vertically. This is an elliptical distance metric that naturally adapts to character shape.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Similarity Matrix</h3>
+<div class="text-content"><em>[Figure placeholder: similarity matrix heatmap]</em></div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Similarity Matching</h3>
-<div class="text-content">*[Figure placeholder: Similarity matching visualization showing lines connecting image CCs to their assigned CRAFT components, color-coded by match quality]*</div>
+<div class="text-content"><em>[Figure placeholder: Similarity matching visualization showing lines connecting image CCs to their assigned CRAFT components, color-coded by match quality]</em></div>
             </div>
         </div>
     </div>
@@ -385,7 +424,15 @@ The inertia tensor \(\Sigma_j\) encodes the shape of the CRAFT blob: for a verti
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Character Filtering</h3>
-<div class="text-content">After assignment, merged character components are filtered:<br><br>1. **Contour proximity filter**: Remove small components that are too close (< 50 px) to the contour of large components (> 4000 px area). This removes artifacts near borders and seals.<br>2. **Size filter**: Remove characters with bounding box outside [30, 30] — [150, 150] pixels<br>3. **Aspect ratio filter**: Remove characters with aspect ratio > 3<br>4. **Fill area filter**: Remove characters where filled_area / bbox_area > 0.9<br>5. **Minimum area filter**: Remove characters with filled area < 200 px</div>
+<div class="text-content">After assignment, merged character components are filtered:<br>
+<br>
+<ol><li><strong>Contour proximity filter</strong>: Remove small components that are too close (< 50 px) to the contour of large components (> 4000 px area). This removes artifacts near borders and seals.</li><li><strong>Size filter</strong>: Remove characters with bounding box outside [30, 30] — [150, 150] pixels</li><li><strong>Aspect ratio filter</strong>: Remove characters with aspect ratio > 3</li><li><strong>Fill area filter</strong>: Remove characters where filled_area / bbox_area > 0.9</li><li><strong>Minimum area filter</strong>: Remove characters with filled area < 200 px</li></ol></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Contour Proximity Filtering</h3>
+<div class="text-content"><em>[Figure placeholder: contour proximity filter result]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Final Character Segmentation</h3>
+<div class="text-content"><em>[Figure placeholder: final extracted characters]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Character Deletion Reasons</h3>
+<div class="text-content"><em>[Figure placeholder: characters coloured by deletion reason]</em></div>
             </div>
         </div>
     </div>
@@ -401,11 +448,19 @@ The inertia tensor \(\Sigma_j\) encodes the shape of the CRAFT blob: for a verti
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Failure Mechanism</h3>
-<div class="text-content">Characters with vertically-stacked sub-components present a systematic extraction failure. Consider the character 蒸:<br><br>- The top portion (body) has high CRAFT score → becomes a CRAFT component with a watershed seed<br>- The bottom portion (water radical 氺) has moderate CRAFT score (~0.3–0.5) → **falls below** ``text_threshold`` (0.6) → **excluded from the watershed mask entirely**<br>- The radical receives no CRAFT label<br>- During Mahalanobis assignment, the radical's ink CC centroid is spatially closer to the CRAFT blob of the character below<br>- **Result**: the water radical is stolen by the wrong character<br><br>This affects many composite characters: 蒸, 烝, 黑, 煮, 熟, and any character where a bottom radical separates into a distinct ink blob positioned closer to the next character.</div>
+<div class="text-content">Characters with vertically-stacked sub-components present a systematic extraction failure. Consider the character 蒸:<br>
+<br>
+<ul><li>The top portion (body) has high CRAFT score → becomes a CRAFT component with a watershed seed</li><li>The bottom portion (water radical 氺) has moderate CRAFT score (~0.3–0.5) → <strong>falls below</strong> <code>text_threshold</code> (0.6) → <strong>excluded from the watershed mask entirely</strong></li><li>The radical receives no CRAFT label</li><li>During Mahalanobis assignment, the radical's ink CC centroid is spatially closer to the CRAFT blob of the character below</li><li><strong>Result</strong>: the water radical is stolen by the wrong character</li></ul><br>
+<br>
+This affects many composite characters: 蒸, 烝, 黑, 煮, 熟, and any character where a bottom radical separates into a distinct ink blob positioned closer to the next character.</div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Root Cause: Single-Threshold Watershed</h3>
-<div class="text-content">The root cause is that a **single threshold** (``text_threshold`` = 0.6) serves two conflicting purposes:<br><br>1. **Seed detection** — needs a high threshold to avoid spurious seeds in noisy regions<br>2. **Basin expansion mask** — needs a lower threshold so that basins can grow into moderate-score areas where radicals reside<br><br>By using 0.6 for both, we get precise seeds but overly restrictive basin expansion. The radical area (score 0.3–0.5) is treated as background.</div>
+<div class="text-content">The root cause is that a <strong>single threshold</strong> (<code>text_threshold</code> = 0.6) serves two conflicting purposes:<br>
+<br>
+<ol><li><strong>Seed detection</strong> — needs a high threshold to avoid spurious seeds in noisy regions</li><li><strong>Basin expansion mask</strong> — needs a lower threshold so that basins can grow into moderate-score areas where radicals reside</li></ol><br>
+<br>
+By using 0.6 for both, we get precise seeds but overly restrictive basin expansion. The radical area (score 0.3–0.5) is treated as background.</div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Threshold Effect on Watershed Mask</h3>
-<div class="text-content">*[Figure placeholder: Side-by-side showing (a) CRAFT score heatmap for a page region with 蒸, (b) watershed mask at threshold 0.6 (radical excluded), (c) watershed mask at threshold 0.3 (radical included)]*</div>
+<div class="text-content"><em>[Figure placeholder: Side-by-side showing (a) CRAFT score heatmap for a page region with 蒸, (b) watershed mask at threshold 0.6 (radical excluded), (c) watershed mask at threshold 0.3 (radical included)]</em></div>
             </div>
         </div>
     </div>
@@ -421,17 +476,13 @@ The inertia tensor \(\Sigma_j\) encodes the shape of the CRAFT blob: for a verti
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Dual-Threshold Mechanism</h3>
-<div class="katex-equation">We split the single ``binary_threshold`` into two independent thresholds:
-
-- **Peak threshold** \(\tau_p\) (= ``text_threshold``, default 0.6): controls where watershed seeds are placed. Only strong character regions produce seeds.
-- **Mask threshold** \(\tau_m\) (= ``mask_threshold``, default 0.3): controls how far watershed basins can expand. Basins grow into moderate-score areas, capturing radicals.
-
-The modified watershed algorithm:
-1. Seed mask: \(M_p = \{(x,y) : \texttt{score}(x,y) > \tau_p\}\)
-2. Expansion mask: \(M_m = \{(x,y) : \texttt{score}(x,y) > \tau_m\}\)
-3. Seeds: ``peak_local_max(score, labels=`` \(M_p\) ``)``
-4. Watershed: ``watershed(−score, markers, mask=`` \(M_m\) ``)``
-
+<div class="text-content">We split the single <code>binary_threshold</code> into two independent thresholds:<br>
+<br>
+<ul><li><strong>Peak threshold</strong> \(\tau_p\) (= <code>text_threshold</code>, default 0.6): controls where watershed seeds are placed. Only strong character regions produce seeds.</li><li><strong>Mask threshold</strong> \(\tau_m\) (= <code>mask_threshold</code>, default 0.3): controls how far watershed basins can expand. Basins grow into moderate-score areas, capturing radicals.</li></ul><br>
+<br>
+The modified watershed algorithm:<br>
+<ol><li>Seed mask: \(M_p = \{(x,y) : \texttt{score}(x,y) > \tau_p\}\)</li><li>Expansion mask: \(M_m = \{(x,y) : \texttt{score}(x,y) > \tau_m\}\)</li><li>Seeds: <code>peak_local_max(score, labels=</code> \(M_p\) <code>)</code></li><li>Watershed: <code>watershed(−score, markers, mask=</code> \(M_m\) <code>)</code></li></ol><br>
+<br>
 Since \(\tau_m < \tau_p\), we have \(M_p \subseteq M_m\): seeds are always within the expansion mask. The key difference is that basins can now grow into the moderate-score radical area.</div>
             </div>
         </div>
@@ -448,12 +499,11 @@ Since \(\tau_m < \tau_p\), we have \(M_p \subseteq M_m\): seeds are always withi
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Score Landscape Analysis</h3>
-<div class="katex-equation">Consider the character 蒸 with the character 者 directly below it.
-
-The CRAFT score landscape in the vertical direction looks approximately like:
-
-```
-Score  ^  
+<div class="text-content">Consider the character 蒸 with the character 者 directly below it.<br>
+<br>
+The CRAFT score landscape in the vertical direction looks approximately like:<br>
+<br>
+<pre><code>Score  ^  
  1.0   |  ┌──┐               ← 蒸 body (seed here)
        |  │  │
  0.6 ──|──┤  ├── τ_p ────── seed threshold (current)
@@ -467,13 +517,13 @@ Score  ^
        |  ┌──┐
  1.0   |  │  │      ← 者 body (separate seed)
        +──┴──┴─────────→ y
-```
-
-With \(\tau_p = 0.6\): the 蒸 body gets a seed. The radical area (score ~0.4) is above \(\tau_m = 0.3\) → included in the expansion mask. The inter-character gap (score ~0.1) is below \(\tau_m\) → remains excluded.
-
+</code></pre><br>
+<br>
+With \(\tau_p = 0.6\): the 蒸 body gets a seed. The radical area (score ~0.4) is above \(\tau_m = 0.3\) → included in the expansion mask. The inter-character gap (score ~0.1) is below \(\tau_m\) → remains excluded.<br>
+<br>
 The 蒸 body's basin expands downward through the radical area (following the gradient of \(-\texttt{score}\)) and stops at the inter-character gap. The radical is now part of the 蒸 CRAFT component, and downstream Mahalanobis assignment works correctly.</div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Before / After Comparison</h3>
-<div class="text-content">*[Figure placeholder: Before/after comparison of CRAFT components on a page with composite characters, showing the radical correctly included after dual-threshold watershed]*</div>
+<div class="text-content"><em>[Figure placeholder: Before/after comparison of CRAFT components on a page with composite characters, showing the radical correctly included after dual-threshold watershed]</em></div>
             </div>
         </div>
     </div>
@@ -489,13 +539,13 @@ The 蒸 body's basin expands downward through the radical area (following the gr
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Potential Risks and Mitigations</h3>
-<div class="katex-equation">**Over-expansion risk**: If \(\tau_m\) is too low, basins could bridge inter-character gaps where the score is slightly above zero. Mitigation: the inter-character gap in historical Chinese text typically has CRAFT score < 0.1, well below the recommended \(\tau_m = 0.3\).
-
-**Noise inclusion**: A lower mask threshold could include background noise. Mitigation: seeds remain at \(\tau_p = 0.6\), so no new spurious seeds are created. Only existing basins expand.
-
-**Adjacent character merging**: Only possible if the gap between adjacent characters has score > \(\tau_m\). For well-separated vertical text, this is unlikely.
-
-**Backward compatibility**: Setting ``mask_threshold: null`` in the configuration restores the original single-threshold behavior.</div>
+<div class="text-content"><strong>Over-expansion risk</strong>: If \(\tau_m\) is too low, basins could bridge inter-character gaps where the score is slightly above zero. Mitigation: the inter-character gap in historical Chinese text typically has CRAFT score < 0.1, well below the recommended \(\tau_m = 0.3\).<br>
+<br>
+<strong>Noise inclusion</strong>: A lower mask threshold could include background noise. Mitigation: seeds remain at \(\tau_p = 0.6\), so no new spurious seeds are created. Only existing basins expand.<br>
+<br>
+<strong>Adjacent character merging</strong>: Only possible if the gap between adjacent characters has score > \(\tau_m\). For well-separated vertical text, this is unlikely.<br>
+<br>
+<strong>Backward compatibility</strong>: Setting <code>mask_threshold: null</code> in the configuration restores the original single-threshold behavior.</div>
             </div>
         </div>
     </div>
@@ -511,21 +561,20 @@ The 蒸 body's basin expands downward through the radical area (following the gr
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Link Score Methodology</h3>
-<div class="katex-equation">CRAFT's ``score_link`` output detects affinity between adjacent text sub-components. The canonical CRAFT approach (from ``craft_utils.py:29``) combines text and link scores before connected component extraction:
-
-$$\texttt{score\_combined} = \text{clip}\big(\texttt{score\_text} + \mathbb{1}[\texttt{score\_link} > \tau_L],\; 0,\; 1\big)$$
-
-where \(\tau_L\) is the link threshold. This fills in the gap between sub-components by adding 1.0 where the link score exceeds the threshold, making the region contiguous.
-
-**This is complementary to the dual-threshold approach**:
-- Dual threshold works when the radical has moderate CRAFT score (0.3–0.5)
-- Link score works when the gap has high affinity even if the radical itself has low text score
-
-**Caveat**: The CRAFT model (``craft_mlt_25k.pth``) was trained on modern multilingual text. The ``score_link`` map was designed to connect characters within words (relevant for Latin and Korean scripts). Its behavior on historical Chinese woodblock prints — where each character is standalone — is uncertain. The link score may not fire between stacked radicals, or it may over-fire between adjacent characters in a column.
-
-**Recommendation**: ``link_threshold`` is disabled by default (``null``). Enable it experimentally after visual inspection of ``score_link`` on your data.</div>
+<div class="text-content">CRAFT's <code>score_link</code> output detects affinity between adjacent text sub-components. The canonical CRAFT approach (from <code>craft_utils.py:29</code>) combines text and link scores before connected component extraction:<br>
+<br>
+$$\texttt{score\_combined} = \text{clip}\big(\texttt{score\_text} + \mathbb{1}[\texttt{score\_link} > \tau_L],\; 0,\; 1\big)$$<br>
+<br>
+where \(\tau_L\) is the link threshold. This fills in the gap between sub-components by adding 1.0 where the link score exceeds the threshold, making the region contiguous.<br>
+<br>
+<strong>This is complementary to the dual-threshold approach</strong>:<br>
+<ul><li>Dual threshold works when the radical has moderate CRAFT score (0.3–0.5)</li><li>Link score works when the gap has high affinity even if the radical itself has low text score</li></ul><br>
+<br>
+<strong>Caveat</strong>: The CRAFT model (<code>craft_mlt_25k.pth</code>) was trained on modern multilingual text. The <code>score_link</code> map was designed to connect characters within words (relevant for Latin and Korean scripts). Its behavior on historical Chinese woodblock prints — where each character is standalone — is uncertain. The link score may not fire between stacked radicals, or it may over-fire between adjacent characters in a column.<br>
+<br>
+<strong>Recommendation</strong>: <code>link_threshold</code> is disabled by default (<code>null</code>). Enable it experimentally after visual inspection of <code>score_link</code> on your data.</div>
 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Link Score Heatmap</h3>
-<div class="text-content">*[Figure placeholder: score_link heatmap for a page with composite characters — does the link score bridge the radical gap?]*</div>
+<div class="text-content"><em>[Figure placeholder: score_link heatmap for a page with composite characters — does the link score bridge the radical gap?]</em></div>
             </div>
         </div>
     </div>
@@ -541,7 +590,19 @@ where \(\tau_L\) is the link threshold. This fills in the gap between sub-compon
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Full Parameter Table</h3>
-<div class="text-content">All parameters are set in ``confs/extraction_pipeline.yaml`` and can be overridden via Hydra command line.<br><br>**CRAFT Detection** (``craftDetectorParams``):<br><br>| Parameter | Default | Description |<br>|---|---|---|<br>| ``mag_ratio`` | 5.0 | Image upscaling factor for CRAFT |<br>| ``canvas_size`` | 1280 | Max image dimension after upscaling |<br>| ``chckpt`` | craft_mlt_25k.pth | Model checkpoint |<br><br>**CRAFT Component Analysis** (``craftComponentAnalysisParams``):<br><br>| Parameter | Default | Description |<br>|---|---|---|<br>| ``text_threshold`` | 0.6 | Threshold for seed detection (high) |<br>| ``mask_threshold`` | 0.3 | Threshold for watershed mask expansion (lower). Set to ``null`` for original behavior. |<br>| ``link_threshold`` | null | Link score combination threshold. Set to ``null`` to disable. |<br>| ``min_dist`` | 8.0 | Merge distance for nearby CRAFT components (px) |<br>| ``min_area`` | 18 | Minimum CRAFT component area |<br>| ``min_aspect_ratio`` | 0.2 | Minimum CRAFT component aspect ratio |<br>| ``max_aspect_ratio`` | 5.0 | Maximum CRAFT component aspect ratio |<br><br>**Image Component Analysis** (``imageComponentsPipelineParams``):<br><br>| Parameter | Default | Description |<br>|---|---|---|<br>| ``threshold`` | otsu | Binarization method |<br>| ``similarity_threshold`` | −10.0 | Mahalanobis distance cutoff |<br>| ``similarity_metric`` | mahalanobis | Distance metric |<br>| ``min_box_size`` | [30, 30] | Min character bbox [w, h] |<br>| ``max_box_size`` | [150, 150] | Max character bbox [w, h] |<br>| ``max_aspect_ratio`` | 3 | Max character aspect ratio |<br>| ``max_filled_area_portion`` | 0.9 | Max fill ratio |<br>| ``min_area`` | 200 | Min character filled area |<br>| ``cc_filtering`` | true | Enable contour proximity filter |<br>| ``cc_distance_threshold`` | 50 | Contour proximity distance |<br>| ``cc_min_comp_size`` | 4000 | Min size for reference contours |</div>
+<div class="text-content">All parameters are set in <code>confs/extraction_pipeline.yaml</code> and can be overridden via Hydra command line.<br>
+<br>
+<strong>CRAFT Detection</strong> (<code>craftDetectorParams</code>):<br>
+<br>
+<div class="table-container"><table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>mag_ratio</code></td><td>5.0</td><td>Image upscaling factor for CRAFT</td></tr><tr><td><code>canvas_size</code></td><td>1280</td><td>Max image dimension after upscaling</td></tr><tr><td><code>chckpt</code></td><td>craft_mlt_25k.pth</td><td>Model checkpoint</td></tr></tbody></table></div><br>
+<br>
+<strong>CRAFT Component Analysis</strong> (<code>craftComponentAnalysisParams</code>):<br>
+<br>
+<div class="table-container"><table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>text_threshold</code></td><td>0.6</td><td>Threshold for seed detection (high)</td></tr><tr><td><code>mask_threshold</code></td><td>0.3</td><td>Threshold for watershed mask expansion (lower). Set to <code>null</code> for original behavior.</td></tr><tr><td><code>link_threshold</code></td><td>null</td><td>Link score combination threshold. Set to <code>null</code> to disable.</td></tr><tr><td><code>min_dist</code></td><td>8.0</td><td>Merge distance for nearby CRAFT components (px)</td></tr><tr><td><code>min_area</code></td><td>18</td><td>Minimum CRAFT component area</td></tr><tr><td><code>min_aspect_ratio</code></td><td>0.2</td><td>Minimum CRAFT component aspect ratio</td></tr><tr><td><code>max_aspect_ratio</code></td><td>5.0</td><td>Maximum CRAFT component aspect ratio</td></tr></tbody></table></div><br>
+<br>
+<strong>Image Component Analysis</strong> (<code>imageComponentsPipelineParams</code>):<br>
+<br>
+<div class="table-container"><table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>threshold</code></td><td>otsu</td><td>Binarization method</td></tr><tr><td><code>similarity_threshold</code></td><td>−10.0</td><td>Mahalanobis distance cutoff</td></tr><tr><td><code>similarity_metric</code></td><td>mahalanobis</td><td>Distance metric</td></tr><tr><td><code>min_box_size</code></td><td>[30, 30]</td><td>Min character bbox [w, h]</td></tr><tr><td><code>max_box_size</code></td><td>[150, 150]</td><td>Max character bbox [w, h]</td></tr><tr><td><code>max_aspect_ratio</code></td><td>3</td><td>Max character aspect ratio</td></tr><tr><td><code>max_filled_area_portion</code></td><td>0.9</td><td>Max fill ratio</td></tr><tr><td><code>min_area</code></td><td>200</td><td>Min character filled area</td></tr><tr><td><code>cc_filtering</code></td><td>true</td><td>Enable contour proximity filter</td></tr><tr><td><code>cc_distance_threshold</code></td><td>50</td><td>Contour proximity distance</td></tr><tr><td><code>cc_min_comp_size</code></td><td>4000</td><td>Min size for reference contours</td></tr></tbody></table></div></div>
             </div>
         </div>
     </div>
@@ -557,27 +618,27 @@ where \(\tau_L\) is the link threshold. This fills in the gap between sub-compon
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Evaluated Alternatives</h3>
-<div class="katex-equation">**A. Bounding Box Containment with Vertical Expansion**
-
-For each CRAFT component, expand its bounding box vertically by a configurable factor. Assign ink CCs by checking containment in the expanded bbox. Pro: simple and geometric. Con: axis-aligned boxes are crude; vertical expansion factor is hard to set globally.
-
-**B. CRAFT Label Map Pixel-Level Overlap**
-
-Upscale the CRAFT watershed label map to image resolution and compute pixel overlap between each ink CC and each CRAFT region. Pro: spatially precise. Con: expensive (per-pixel mapping); does not solve the problem when the radical area has no CRAFT label (the root cause).
-
-**C. Composite Similarity Score (Mahalanobis + Spatial)**
-
-Add a bbox overlap bonus to the Mahalanobis similarity: \(S = S_{\text{Maha}} + \alpha \cdot S_{\text{bbox}}\). Pro: builds on existing code. Con: still centroid-based; adds tuning complexity.
-
-**D. Vertical Territory Assignment**
-
-Define character territories using midpoints between adjacent CRAFT bounding boxes. Pro: robust for columnar text. Con: requires column detection at a pipeline stage where it's not yet available.
-
-**E. Modified Mahalanobis with Vertical Bias**
-
-Inflate the vertical component of the CRAFT inertia tensor: \(\Sigma' = \Sigma + \text{diag}(0, \sigma_v^2)\). Pro: minimal code change. Con: also extends reach in the wrong direction (upward); hard to tune.
-
-**Why dual-threshold watershed was chosen**: It addresses the root cause (restrictive watershed mask) rather than patching downstream assignment. It is model-independent, has a single interpretable parameter (\(\tau_m\)), and is fully backward-compatible.</div>
+<div class="text-content"><strong>A. Bounding Box Containment with Vertical Expansion</strong><br>
+<br>
+For each CRAFT component, expand its bounding box vertically by a configurable factor. Assign ink CCs by checking containment in the expanded bbox. Pro: simple and geometric. Con: axis-aligned boxes are crude; vertical expansion factor is hard to set globally.<br>
+<br>
+<strong>B. CRAFT Label Map Pixel-Level Overlap</strong><br>
+<br>
+Upscale the CRAFT watershed label map to image resolution and compute pixel overlap between each ink CC and each CRAFT region. Pro: spatially precise. Con: expensive (per-pixel mapping); does not solve the problem when the radical area has no CRAFT label (the root cause).<br>
+<br>
+<strong>C. Composite Similarity Score (Mahalanobis + Spatial)</strong><br>
+<br>
+Add a bbox overlap bonus to the Mahalanobis similarity: \(S = S_{\text{Maha}} + \alpha \cdot S_{\text{bbox}}\). Pro: builds on existing code. Con: still centroid-based; adds tuning complexity.<br>
+<br>
+<strong>D. Vertical Territory Assignment</strong><br>
+<br>
+Define character territories using midpoints between adjacent CRAFT bounding boxes. Pro: robust for columnar text. Con: requires column detection at a pipeline stage where it's not yet available.<br>
+<br>
+<strong>E. Modified Mahalanobis with Vertical Bias</strong><br>
+<br>
+Inflate the vertical component of the CRAFT inertia tensor: \(\Sigma' = \Sigma + \text{diag}(0, \sigma_v^2)\). Pro: minimal code change. Con: also extends reach in the wrong direction (upward); hard to tune.<br>
+<br>
+<strong>Why dual-threshold watershed was chosen</strong>: It addresses the root cause (restrictive watershed mask) rather than patching downstream assignment. It is model-independent, has a single interpretable parameter (\(\tau_m\)), and is fully backward-compatible.</div>
             </div>
         </div>
     </div>
@@ -593,7 +654,7 @@ Inflate the vertical component of the CRAFT inertia tensor: \(\Sigma' = \Sigma +
         <div class="section-content">
             <div class="section-content-inner">
                 <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Testing Steps</h3>
-<div class="text-content">1. **Backward compatibility**: Run with ``mask_threshold: null``, ``link_threshold: null`` and verify identical output to the unmodified pipeline.<br><br>2. **Visual inspection**: Use ``visualization.create_pipeline_summary()`` to compare CRAFT components and similarity matching before and after on pages containing composite characters (蒸, 烝, 黑, 煮, 熟).<br><br>3. **Score map analysis**: Visualize the CRAFT ``score_text`` heatmap for problematic characters to confirm that the radical area has scores in the 0.3–0.5 range (validating the threshold approach).<br><br>4. **Threshold sweep**: Test ``mask_threshold`` in {0.2, 0.3, 0.4, 0.5} and monitor:<br> &nbsp; - Total CRAFT components per page<br> &nbsp; - Total final characters per page<br> &nbsp; - Radical misassignment rate (manual check)<br><br>5. **Over-merging check**: Verify that adjacent characters with normal spacing are NOT merged at ``mask_threshold = 0.3``.</div>
+<div class="text-content"><ol><li><strong>Backward compatibility</strong>: Run with <code>mask_threshold: null</code>, <code>link_threshold: null</code> and verify identical output to the unmodified pipeline.</li><li><strong>Visual inspection</strong>: Use <code>visualization.create_pipeline_summary()</code> to compare CRAFT components and similarity matching before and after on pages containing composite characters (蒸, 烝, 黑, 煮, 熟).</li><li><strong>Score map analysis</strong>: Visualize the CRAFT <code>score_text</code> heatmap for problematic characters to confirm that the radical area has scores in the 0.3–0.5 range (validating the threshold approach).</li><li><strong>Threshold sweep</strong>: Test <code>mask_threshold</code> in {0.2, 0.3, 0.4, 0.5} and monitor:<br>- Total CRAFT components per page<br>- Total final characters per page<br>- Radical misassignment rate (manual check)</li><li><strong>Over-merging check</strong>: Verify that adjacent characters with normal spacing are NOT merged at <code>mask_threshold = 0.3</code>.</li></ol></div>
             </div>
         </div>
     </div>
