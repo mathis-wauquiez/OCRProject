@@ -309,10 +309,10 @@ def bench_time_per_pair_vs_batch_size():
 
         plt.tight_layout()
         import os
-        os.makedirs('code_tests', exist_ok=True)
-        plt.savefig('code_tests/batch_size_benchmark.png', dpi=150)
+        os.makedirs('outputs/tests/registration', exist_ok=True)
+        plt.savefig('outputs/tests/registration/batch_size_benchmark.png', dpi=150)
         plt.close()
-        print("\n  Saved: code_tests/batch_size_benchmark.png")
+        print("\n  Saved: outputs/tests/registration/batch_size_benchmark.png")
     except ImportError:
         pass
 
