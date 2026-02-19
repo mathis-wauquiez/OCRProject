@@ -75,34 +75,52 @@ class connectedComponent:
     _intensity_image: np.ndarray | None = None
     _colors: np.ndarray = None
 
-    _deleted_labels: List[int] = field(default_factory=list)
-    _delete_reason: List[str] = field(default_factory=list)
-    
+    _deleted_labels: set = field(default_factory=set)
+    _delete_reason: dict = field(default_factory=dict)  # label -> reason
+
     # New: track label merging
-    _merge_mapping: dict = field(default_factory=dict)  # old_label -> new_label
+    _merge_mapping: dict = field(default_factory=dict)
+
+    # Caches (not constructor args)
+    _valid_labels_cache: set | None = field(init=False, default=None, repr=False)
+    _labels_cache: np.ndarray | None = field(init=False, default=None, repr=False)
+
+    def _invalidate_labels_cache(self):
+        self._labels_cache = None
 
     @property
     def labels(self):
-        """Label array with deleted labels set to 0 and merged labels remapped"""
+        """Label array with deleted labels set to 0 and merged labels remapped.
+
+        The result is cached and returned as a read-only array.  The cache is
+        invalidated automatically by ``delete``, ``undelete``, ``merge``,
+        ``unmerge`` and ``clear_merges``.
+        """
+        if self._labels_cache is not None:
+            return self._labels_cache
+
         l = self._labels.copy()
-        
+
         # First, set deleted labels to 0
-        l[np.isin(l, self._deleted_labels)] = 0
-        
+        if self._deleted_labels:
+            l[np.isin(l, list(self._deleted_labels))] = 0
+
         # Then, apply merge mapping
         if self._merge_mapping:
             # Create lookup table for fast remapping
             max_label = l.max()
             lookup = np.arange(max_label + 1)
-            
+
             # Update lookup with merge mapping
             for old_label, new_label in self._merge_mapping.items():
                 if old_label <= max_label:
                     lookup[old_label] = new_label
-            
+
             # Apply the mapping
             l = lookup[l]
-        
+
+        l.flags.writeable = False
+        self._labels_cache = l
         return l
     
     def merge(self, link_matrix, labels_list=None):
@@ -165,7 +183,8 @@ class connectedComponent:
                 for label in group:
                     if label != representative:
                         self._merge_mapping[label] = representative
-        
+
+        self._invalidate_labels_cache()
         return self
     
     def get_merge_representative(self, label: int) -> int:
@@ -224,12 +243,14 @@ class connectedComponent:
         """
         if label not in self._merge_mapping:
             raise ValueError(f"Label {label} is not merged")
-        
+
         del self._merge_mapping[label]
-    
+        self._invalidate_labels_cache()
+
     def clear_merges(self):
         """Clear all merge mappings."""
         self._merge_mapping.clear()
+        self._invalidate_labels_cache()
     
     @property
     def nLabels(self):
@@ -456,7 +477,7 @@ class connectedComponent:
         vis = np.zeros((*self._labels.shape, 3), dtype=np.uint8)
         
         # Get unique deletion reasons
-        unique_reasons = list(set(self._delete_reason)) if self._delete_reason else []
+        unique_reasons = list(set(self._delete_reason.values())) if self._delete_reason else []
         
         # Create reason to color mapping
         reason_to_color = {}
@@ -484,11 +505,11 @@ class connectedComponent:
         color_map.update(reason_to_color)
         
         # Color kept labels
-        kept_mask = np.isin(self._labels, self._deleted_labels, invert=True) & (self._labels > 0)
+        kept_mask = np.isin(self._labels, list(self._deleted_labels), invert=True) & (self._labels > 0)
         vis[kept_mask] = kept_color
-        
+
         # Color deleted labels by reason
-        for label, reason in zip(self._deleted_labels, self._delete_reason):
+        for label, reason in self._delete_reason.items():
             color = reason_to_color[reason]
             vis[self._labels == label] = color
         
@@ -507,8 +528,9 @@ class connectedComponent:
             filepath,
             _nLabels=self._nLabels,
             _labels=self._labels,
-            _deleted_labels=self._deleted_labels,
-            _delete_reason=self._delete_reason,
+            _deleted_labels=sorted(self._deleted_labels),
+            _delete_reason_keys=sorted(self._delete_reason.keys()),
+            _delete_reason_values=[self._delete_reason[k] for k in sorted(self._delete_reason.keys())],
             _merge_mapping_keys=list(self._merge_mapping.keys()),
             _merge_mapping_values=list(self._merge_mapping.values()),
             _stats=self._stats if self._stats is not None else np.array([]),
@@ -537,8 +559,16 @@ class connectedComponent:
         )
         
         # Load deletion tracking
-        instance._deleted_labels = data['_deleted_labels'].tolist()
-        instance._delete_reason = data['_delete_reason'].tolist()
+        instance._deleted_labels = set(data['_deleted_labels'].tolist())
+        if '_delete_reason_keys' in data:
+            keys = data['_delete_reason_keys'].tolist()
+            values = data['_delete_reason_values'].tolist()
+            instance._delete_reason = dict(zip(keys, values))
+        else:
+            # Backward compat: old format stored parallel lists
+            labels_list = data['_deleted_labels'].tolist()
+            reasons_list = data['_delete_reason'].tolist()
+            instance._delete_reason = dict(zip(labels_list, reasons_list))
         
         # Load merge mapping
         if '_merge_mapping_keys' in data:
@@ -554,7 +584,7 @@ class connectedComponent:
     def delete(self, label: int, reason: str = ""):
         """
         Mark a label as deleted.
-        
+
         Parameters
         ----------
         label : int
@@ -564,16 +594,21 @@ class connectedComponent:
         """
         if label == 0:
             raise ValueError("Cannot delete background label (0)")
-        
-        if label not in np.unique(self._labels):
+
+        # Lazily cache the set of labels present in _labels (never changes).
+        if self._valid_labels_cache is None:
+            self._valid_labels_cache = set(np.unique(self._labels).tolist())
+
+        if label not in self._valid_labels_cache:
             raise ValueError(f"Label {label} does not exist in the component")
-        
+
         if label in self._deleted_labels:
             print(f"Warning: Label {label} is already deleted")
             return
-        
-        self._deleted_labels.append(label)
-        self._delete_reason.append(reason)
+
+        self._deleted_labels.add(label)
+        self._delete_reason[label] = reason
+        self._invalidate_labels_cache()
 
     def is_deleted(self, label: int) -> bool:
         """Check if a label is deleted."""
@@ -582,7 +617,7 @@ class connectedComponent:
     def undelete(self, label: int):
         """
         Restore a previously deleted label.
-        
+
         Parameters
         ----------
         label : int
@@ -590,17 +625,16 @@ class connectedComponent:
         """
         if label not in self._deleted_labels:
             raise ValueError(f"Label {label} is not deleted")
-        
-        idx = self._deleted_labels.index(label)
-        self._deleted_labels.pop(idx)
-        self._delete_reason.pop(idx)
+
+        self._deleted_labels.discard(label)
+        self._delete_reason.pop(label, None)
+        self._invalidate_labels_cache()
 
     def get_delete_reason(self, label: int) -> str:
         """Get the deletion reason for a label."""
         if label not in self._deleted_labels:
             raise ValueError(f"Label {label} is not deleted")
-        idx = self._deleted_labels.index(label)
-        return self._delete_reason[idx]
+        return self._delete_reason[label]
 
     def __deepcopy__(self, memo):
         """Custom deepcopy that regenerates regions instead of copying them."""
@@ -620,7 +654,9 @@ class connectedComponent:
         result._stats = self._stats.copy() if self._stats is not None else None
         result._intensity_image = self._intensity_image.copy() if self._intensity_image is not None else None
         result._colors = self._colors.copy() if self._colors is not None else None
-        
+        result._valid_labels_cache = None
+        result._labels_cache = None
+
         # Regenerate regions instead of copying
         result._regions = regionprops(result._labels, result._intensity_image)
         

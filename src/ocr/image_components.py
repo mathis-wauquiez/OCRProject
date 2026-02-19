@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from ..utils import connectedComponent, Timer
-from .distances import compute_mahalanobis_distance, l2
+from .distances import compute_mahalanobis_distance, compute_mahalanobis_distance_batched, l2
 from .params import imageComponentsParams
 from .detection.model_wrapper import craftWrapper
 from . import params
@@ -119,35 +119,45 @@ class imageComponentsPipeline:
         return connectedComponent.from_labels(new_labels, 
                                             intensity_image=imageComponents.intensity_image)
     
-    def compute_similarities(self, imageComponents: connectedComponent, 
+    def compute_similarities(self, imageComponents: connectedComponent,
                             charactersComponents: connectedComponent):
         """Compute similarity matrix between image and character components."""
         # Get active image component centroids
-        active_img_regions = [r for r in imageComponents.regions 
+        active_img_regions = [r for r in imageComponents.regions
                              if not imageComponents.is_deleted(r.label)]
-        
+
         img_centroids = torch.tensor([r.centroid for r in active_img_regions]).to(params.device)
         img_centroids = torch.flip(img_centroids, dims=[1])
         img_centroids = self.craftDetector.map_original_to_preprocessed(
-            img_centroids, original_shape=imageComponents.labels.shape) / 2
+            img_centroids, original_shape=imageComponents._labels.shape) / 2
 
-        # Initialize similarity matrix
-        n_chars = len(charactersComponents.regions)
+        # Collect active CRAFT regions
+        active_craft_regions = charactersComponents.regions  # already filters deleted
+        n_chars = len(active_craft_regions)
         n_imgs = len(active_img_regions)
-        similarities = torch.zeros((n_chars, n_imgs)).to(params.device)
 
-        # Compute similarities
-        for i, region in enumerate(charactersComponents.regions):
-            if charactersComponents.is_deleted(region.label):
-                continue
+        if n_chars == 0 or n_imgs == 0:
+            return np.zeros((n_chars, n_imgs), dtype=np.float32)
 
-            centroid = torch.tensor(region.centroid[::-1]).to(params.device)
+        # Vectorised path — one batched call instead of N individual ones
+        craft_centroids = torch.tensor(
+            np.array([r.centroid[::-1] for r in active_craft_regions]),
+            device=params.device, dtype=torch.float32,
+        )
 
-            if self.params.similarity_metric == 'mahalanobis':
-                VI = torch.from_numpy(region.inertia_tensor).to(params.device)
-                similarities[i, :] = -compute_mahalanobis_distance(centroid, img_centroids, VI=VI)
-            elif self.params.similarity_metric == 'euclidian':
-                similarities[i, :] = -l2(centroid, img_centroids) ** 0.5
+        if self.params.similarity_metric == 'mahalanobis':
+            VIs = torch.tensor(
+                np.stack([r.inertia_tensor for r in active_craft_regions]),
+                device=params.device, dtype=torch.float32,
+            )  # (N, 2, 2)
+            similarities = -compute_mahalanobis_distance_batched(
+                craft_centroids, img_centroids, VIs,
+            )
+        elif self.params.similarity_metric == 'euclidian':
+            similarities = -torch.cdist(craft_centroids.unsqueeze(0),
+                                        img_centroids.unsqueeze(0)).squeeze(0)
+        else:
+            similarities = torch.zeros((n_chars, n_imgs), device=params.device)
 
         return similarities.cpu().numpy()
 
