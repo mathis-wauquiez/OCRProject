@@ -38,9 +38,16 @@ import logging
 from src.patch_processing.configs import get_hog_cfg
 from src.patch_processing.hog import HOG
 
-# Cluster splitting
+# Cluster splitting (legacy — kept for backward compat of direct calls)
 from src.clustering.bin_image_metrics import (
     compute_hausdorff, registeredMetric, compute_distance_matrices_batched
+)
+
+# Refinement pipeline
+from .refinement import (
+    ClusterRefinementStep, RefinementResult,
+    HausdorffSplitStep, OCRRematchStep, PCAZScoreRematchStep,
+    UNKNOWN_LABEL as _UNKNOWN_LABEL,
 )
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -76,6 +83,16 @@ class graphClusteringSweep(AutoReport):
             split_batch_size: int = 256,
             split_render_scale: float = 0.3,
             split_metrics: Optional[Dict[str, callable]] = None,
+
+            # ── Post-split rematching parameters ──
+            rematch_max_cluster_size: int = 3,
+            rematch_pca_k: int = 5,
+            rematch_z_max: float = 3.0,
+            rematch_n_candidates: int = 5,
+            rematch_min_target_size: int = 10,
+
+            # ── Explicit refinement pipeline (overrides above if given) ──
+            refinement_steps: Optional[list] = None,
 
             embed_images: bool = False,
             image_dpi: int = 100,
@@ -482,7 +499,10 @@ class graphClusteringSweep(AutoReport):
 
     def _compute_label_dataframe(self, dataframe):
         label_data = []
-        for label, label_rows in tqdm(dataframe.groupby(self.target_lbl),
+        known_df = dataframe[
+            dataframe[self.target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
+        ]
+        for label, label_rows in tqdm(known_df.groupby(self.target_lbl),
                                       desc="Computing completeness", colour='blue'):
             label_size = len(label_rows)
             cluster_counts = label_rows['membership'].value_counts()
@@ -531,24 +551,42 @@ class graphClusteringSweep(AutoReport):
             pre_split_membership, index=dataframe.index
         )
 
-        # ── 4. Cluster splitting ──
-        did_split = renderer is not None and self.split_thresholds is not None
-        if did_split:
-            (best_threshold, post_split_membership, best_split_log,
-             sweep_results_df, _cluster_linkages) = \
-                self.sweep_split_thresholds(dataframe, pre_split_membership, renderer)
+        # ── 4. Refinement pipeline ──
+        #   Each step takes the current membership and returns a new one.
+        #   Results are collected for per-step reporting.
+        current_membership = pre_split_membership.copy()
+        refinement_results: list[RefinementResult] = []
+        refinement_step_names: list[str] = []
 
-            dataframe.loc[:, 'membership'] = pd.Series(
-                post_split_membership, index=dataframe.index
+        has_renderer = renderer is not None
+        for step in self.refinement_steps:
+            if not has_renderer and isinstance(step, (HausdorffSplitStep, PCAZScoreRematchStep)):
+                continue  # skip GPU steps when no renderer available
+            result = step.run(
+                dataframe, current_membership, renderer,
+                target_lbl=self.target_lbl,
+                graph=graph,
             )
-        else:
-            best_threshold = None
-            post_split_membership = pre_split_membership
-            best_split_log = None
-            sweep_results_df = None
-            dataframe.loc[:, 'membership'] = pd.Series(
-                partition.membership, index=dataframe.index
-            )
+            current_membership = result.membership
+            refinement_results.append(result)
+            refinement_step_names.append(step.name)
+
+        post_split_membership = current_membership
+        dataframe.loc[:, 'membership'] = pd.Series(
+            post_split_membership, index=dataframe.index
+        )
+        did_split = len(refinement_results) > 0
+
+        # Extract split-specific metadata for backward-compat reporting
+        split_result = next(
+            (r for r, n in zip(refinement_results, refinement_step_names)
+             if n == 'hausdorff_split'), None
+        )
+        best_threshold = (split_result.metadata.get('best_threshold')
+                          if split_result else None)
+        best_split_log = split_result.log if split_result else None
+        sweep_results_df = (split_result.metadata.get('sweep_df')
+                            if split_result else None)
 
         # ── 5. Reorder by membership ──
         dataframe['_graph_node_id'] = range(len(dataframe))
