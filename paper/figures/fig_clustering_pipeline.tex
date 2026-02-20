@@ -1,0 +1,71 @@
+% ============================================================================
+%  Clustering Pipeline Figure — a contrario matching → graph → Leiden
+% ============================================================================
+\begin{figure}[t]
+    \centering
+    \resizebox{\linewidth}{!}{%
+    \begin{tikzpicture}[
+        >=stealth,
+        node distance=0.4cm and 1.0cm,
+        process/.style={
+            rectangle, rounded corners=3pt, draw=black!60, thick,
+            fill=#1, minimum width=3.2cm, minimum height=1.0cm,
+            text centered, font=\small, text width=3cm
+        },
+        process/.default=blue!8,
+        data/.style={
+            rectangle, draw=black!40, fill=gray!5,
+            minimum width=2.6cm, minimum height=0.7cm,
+            text centered, font=\footnotesize, text width=2.5cm
+        },
+        arrow/.style={->, thick, black!60},
+        note/.style={font=\scriptsize\itshape, text=gray!70, text width=2.8cm},
+    ]
+
+    % ── Row 1: HOG features ──
+    \node[data] (hog) {HOG descriptors\\$\{\mathbf{h}_i\}_{i=1}^N$};
+
+    % ── Row 2: Dissimilarity ──
+    \node[process=yellow!12, below=0.6cm of hog] (dissim)
+        {CEMD dissimilarity\\$D(\mathbf{h}^A, \mathbf{h}^B)$};
+
+    % ── Row 3: NFA ──
+    \node[process=orange!12, below=0.6cm of dissim] (nfa)
+        {NFA computation\\$\text{NLFA}(A,B)$};
+    \node[note, right=0.8cm of nfa] {$\mu_A, \sigma_A$ from\\background model};
+
+    % ── Row 4: Thresholding ──
+    \node[process=red!10, below=0.6cm of nfa] (threshold)
+        {Reciprocal thresholding\\$\varepsilon = 5{\times}10^{-4}$};
+
+    % ── Row 5: Graph ──
+    \node[process=green!12, below=0.6cm of threshold] (graph)
+        {Similarity graph $G$\\$w_{ij} = \frac{1}{2}(\text{NLFA}_{ij} + \text{NLFA}_{ji})$};
+
+    % ── Row 6: Leiden ──
+    \node[process=blue!15, below=0.6cm of graph] (leiden)
+        {Leiden algorithm\\$\gamma = 1.0$};
+
+    % ── Row 7: Output ──
+    \node[data, below=0.6cm of leiden] (partition)
+        {Initial partition\\$\{C_1, \ldots, C_K\}$};
+
+    % ── Arrows ──
+    \draw[arrow] (hog) -- (dissim);
+    \draw[arrow] (dissim) -- (nfa);
+    \draw[arrow] (nfa) -- (threshold);
+    \draw[arrow] (threshold) -- (graph);
+    \draw[arrow] (graph) -- (leiden);
+    \draw[arrow] (leiden) -- (partition);
+
+    % ── Side annotations ──
+    \node[note, left=0.8cm of dissim] {Per-cell circular\\EMD (Eq.~\ref{eq:cemd})};
+    \node[note, left=0.8cm of threshold] {Both $\text{NLFA}(i,j)$\\and $\text{NLFA}(j,i)$\\must exceed $\tau$};
+    \node[note, left=0.8cm of leiden] {RBConfiguration\\vertex partition};
+
+    \end{tikzpicture}%
+    }
+    \caption{Clustering pipeline: from HOG features to an initial partition.
+    Pairwise CEMD dissimilarities are converted into NFA scores under the \textit{a contrario} model, thresholded reciprocally to build a similarity graph, and partitioned by the Leiden algorithm.}
+    \label{fig:clustering-pipeline}
+\end{figure}
