@@ -225,6 +225,7 @@ class graphClusteringSweep(AutoReport):
             D_dict = compute_distance_matrices_batched(
                 reg_metric, renderer, subdf,
                 batch_size=self.split_batch_size,
+                device=self.device,
             )
             D = D_dict['hausdorff']
             condensed = squareform(D, checks=False)
@@ -654,7 +655,9 @@ class graphClusteringSweep(AutoReport):
 
         # ── Use best config for detailed graph report ──
         dataframe['histogram'] = list(best_overall_config['features'].cpu().numpy())
-        best_renderer = best_overall_config['hog_cfg']['renderer']
+        # Re-instantiate the renderer for the best config (the factory was stored,
+        # not the instance, which was deleted earlier to free GPU memory).
+        best_renderer = best_overall_config['hog_cfg']['renderer'](dataframe['svg'])
 
         dataframe, filtered_dataframe, label_representatives_dataframe, \
             graph, partition = self.report_graph(

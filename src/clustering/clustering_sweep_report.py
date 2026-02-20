@@ -25,13 +25,12 @@ from .tsne_plot import plot_community_tsne
 UNKNOWN_LABEL = '\u25af'  # ▯
 
 
-def _get_b64(fig, dpi=75, quality=70):
+def _get_b64(fig, dpi=75):
     """Convert a matplotlib figure to a base64-encoded PNG string."""
     buf = io.BytesIO()
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', message='Glyph.*missing from font')
-        fig.savefig(buf, format='png', bbox_inches='tight', dpi=dpi,
-                    pil_kwargs={'quality': quality})
+        fig.savefig(buf, format='png', bbox_inches='tight', dpi=dpi)
     buf.seek(0)
     img_str = base64.b64encode(buf.read()).decode()
     plt.close(fig)
@@ -161,7 +160,7 @@ class ClusteringSweepReporter:
         ax.set_title('Best Performance by HOG Configuration')
         ax.grid(axis='x', alpha=0.3)
         best_bar_pos = list(bpc.index).index(bpc['adjusted_rand_index'].idxmax())
-        ax.get_children()[best_bar_pos].set_color('green')
+        ax.patches[best_bar_pos].set_color('green')
 
         # cell_size vs grdt_sigma
         pivot = best_per_config.pivot_table(
@@ -211,8 +210,8 @@ class ClusteringSweepReporter:
         n_cols = 3
         n_rows = (n_metrics + n_cols - 1) // n_cols
 
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 5 * n_rows))
-        axes = axes.flatten() if n_metrics > 1 else [axes]
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 5 * n_rows), squeeze=False)
+        axes = axes.flatten()
 
         for idx, metric in enumerate(metric_names):
             pivot = results_df.pivot_table(values=metric, index='gamma',
