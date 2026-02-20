@@ -1,26 +1,26 @@
 % ============================================================================
 %  Pipeline Overview Figure — full-page flowchart
 % ============================================================================
-\begin{figure}[t]
+\begin{figure}[p]
     \centering
-    \resizebox{\linewidth}{!}{%
+    \resizebox{0.7\linewidth}{!}{%
     \begin{tikzpicture}[
         >=stealth,
-        node distance=0.6cm and 1.2cm,
+        node distance=0.4cm and 1.0cm,
         stage/.style={
             rectangle, rounded corners=4pt, draw=black!70, thick,
-            fill=blue!8, minimum width=3.8cm, minimum height=1.1cm,
+            fill=blue!8, minimum width=3.8cm, minimum height=0.9cm,
             text centered, font=\small\bfseries
         },
         substage/.style={
             rectangle, rounded corners=2pt, draw=black!50,
-            fill=white, minimum width=3.4cm, minimum height=0.7cm,
+            fill=white, minimum width=3.4cm, minimum height=0.55cm,
             text centered, font=\footnotesize
         },
         io/.style={
             trapezium, trapezium left angle=70, trapezium right angle=110,
             draw=black!60, fill=orange!10, thick,
-            minimum width=2.8cm, minimum height=0.8cm,
+            minimum width=2.8cm, minimum height=0.7cm,
             text centered, font=\small
         },
         arrow/.style={->, thick, black!70},
@@ -34,65 +34,65 @@
     \node[io] (input) {Scanned page images};
 
     % ── Stage 1: Extraction ──
-    \node[stage, below=0.8cm of input] (extraction) {Stage 1: Extraction};
-    \node[substage, below=0.15cm of extraction.south west, anchor=north west, xshift=0.2cm]
+    \node[stage, below=0.5cm of input] (extraction) {Stage 1: Extraction};
+    \node[substage, below=0.1cm of extraction.south west, anchor=north west, xshift=0.2cm]
         (craft) {CRAFT detection};
-    \node[substage, below=0.1cm of craft]
+    \node[substage, below=0.06cm of craft]
         (watershed) {Dual-threshold watershed};
-    \node[substage, below=0.1cm of watershed]
+    \node[substage, below=0.06cm of watershed]
         (binarise) {Binarisation + association};
-    \node[substage, below=0.1cm of binarise]
+    \node[substage, below=0.06cm of binarise]
         (charfilter) {Character filtering};
 
     % ── Stage 2: Preprocessing ──
-    \node[stage, below=1.0cm of charfilter] (preproc) {Stage 2: Preprocessing};
-    \node[substage, below=0.15cm of preproc.south west, anchor=north west, xshift=0.2cm]
+    \node[stage, below=0.6cm of charfilter] (preproc) {Stage 2: Preprocessing};
+    \node[substage, below=0.1cm of preproc.south west, anchor=north west, xshift=0.2cm]
         (layout) {Layout analysis};
-    \node[substage, below=0.1cm of layout]
+    \node[substage, below=0.06cm of layout]
         (skew) {Skew estimation};
-    \node[substage, below=0.1cm of skew]
+    \node[substage, below=0.06cm of skew]
         (inkfilt) {Ink filter + vectorisation};
-    \node[substage, below=0.1cm of inkfilt]
+    \node[substage, below=0.06cm of inkfilt]
         (chatocr) {CHAT OCR};
-    \node[substage, below=0.1cm of chatocr]
+    \node[substage, below=0.06cm of chatocr]
         (hogcomp) {HOG computation};
 
     % ── Stage 3: Clustering ──
-    \node[stage, below=1.0cm of hogcomp] (cluster) {Stage 3: Clustering};
-    \node[substage, below=0.15cm of cluster.south west, anchor=north west, xshift=0.2cm]
+    \node[stage, below=0.6cm of hogcomp] (cluster) {Stage 3: Clustering};
+    \node[substage, below=0.1cm of cluster.south west, anchor=north west, xshift=0.2cm]
         (acontrario) {\textit{A contrario} matching};
-    \node[substage, below=0.1cm of acontrario]
+    \node[substage, below=0.06cm of acontrario]
         (graph) {Graph construction};
-    \node[substage, below=0.1cm of graph]
+    \node[substage, below=0.06cm of graph]
         (leiden) {Leiden community detection};
 
     % ── Stage 4: Refinement ──
-    \node[stage, below=1.0cm of leiden] (refine) {Stage 4: Refinement};
-    \node[substage, below=0.15cm of refine.south west, anchor=north west, xshift=0.2cm]
+    \node[stage, below=0.6cm of leiden] (refine) {Stage 4: Refinement};
+    \node[substage, below=0.1cm of refine.south west, anchor=north west, xshift=0.2cm]
         (hausdorff) {Hausdorff splitting};
-    \node[substage, below=0.1cm of hausdorff]
+    \node[substage, below=0.06cm of hausdorff]
         (ocrrematch) {OCR rematching};
-    \node[substage, below=0.1cm of ocrrematch]
+    \node[substage, below=0.06cm of ocrrematch]
         (pcarematch) {PCA z-score rematching};
 
     % ── Output ──
-    \node[io, below=0.8cm of pcarematch] (output) {Character clusters};
+    \node[io, below=0.5cm of pcarematch] (output) {Character clusters};
 
     % ── Arrows ──
     \draw[arrow] (input) -- (extraction);
-    \draw[arrow] (charfilter.south) -- ++(0,-0.35) -| (preproc);
-    \draw[arrow] (hogcomp.south) -- ++(0,-0.35) -| (cluster);
-    \draw[arrow] (leiden.south) -- ++(0,-0.35) -| (refine);
-    \draw[arrow] (pcarematch.south) -- ++(0,-0.35) -| (output);
+    \draw[arrow] (charfilter.south) -- ++(0,-0.2) -| (preproc);
+    \draw[arrow] (hogcomp.south) -- ++(0,-0.2) -| (cluster);
+    \draw[arrow] (leiden.south) -- ++(0,-0.2) -| (refine);
+    \draw[arrow] (pcarematch.south) -- ++(0,-0.2) -| (output);
 
     % ── Side annotations ──
-    \node[right=1.2cm of extraction, text=gray, font=\footnotesize\itshape, text width=3cm]
+    \node[right=1.0cm of extraction, text=gray, font=\footnotesize\itshape, text width=3cm]
         {Per page\\GPU (CRAFT)};
-    \node[right=1.2cm of preproc, text=gray, font=\footnotesize\itshape, text width=3cm]
+    \node[right=1.0cm of preproc, text=gray, font=\footnotesize\itshape, text width=3cm]
         {Per page\\CPU + GPU};
-    \node[right=1.2cm of cluster, text=gray, font=\footnotesize\itshape, text width=3cm]
+    \node[right=1.0cm of cluster, text=gray, font=\footnotesize\itshape, text width=3cm]
         {All pages\\GPU (matching)};
-    \node[right=1.2cm of refine, text=gray, font=\footnotesize\itshape, text width=3cm]
+    \node[right=1.0cm of refine, text=gray, font=\footnotesize\itshape, text width=3cm]
         {Per cluster\\GPU (registration)};
 
     \end{tikzpicture}%
