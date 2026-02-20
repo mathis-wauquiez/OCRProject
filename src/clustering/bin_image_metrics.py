@@ -192,9 +192,6 @@ metrics_dict = {
     'hausdorff': compute_hausdorff,
 }
 
-# Initialize the registered metric
-reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
-
 
 
 
