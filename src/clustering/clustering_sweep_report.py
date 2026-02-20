@@ -17,7 +17,7 @@ from scipy.stats import entropy
 from tqdm import tqdm
 
 from .graph_visu import (
-    matches_per_treshold, random_match_figure, size_distribution_figure,
+    matches_per_threshold, random_match_figure, size_distribution_figure,
     purity_figure, completeness_figure, report_community, plot_nearest_neighbors,
 )
 from .tsne_plot import plot_community_tsne
@@ -618,7 +618,7 @@ class ClusteringSweepReporter:
                 dataframe, purity_dataframe, label_dataframe,
                 best_epsilon, best_gamma, best_split_threshold=best_threshold
             )
-            self._report(matches_per_treshold(nlfa, best_epsilon),
+            self._report(matches_per_threshold(nlfa, best_epsilon),
                          title="Average number of matches = f(epsilon)")
             self._report(size_distribution_figure(dataframe['membership'],
                                                   dataframe[target_lbl]),
@@ -902,7 +902,7 @@ class ClusteringSweepReporter:
 
             <h3 style="color: #667eea;">2. A-Contrario Feature Matching</h3>
             <ul>
-                <li>Metric: {s.featureMatcher.params.metric}</li>
+                <li>Metric: {s.featureMatcher._params.metric}</li>
                 <li>Epsilon (&epsilon;): {best_epsilon}</li>
                 <li>Reciprocal matching: {s.keep_reciprocal}</li>
                 <li>Edge type: {s.edges_type}</li>

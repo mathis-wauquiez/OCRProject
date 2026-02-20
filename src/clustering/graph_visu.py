@@ -7,7 +7,7 @@ UNKNOWN_LABEL = '▯'  # U+25AF - represents unrecognized characters
 
 plt.rcParams['font.family'] = ['Noto Sans CJK JP', 'DejaVu Sans', 'sans-serif']
 
-def matches_per_treshold(nlfa, best_eps):
+def matches_per_threshold(nlfa, best_eps):
     N = nlfa.shape[0]
     nlfa_threshold = -np.log(best_eps) + 2 * np.log(N)
 
@@ -67,7 +67,7 @@ def random_match_figure(featureMatcher, features, best_epsilon, svgs):
     # show the distribution
     total_dissim = dissim.sum(-1).reshape(-1).cpu()
     mu_tot   = dissim.mean(dim=1).sum(dim=1).item()
-    var_tot  = dissim.var(dim=1).sum(dim=1).item()*2
+    var_tot  = dissim.var(dim=1).sum(dim=1).item()
 
     fig, axes = plt.subplots(1, 3, figsize=(14, 5))
 

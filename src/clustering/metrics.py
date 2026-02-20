@@ -119,44 +119,38 @@ def compute_purity(labels_true, labels_pred):
 def compute_clustering_f1(labels_true, labels_pred):
     """
     Compute F1 score for clustering using pairwise comparisons.
-    
+
+    Uses the contingency matrix for O(n_classes * n_clusters) computation
+    instead of O(n^2) pairwise enumeration.
+
     Considers each pair of samples:
     - TP: same cluster in both reference and prediction
     - FP: same cluster in prediction but different in reference
     - FN: different cluster in prediction but same in reference
     """
-    n = len(labels_true)
-    
-    # Count pairs
-    tp = fp = fn = 0
-    
-    for i in range(n):
-        for j in range(i + 1, n):
-            same_true = (labels_true[i] == labels_true[j])
-            same_pred = (labels_pred[i] == labels_pred[j])
-            
-            if same_true and same_pred:
-                tp += 1
-            elif same_pred and not same_true:
-                fp += 1
-            elif same_true and not same_pred:
-                fn += 1
-    
-    if tp + fp == 0:
-        precision = 0.0
-    else:
-        precision = tp / (tp + fp)
-    
-    if tp + fn == 0:
-        recall = 0.0
-    else:
-        recall = tp / (tp + fn)
-    
+    C = contingency_matrix(labels_true, labels_pred)
+
+    # TP = sum of C(i,j) choose 2 for all cells
+    tp = (C * (C - 1) // 2).sum()
+
+    # Total pairs in each predicted cluster
+    col_sums = C.sum(axis=0)
+    tp_fp = (col_sums * (col_sums - 1) // 2).sum()
+
+    # Total pairs in each true class
+    row_sums = C.sum(axis=1)
+    tp_fn = (row_sums * (row_sums - 1) // 2).sum()
+
+    fp = tp_fp - tp
+    fn = tp_fn - tp
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
     if precision + recall == 0:
         return 0.0
-    
-    f1 = 2 * (precision * recall) / (precision + recall)
-    return f1
+
+    return 2 * (precision * recall) / (precision + recall)
 
 
 def compute_accuracy_hungarian(labels_true, labels_pred):

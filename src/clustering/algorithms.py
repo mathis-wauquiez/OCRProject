@@ -322,6 +322,8 @@ class graphClustering:
 
         matches, nlfa, dissimilarities = self.featureMatcher.match(features, features)
 
+        N = nlfa.shape[0]
+
         if self.edges_type == 'nlfa':
             edge_weights = nlfa
             del dissimilarities
@@ -333,8 +335,6 @@ class graphClustering:
             del nlfa, dissimilarities
 
         # -- Build the networkx Graph --
-
-        N = nlfa.shape[0]
         G = nx.Graph()
         G.add_nodes_from(range(N))
         edges = [(int(i.item()), int(j.item()), edge_weights[i, j].item()) for i, j in matches if i != j]

@@ -91,7 +91,7 @@ class featureMatching:
         return matches, nlfa, total_dissimilarities, mu_tot, var_tot
     
 
-    def nlfa_theshold(self, query_histograms, key_histograms):
+    def nlfa_threshold(self, query_histograms, key_histograms):
         N1, _, _ = query_histograms.shape
         N2, Nh, Nbins = key_histograms.shape
         log_quantile = np.log(self._params.epsilon) - np.log(N1) - np.log(N2)
@@ -99,18 +99,25 @@ class featureMatching:
 
 
     def __call__(self, query_histograms, key_histograms):
-        nlfa_threshold = self.nlfa_theshold(query_histograms, key_histograms)
-        matches1, nlfa1, dissim = self.match(query_histograms, key_histograms)
+        nlfa_threshold = self.nlfa_threshold(query_histograms, key_histograms)
 
-        if not self._params.reciprocal_only:
-            return featureMatchingOutputs(
-                match_indices=matches1,
-                nlfa=nlfa1,
-                dissimilarities=dissim,
-                nlfa_threshold=nlfa_threshold
-            )
-        
-        _, nlfa2, _ = self.match(key_histograms, query_histograms)
+        # Force full output — __call__ needs NLFA matrices for reciprocal matching
+        saved = self._params.partial_output
+        self._params.partial_output = False
+        try:
+            matches1, nlfa1, dissim, _, _ = self.match(query_histograms, key_histograms)
+
+            if not self._params.reciprocal_only:
+                return featureMatchingOutputs(
+                    match_indices=matches1,
+                    nlfa=nlfa1,
+                    dissimilarities=dissim,
+                    nlfa_threshold=nlfa_threshold
+                )
+
+            _, nlfa2, _, _, _ = self.match(key_histograms, query_histograms)
+        finally:
+            self._params.partial_output = saved
     
         matches = torch.logical_and(nlfa1 >= nlfa_threshold,  nlfa2.T >= nlfa_threshold)
         match_indices = torch.nonzero(matches, as_tuple=False)
