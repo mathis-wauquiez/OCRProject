@@ -174,6 +174,33 @@ class graphClusteringSweep(AutoReport):
         self.use_jpeg       = use_jpeg
         self.jpeg_quality   = jpeg_quality
 
+        # ── Build refinement pipeline ──────────────────────────────────────
+        # If an explicit list is provided, use it; otherwise build from params.
+        if refinement_steps is not None:
+            self.refinement_steps = refinement_steps
+        else:
+            steps: list = []
+            if self.split_thresholds:
+                steps.append(HausdorffSplitStep(
+                    thresholds=self.split_thresholds,
+                    linkage_method=self.split_linkage_method,
+                    min_cluster_size=self.split_min_cluster_size,
+                    batch_size=self.split_batch_size,
+                    evaluate_fn=self._evaluate_membership,
+                ))
+            steps.append(OCRRematchStep(
+                max_cluster_size=rematch_max_cluster_size,
+            ))
+            steps.append(PCAZScoreRematchStep(
+                max_cluster_size=rematch_max_cluster_size,
+                pca_k=rematch_pca_k,
+                z_max=rematch_z_max,
+                n_candidates=rematch_n_candidates,
+                min_target_size=rematch_min_target_size,
+                device=device,
+            ))
+            self.refinement_steps = steps
+
         self.report_name   = self.metadata.report_id
         self.image_counter = 0
         if not self.embed_images:
@@ -679,6 +706,8 @@ class graphClusteringSweep(AutoReport):
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
+            refinement_results=refinement_results,
+            refinement_step_names=refinement_step_names,
             chat_split_log=chat_split_log,
             hapax_log=hapax_log,
             glossary_df=glossary_df,
