@@ -32,6 +32,17 @@ __pycache__/
 /.hydra_outputs
 /hydra_outputs
 
+# ── LaTeX build artifacts ──
+*.aux
+*.log
+*.out
+*.pdf
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.bbl
+*.blg
+
 # ── Misc ──
 OCR_Pipeline_Results.pptx
 caches/hog_cache/params.json
