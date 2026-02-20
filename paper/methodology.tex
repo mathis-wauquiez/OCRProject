@@ -48,7 +48,7 @@ The input page is rescaled with a magnification ratio of $5.0$ (canvas size 1280
 Connected components are extracted from the CRAFT text score map via a dual-threshold watershed procedure:
 \begin{enumerate}
     \item \textbf{Seed detection.}  Pixels with $S_\text{text} \ge \tau_\text{text}$ (default $\tau_\text{text} = 0.6$) are used as seeds for the watershed algorithm.
-    \item \textbf{Mask expansion.}  The basin mask is defined at a lower threshold $\tau_\text{mask} = 0.3$, allowing character regions to expand into areas with moderate CRAFT scores.  This is particularly important for composite characters (e.g.\ CJK radicals such as~``\begin{CJK}{UTF8}{gbsn}蒸\end{CJK}'') where sub-parts may receive lower text scores.
+    \item \textbf{Mask expansion.}  The basin mask is defined at a lower threshold $\tau_\text{mask} = 0.3$, allowing character regions to expand into areas with moderate CRAFT scores.  This is particularly important for composite CJK characters where sub-parts (radicals) may receive lower text scores.
     \item \textbf{Component merging.}  Nearby components whose centroids are closer than $d_\text{min} = 8$\,px are merged, connecting split radicals of composite characters.
 \end{enumerate}
 
@@ -70,7 +70,7 @@ Characters whose centroids are too close to the contours of large connected comp
 
 \begin{figure}[t]
     \centering
-    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
         \textbf{[PLACEHOLDER]} --- Example showing a page crop with: (a)~CRAFT score map, (b)~dual-threshold watershed, (c)~binary image with component overlay, (d)~final character bounding boxes after filtering.
     \vspace{3cm}}}
     \caption{Character extraction pipeline on an example page region.
@@ -104,7 +104,7 @@ Each character receives an integer reading-order index used in downstream visual
 Document skew is estimated using the Line Segment Detector (LSD)~\cite{von2010lsd} with advanced refinement.
 Long line segments ($> 100$\,px) are classified as horizontal or vertical (within $\pm\pi/8$), and the skew angle $\theta$ is computed as the length-weighted circular mean of their orientations:
 \begin{equation}
-    \theta = \frac{1}{2}\arg\!\left(\sum_i w_i \, e^{2i\alpha_i}\right),
+    \theta = \frac{1}{2}\arg\!\left(\sum_i w_i \, e^{2\mathrm{i}\alpha_i}\right),
     \label{eq:skew}
 \end{equation}
 where $w_i$ is the length and $\alpha_i$ the orientation of line segment~$i$.
@@ -151,7 +151,7 @@ Each character thus receives a recognised label $\ell_i \in \mathcal{A} \cup \{\
 
 \begin{figure}[t]
     \centering
-    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
         \textbf{[PLACEHOLDER]} --- Example showing a subcolumn with: (left)~binarised crop with CRAFT centroids and Kraken cut boundaries, (right)~predicted characters at matched positions.
     \vspace{3cm}}}
     \caption{CHAT OCR on an example subcolumn.
@@ -321,7 +321,7 @@ Characters with unknown OCR labels ($\square$) are excluded from the distance co
 
 \begin{figure}[t]
     \centering
-    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
         \textbf{[PLACEHOLDER]} --- Example dendrogram showing a cluster being split.
         Left: character patches sorted by sub-cluster.
         Right: the linkage dendrogram with the cut threshold shown as a horizontal line.
@@ -364,7 +364,7 @@ Remaining small clusters ($\le 3$ members) without matching OCR labels are teste
 
 \begin{figure}[t]
     \centering
-    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
         \textbf{[PLACEHOLDER]} --- Illustration of PCA z-score rematching.
         Show a singleton being projected into the PCA space of a candidate cluster and accepted / rejected.
     \vspace{3cm}}}
@@ -448,7 +448,7 @@ Table~\ref{tab:hyperparameters} summarises the key hyperparameters of the pipeli
             & Reciprocal edges        & ---                  & Yes \\
             & Resolution ($\gamma$)   & $\gamma$             & 1.0 \\
         \midrule
-        \multirow{2}{*}{Splitting}
+        \multirow{3}{*}{Splitting}
             & Hausdorff threshold     & $\tau_\text{split}$  & 21.5 \\
             & Min.\ cluster size      & ---                  & 5 \\
             & Linkage method          & ---                  & Average \\
