@@ -98,7 +98,7 @@ def main(cfg: DictConfig):
     report = AutoReport(
         title="Preprocessing Report",
         output_dir=str(report_dir),
-        config=ReportConfig(dpi=100, output_format='jpeg', image_quality=75),
+        config=ReportConfig(dpi=50, output_format='jpeg', image_quality=75),
     )
 
     # Instantiate - Hydra handles everything

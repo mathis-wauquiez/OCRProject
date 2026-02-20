@@ -69,7 +69,7 @@ class graphClusteringSweep(AutoReport):
             metric: str = "CEMD",
             keep_reciprocal: bool = True,
             device: str = "cuda",
-            output_dir: str = "./outputs/clustering_results",
+            output_dir: str = "./outputs/clustering/results",
 
             cell_sizes: None | List[int] = None,
             normalization_methods: None | List[None | str] = ['patch'],
@@ -99,6 +99,18 @@ class graphClusteringSweep(AutoReport):
             thumbnail_dpi: int = 50,
             use_jpeg: bool = True,
             jpeg_quality: int = 70,
+
+            # ── Post-clustering refinement (optional) ──
+            enable_chat_split: bool = False,
+            chat_split_purity_threshold: float = 0.90,
+            chat_split_min_size: int = 3,
+            chat_split_min_label_count: int = 2,
+
+            enable_hapax_association: bool = False,
+            hapax_min_confidence: float = 0.3,
+            hapax_max_dissimilarity: Optional[float] = None,
+
+            enable_glossary: bool = False,
     ):
         config = ReportConfig(
             dpi=image_dpi,
@@ -144,38 +156,17 @@ class graphClusteringSweep(AutoReport):
         self.split_render_scale     = split_render_scale
         self.split_metrics          = split_metrics
 
-        # ── Rematching config ──
-        self.rematch_max_cluster_size = rematch_max_cluster_size
-        self.rematch_pca_k            = rematch_pca_k
-        self.rematch_z_max            = rematch_z_max
-        self.rematch_n_candidates     = rematch_n_candidates
-        self.rematch_min_target_size  = rematch_min_target_size
+        # ── Post-clustering refinement (optional) ──
+        self.enable_chat_split          = enable_chat_split
+        self.chat_split_purity_threshold = chat_split_purity_threshold
+        self.chat_split_min_size        = chat_split_min_size
+        self.chat_split_min_label_count = chat_split_min_label_count
 
-        # ── Build refinement pipeline ──
-        if refinement_steps is not None:
-            self.refinement_steps = refinement_steps
-        else:
-            self.refinement_steps = [
-                HausdorffSplitStep(
-                    thresholds=self.split_thresholds,
-                    linkage_method=self.split_linkage_method,
-                    min_cluster_size=self.split_min_cluster_size,
-                    batch_size=self.split_batch_size,
-                    evaluate_fn=self._evaluate_membership,
-                ),
-                OCRRematchStep(
-                    max_cluster_size=self.rematch_max_cluster_size,
-                ),
-                PCAZScoreRematchStep(
-                    max_cluster_size=self.rematch_max_cluster_size,
-                    pca_k=self.rematch_pca_k,
-                    z_max=self.rematch_z_max,
-                    n_candidates=self.rematch_n_candidates,
-                    min_target_size=self.rematch_min_target_size,
-                    batch_size=self.split_batch_size,
-                    device=self.device,
-                ),
-            ]
+        self.enable_hapax_association    = enable_hapax_association
+        self.hapax_min_confidence        = hapax_min_confidence
+        self.hapax_max_dissimilarity     = hapax_max_dissimilarity
+
+        self.enable_glossary             = enable_glossary
 
         self.embed_images   = embed_images
         self.image_dpi      = image_dpi
@@ -598,12 +589,58 @@ class graphClusteringSweep(AutoReport):
                             if split_result else None)
 
         # ── 5. Reorder by membership ──
+        dataframe['_graph_node_id'] = range(len(dataframe))
         dataframe = dataframe.sort_values(
             by=['membership', 'degree_centrality'],
             ascending=[True, False]
         ).reset_index(drop=True)
 
-        # ── 5b. Compute purity & representatives AFTER index reset ──
+        # ── 5a. Realign graph, matrices, and membership arrays ──
+        # After sorting + reset_index the dataframe has new 0..N-1 indices,
+        # but the graph nodes, distance matrices, and raw membership arrays
+        # still use the OLD row order.  Re-map everything to the new order
+        # so that downstream code (subgraph extraction, NN lookup, etc.)
+        # can use dataframe indices directly as graph node IDs.
+        perm = dataframe.pop('_graph_node_id').values
+        old_to_new = {int(old): new for new, old in enumerate(perm)}
+        graph = nx.relabel_nodes(graph, old_to_new)
+
+        perm_t = torch.tensor(perm, device=nlfa.device, dtype=torch.long)
+        nlfa = nlfa[perm_t][:, perm_t]
+        dissimilarities = dissimilarities[perm_t][:, perm_t]
+
+        pre_split_membership = pre_split_membership[perm]
+        post_split_membership = np.asarray(post_split_membership)[perm]
+
+        # ── 5b. Post-clustering refinement (optional) ──
+        from .post_clustering import chat_split_clusters, associate_hapax, build_glossary
+
+        chat_split_log = None
+        hapax_log = None
+        glossary_df = None
+
+        if self.enable_chat_split and self.target_lbl in dataframe.columns:
+            dataframe, chat_split_log = chat_split_clusters(
+                dataframe, dissimilarities,
+                purity_threshold=self.chat_split_purity_threshold,
+                min_split_size=self.chat_split_min_size,
+                min_label_count=self.chat_split_min_label_count,
+                target_lbl=self.target_lbl,
+            )
+
+        if self.enable_hapax_association and self.target_lbl in dataframe.columns:
+            dataframe, hapax_log = associate_hapax(
+                dataframe, dissimilarities,
+                target_lbl=self.target_lbl,
+                min_confidence=self.hapax_min_confidence,
+                max_dissimilarity=self.hapax_max_dissimilarity,
+            )
+
+        if self.enable_glossary and self.target_lbl in dataframe.columns:
+            glossary_df = build_glossary(dataframe, target_lbl=self.target_lbl)
+
+        # ── 5c. Compute purity & representatives AFTER index reset ──
+        #     so that stored representative indices match the new index.
         pre_purity_df, pre_representatives = \
             self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
 
@@ -642,8 +679,9 @@ class graphClusteringSweep(AutoReport):
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
-            refinement_results=refinement_results,
-            refinement_step_names=refinement_step_names,
+            chat_split_log=chat_split_log,
+            hapax_log=hapax_log,
+            glossary_df=glossary_df,
         )
 
         # ── 8. Build filtered / representative dataframes ──

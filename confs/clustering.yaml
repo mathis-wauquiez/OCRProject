@@ -6,11 +6,11 @@ hydra:
 
 # Data paths
 data:
-  # input_path: "outputs/processed_test"
-  target_lbl: "char_qwen_single"
-  # output_path: "outputs/clustering_results"
-  input_path: "outputs/processed_patches_book1complete"
-  output_path: "outputs/clustering_results_full"
+  # input_path: "outputs/preprocessing/book_small"
+  target_lbl: "char_chat"
+  # output_path: "outputs/clustering/book_small"
+  input_path: "outputs/preprocessing/book1"
+  output_path: "outputs/clustering/book1"
 
   
 # Clustering method
@@ -22,17 +22,15 @@ method:
   device: "cuda"
   
   # Parameter sweep ranges
-  epsilons: [0.000]
-  gammas: [2]
 
   # cell_sizes: [16, 24, 32]  # Cell size for HOG computation
   # grdt_sigmas: [5]       # Gradient sigma for smoothing
   # nums_bins: [8, 16]        # Number of orientation bins
 
   # epsilons: [0.00025, 0.00038, .0005]
-  # epsilons: [0.0005]
+  epsilons: [0.0005]
   # gammas: [1.0, 1.25]
-  # gammas: [1.0]
+  gammas: [1.0]
   
   cell_sizes: [22]  # Cell size for HOG computation
   # cell_sizes: [48]  # Cell size for HOG computation
@@ -48,12 +46,17 @@ method:
   split_batch_size: 256           # batch size for Hausdorff distance computation
   split_render_scale: 1         # SVG render scale for binary image distance
 
-  # ── Post-split rematching ──
-  rematch_max_cluster_size: 3   # clusters <= this size are candidates for rematching
-  rematch_pca_k: 5              # number of PCA components for z-score test
-  rematch_z_max: 3.0            # max |z-score| to accept a merge
-  rematch_n_candidates: 5       # number of candidate target clusters to test
-  rematch_min_target_size: 10   # only merge into clusters of at least this size
+  # ── Post-clustering refinement (all optional) ──
+  enable_chat_split: true           # split clusters with mixed CHAT labels
+  chat_split_purity_threshold: 0.90 # skip if dominant label >= this fraction
+  chat_split_min_size: 3            # clusters smaller than this are never split
+  chat_split_min_label_count: 2     # CHAT label needs >= this many patches
+
+  enable_hapax_association: true     # merge singletons into matching clusters
+  hapax_min_confidence: 0.3         # ignore hapax with CHAT conf below this
+  hapax_max_dissimilarity: null      # null = adaptive (per-cluster median)
+
+  enable_glossary: true              # generate character glossary
 
   # ── Reporting options ──
   embed_images: true       # true: base64-embedded images; false: external files

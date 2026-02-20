@@ -1,8 +1,8 @@
 """
-This files handles the different operations on the components extracted from CRAFT's output.
-It is only two functions:
-- filter_craft_components -> filter the components by aspect ratio and area
-- merge_craft_components  -> merge the components that are too close to each other (composite characters usually)
+This files handles the different operations on the components extracted from CRAFT's output:
+- combine_text_link_scores -> combine text and link score maps before watershed
+- filter_craft_components  -> filter the components by aspect ratio and area
+- merge_craft_components   -> merge the components that are too close to each other (composite characters usually)
 """
 
 from .params import craftComponentsParams
@@ -12,7 +12,40 @@ import cv2
 import numpy as np
 import networkx as nx
 
-from scipy.spatial import distance_matrix
+from scipy.spatial import cKDTree
+
+
+def combine_text_link_scores(score_text: np.ndarray,
+                             score_link: np.ndarray,
+                             link_threshold: float) -> np.ndarray:
+    """Combine CRAFT text and link score maps before watershed segmentation.
+
+    The link score bridges gaps between sub-components of composite characters
+    (e.g., the body and water radical of 蒸). By adding the thresholded link
+    score to the text score, watershed segmentation produces unified blobs for
+    composite characters instead of separate fragments.
+
+    This follows the canonical CRAFT approach from craft_utils.py:29:
+        text_score_comb = np.clip(text_score + link_score, 0, 1)
+
+    Parameters
+    ----------
+    score_text : np.ndarray, shape (H, W)
+        CRAFT text confidence map (values in [0, 1]).
+    score_link : np.ndarray, shape (H, W)
+        CRAFT link/affinity confidence map (values in [0, 1]).
+    link_threshold : float
+        Threshold for binarizing the link score. Pixels with
+        score_link > link_threshold contribute to the combined score.
+
+    Returns
+    -------
+    combined : np.ndarray, shape (H, W)
+        Combined score map, clipped to [0, 1].
+    """
+    link_binary = (score_link > link_threshold).astype(score_text.dtype)
+    return np.clip(score_text + link_binary, 0, 1)
+
 
 def filter_craft_components(params: craftComponentsParams, components: connectedComponent):
     """Filter CRAFT components by area and aspect ratio, marking deletions with reasons."""
@@ -53,9 +86,14 @@ def merge_craft_components(params: craftComponentsParams, components: connectedC
     # Get centroids for active regions
     centroids = np.array([label_to_region[label].centroid for label in active_labels])
     
-    # Calculate distance matrix and linking matrix
-    dist_matrix = distance_matrix(centroids, centroids)
-    link_matrix = dist_matrix < params.min_dist
+    # Radius search via k-d tree — O(N log N) instead of dense O(N^2)
+    tree = cKDTree(centroids)
+    pairs = tree.query_pairs(r=params.min_dist)
+    n = len(active_labels)
+    link_matrix = np.zeros((n, n), dtype=bool)
+    for i, j in pairs:
+        link_matrix[i, j] = True
+        link_matrix[j, i] = True
     
     # Merge the components
     components.merge(link_matrix, labels_list=active_labels)

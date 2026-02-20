@@ -146,10 +146,10 @@ def extract_deletion_stages(components: connectedComponent):
     
     deleted_labels = set(components._deleted_labels)
     kept_labels = all_labels - deleted_labels
-    
+
     # Group deletions by reason
     deleted_by_reason = {}
-    for label, reason in zip(components._deleted_labels, components._delete_reason):
+    for label, reason in components._delete_reason.items():
         if reason not in deleted_by_reason:
             deleted_by_reason[reason] = []
         deleted_by_reason[reason].append(label)

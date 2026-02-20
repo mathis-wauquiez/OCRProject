@@ -22,7 +22,7 @@ epsilons = np.linspace(0, 50, 100)
 ## FILES ##
 
 image_folder = Path('data/datasets/book1')
-comps_folder = Path('data/extracted/book1-complete/components/')
+comps_folder = Path('outputs/extraction/book1/components/')
 
 FILELIMIT = 10
 
@@ -229,8 +229,10 @@ plt.suptitle(f'L2 vs CEMD Coverage Analysis | |B| = {len_b:,} | Correlation(D_L2
              fontsize=14, fontweight='bold', y=1.02)
 plt.tight_layout()
 
-plt.savefig('coverage_plot.png', dpi=300, bbox_inches='tight')
-print(f"\n✓ Coverage plot saved to coverage_plot.png")
+import os
+os.makedirs('outputs/evaluation', exist_ok=True)
+plt.savefig('outputs/evaluation/coverage_plot.png', dpi=300, bbox_inches='tight')
+print(f"\n✓ Coverage plot saved to outputs/evaluation/coverage_plot.png")
 
 # Print summary statistics
 print(f"\n{'='*60}")
