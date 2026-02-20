@@ -732,6 +732,215 @@ class ClusteringSweepReporter:
     #  Master orchestrator
     # ================================================================
 
+    # ================================================================
+    #  Refinement step reporting
+    # ================================================================
+
+    def report_refinement_step(self, step_name, result, dataframe):
+        """Report diagnostics for a single refinement step."""
+        log = result.log
+        meta = result.metadata
+
+        if step_name == 'hausdorff_split':
+            # Already covered by report_split_* methods
+            return
+
+        if not log:
+            self._report_raw_html(
+                f'<p>No actions taken by <strong>{step_name}</strong>.</p>',
+                title=f"Refinement: {step_name}"
+            )
+            return
+
+        log_df = pd.DataFrame(log)
+        n_actions = len(log_df)
+
+        if step_name == 'ocr_rematch':
+            color_start, color_end = '#11998e', '#38ef7d'
+            icon = 'OCR'
+        elif step_name == 'pca_zscore_rematch':
+            color_start, color_end = '#667eea', '#764ba2'
+            icon = 'PCA'
+        else:
+            color_start, color_end = '#888', '#aaa'
+            icon = step_name
+
+        summary_html = f"""
+        <div style="background: linear-gradient(135deg, {color_start} 0%, {color_end} 100%);
+                    color: white; padding: 25px; border-radius: 10px; margin: 20px 0;">
+            <h2 style="margin: 0 0 10px 0;">{icon} Rematching — {step_name}</h2>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 10px;">
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Clusters merged</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{n_actions}</p></div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Patches moved</h4>
+                    <p style="font-size:1.8em; margin:5px 0;">{log_df['source_size'].sum()}</p></div>
+                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
+                    <h4 style="margin:0;">Config</h4>
+                    <p style="font-size:0.9em; margin:5px 0;">{', '.join(f'{k}={v}' for k, v in meta.items() if k != 'n_merged')}</p></div>
+            </div>
+        </div>
+        """
+        self._report_raw_html(summary_html, title=f"Refinement: {step_name}")
+        self._report_table(log_df, title=f"{step_name} — merge log")
+
+    # ================================================================
+    #  Label fragmentation reporting
+    # ================================================================
+
+    def report_fragmentation(self, dataframe, label_dataframe):
+        """Report labels that are split across multiple clusters."""
+        target_lbl = self.sweep.target_lbl
+
+        fragmented = label_dataframe[
+            (label_dataframe['Unique_Clusters'] > 1) &
+            (label_dataframe['Label'] != UNKNOWN_LABEL)
+        ].sort_values('Unique_Clusters', ascending=False)
+
+        if len(fragmented) == 0:
+            self._report_raw_html(
+                '<p>No fragmented labels — every known label is in a single cluster.</p>',
+                title="Label Fragmentation"
+            )
+            return
+
+        n_frag = len(fragmented)
+        avg_clusters = fragmented['Unique_Clusters'].mean()
+        worst = fragmented.iloc[0]
+
+        summary_html = f"""
+        <div style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+                    color: white; padding: 25px; border-radius: 10px; margin: 20px 0;">
+            <h2 style="margin: 0 0 10px 0;">Label Fragmentation</h2>
+            <p>{n_frag} labels are split across multiple clusters
+               (avg {avg_clusters:.1f} clusters per fragmented label).</p>
+            <p>Most fragmented: <strong>"{worst['Label']}"</strong>
+               ({worst['Size']} patches across {worst['Unique_Clusters']} clusters,
+               best share = {worst['Best share']:.0%})</p>
+        </div>
+        """
+        self._report_raw_html(summary_html, title="Fragmentation Summary")
+        self._report_table(
+            fragmented.set_index('Label'),
+            title=f"Fragmented Labels ({n_frag} labels across >1 cluster)"
+        )
+
+        # Visual: for the top-10 most fragmented labels, show which clusters they land in
+        max_labels = 10
+        vis_html = '<div style="display: grid; gap: 25px;">'
+
+        for _, row in fragmented.head(max_labels).iterrows():
+            label = row['Label']
+            label_df = dataframe[dataframe[target_lbl] == label]
+            cluster_counts = label_df['membership'].value_counts()
+
+            bars = ''
+            for cid, cnt in cluster_counts.items():
+                pct = cnt / row['Size'] * 100
+                bars += (
+                    f'<div style="display:inline-block; margin:3px; padding:6px 10px; '
+                    f'background:#667eea; color:white; border-radius:4px; font-size:12px;">'
+                    f'Cluster {cid}: {cnt} ({pct:.0f}%)</div>'
+                )
+
+            # Show a few sample SVG thumbnails from each cluster
+            thumbs = ''
+            for cid in cluster_counts.index[:4]:
+                sub = label_df[label_df['membership'] == cid].head(3)
+                for _, srow in sub.iterrows():
+                    thumbs += (
+                        f'<div style="display:inline-block; text-align:center; margin:2px; '
+                        f'border:1px solid #ddd; border-radius:4px; padding:3px; background:white;">'
+                        f'<div style="width:35px; height:35px; display:flex; align-items:center; '
+                        f'justify-content:center;">{srow["svg"].to_string()}</div>'
+                        f'<div style="font-size:8px; color:#888;">c{int(srow["membership"])}</div></div>'
+                    )
+
+            vis_html += f'''
+            <div style="background:white; padding:15px; border-radius:8px;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-left:4px solid #e74c3c;">
+                <h4 style="margin:0 0 8px 0; color:#e74c3c;">"{label}"
+                    <span style="font-weight:normal; font-size:0.8em; color:#888;">
+                    — {row['Size']} patches, {row['Unique_Clusters']} clusters,
+                    best share {row['Best share']:.0%}</span></h4>
+                <div>{bars}</div>
+                <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:2px;">{thumbs}</div>
+            </div>'''
+
+        vis_html += '</div>'
+        self._report_raw_html(vis_html, title="Top Fragmented Labels (visual)")
+
+    # ================================================================
+    #  Methodology report
+    # ================================================================
+
+    def report_methodology(self, best_epsilon, best_gamma, best_threshold,
+                           refinement_step_names):
+        """Static summary of the full pipeline methodology."""
+        s = self.sweep  # shorthand
+
+        steps_html = ''
+        for i, name in enumerate(refinement_step_names, 1):
+            steps_html += f'<li><strong>Step {i}:</strong> {name}</li>'
+        if not steps_html:
+            steps_html = '<li>No refinement steps configured.</li>'
+
+        html = f"""
+        <div style="background: #f8f9fa; padding: 30px; border-radius: 10px;
+                    border: 1px solid #dee2e6; margin: 20px 0; line-height: 1.7;">
+            <h2 style="margin: 0 0 20px 0; color: #333;">Pipeline Methodology</h2>
+
+            <h3 style="color: #667eea;">1. Feature Extraction (HOG)</h3>
+            <ul>
+                <li>Cell sizes: {s.cell_sizes}</li>
+                <li>Gradient sigma: {s.grdt_sigmas}</li>
+                <li>Orientation bins: {s.nums_bins}</li>
+                <li>Normalization: {s.normalization_methods}</li>
+                <li>Device: {s.device}</li>
+            </ul>
+
+            <h3 style="color: #667eea;">2. A-Contrario Feature Matching</h3>
+            <ul>
+                <li>Metric: {s.featureMatcher.params.metric}</li>
+                <li>Epsilon (&epsilon;): {best_epsilon}</li>
+                <li>Reciprocal matching: {s.keep_reciprocal}</li>
+                <li>Edge type: {s.edges_type}</li>
+            </ul>
+
+            <h3 style="color: #667eea;">3. Graph Construction & Community Detection</h3>
+            <ul>
+                <li>Algorithm: Leiden (RBConfigurationVertexPartition)</li>
+                <li>Resolution &gamma;: {best_gamma}</li>
+                <li>Edge filtering: NLFA &ge; threshold</li>
+            </ul>
+
+            <h3 style="color: #667eea;">4. Refinement Pipeline</h3>
+            <ol>{steps_html}</ol>
+            <ul>
+                <li>Split thresholds: {s.split_thresholds}</li>
+                <li>Linkage method: {s.split_linkage_method}</li>
+                <li>Min cluster size for splitting: {s.split_min_cluster_size}</li>
+                <li>Rematch max cluster size: {s.rematch_max_cluster_size}</li>
+                <li>PCA components (k): {s.rematch_pca_k}</li>
+                <li>Z-score threshold: {s.rematch_z_max}</li>
+            </ul>
+
+            <h3 style="color: #667eea;">5. Evaluation</h3>
+            <ul>
+                <li>Metrics: ARI, NMI, AMI, Homogeneity, Completeness, V-measure,
+                    F1, Purity, Hungarian accuracy</li>
+                <li>Unknown label (&squaf;): excluded from all metric computations</li>
+                <li>Target label column: <code>{s.target_lbl}</code></li>
+            </ul>
+        </div>
+        """
+        self._report_raw_html(html, title="Methodology")
+
+    # ================================================================
+    #  Master orchestrator
+    # ================================================================
+
     def report_graph_results(self, *, dataframe, graph, partition, nlfa,
                              dissimilarities, best_epsilon, best_gamma,
                              pre_split_membership, post_split_membership,
@@ -739,12 +948,24 @@ class ClusteringSweepReporter:
                              sweep_results_df, did_split,
                              purity_dataframe, representatives,
                              pre_purity_df, pre_representatives,
-                             best_metrics, label_dataframe):
+                             best_metrics, label_dataframe,
+                             refinement_results=None,
+                             refinement_step_names=None):
         """
         Single entry-point producing every report section for a given
         graph + partition.  Called once ALL computation is done.
         """
-        # Section 0: Graph topology + best-config summary
+        if refinement_results is None:
+            refinement_results = []
+        if refinement_step_names is None:
+            refinement_step_names = []
+
+        # Section 0: Methodology
+        with self._section("Methodology"):
+            self.report_methodology(best_epsilon, best_gamma, best_threshold,
+                                    refinement_step_names)
+
+        # Section 1: Graph topology + best-config summary
         with self._section("Graph Topology"):
             self.report_graph_topology(graph, best_epsilon, best_gamma)
 
@@ -767,7 +988,7 @@ class ClusteringSweepReporter:
             """
             self._report_raw_html(config_html, title="Best Configuration Parameters")
 
-        # Section 1: Pre-split clusters
+        # Section 2: Pre-split clusters
         with self._section("Clusters (Pre-Split)"):
             self.report_clusters_section(
                 dataframe, 'membership_pre_split', pre_purity_df,
@@ -775,10 +996,10 @@ class ClusteringSweepReporter:
                 title_prefix="All Clusters Analysis (Before Splitting)"
             )
 
-        # Section 2: Cluster splitting
-        if did_split:
+        # Section 3: Cluster splitting (Hausdorff-specific)
+        if did_split and best_split_log is not None:
             with self._section("Cluster Splitting"):
-                if len(self.sweep.split_thresholds) > 1:
+                if sweep_results_df is not None and len(self.sweep.split_thresholds) > 1:
                     self.report_split_sweep(sweep_results_df, best_threshold)
                 self.report_split_comparison(
                     dataframe, pre_split_membership, post_split_membership,
@@ -786,23 +1007,33 @@ class ClusteringSweepReporter:
                 )
                 self.report_split_visualization(dataframe, best_split_log, best_threshold)
 
-        # Section 2b: Post-split clusters (separate section)
+        # Section 4: Per-refinement-step reports (rematch steps)
+        if refinement_results:
+            with self._section("Refinement Steps"):
+                for name, result in zip(refinement_step_names, refinement_results):
+                    self.report_refinement_step(name, result, dataframe)
+
+        # Section 5: Post-refinement clusters
         if did_split:
-            with self._section("Clusters (Post-Split)"):
+            with self._section("Clusters (Post-Refinement)"):
                 self.report_clusters_section(
                     dataframe, 'membership', purity_dataframe,
                     representatives, graph,
-                    title_prefix="All Clusters Analysis (After Splitting)"
+                    title_prefix="All Clusters Analysis (After Refinement)"
                 )
 
-        # Section 3: Summary & metrics
+        # Section 6: Label fragmentation
+        with self._section("Label Fragmentation"):
+            self.report_fragmentation(dataframe, label_dataframe)
+
+        # Section 7: Summary & metrics
         hapax_df = self.report_summary_and_metrics(
             dataframe, purity_dataframe, label_dataframe,
             best_metrics, nlfa, best_epsilon, best_gamma, best_threshold
         )
 
-        # Section 4: Examples
+        # Section 8: Examples
         self.report_examples(dataframe, dissimilarities, graph, best_epsilon)
 
-        # Section 5: Hapax
+        # Section 9: Hapax
         self.report_hapax(dataframe, hapax_df, dissimilarities, graph)

@@ -48,6 +48,13 @@ method:
   split_batch_size: 256           # batch size for Hausdorff distance computation
   split_render_scale: 1         # SVG render scale for binary image distance
 
+  # ── Post-split rematching ──
+  rematch_max_cluster_size: 3   # clusters <= this size are candidates for rematching
+  rematch_pca_k: 5              # number of PCA components for z-score test
+  rematch_z_max: 3.0            # max |z-score| to accept a merge
+  rematch_n_candidates: 5       # number of candidate target clusters to test
+  rematch_min_target_size: 10   # only merge into clusters of at least this size
+
   # ── Reporting options ──
   embed_images: true       # true: base64-embedded images; false: external files
   image_dpi: 75            # DPI for saved figures
