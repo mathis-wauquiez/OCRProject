@@ -948,6 +948,7 @@ class ClusteringSweepReporter:
                              purity_dataframe, representatives,
                              pre_purity_df, pre_representatives,
                              best_metrics, label_dataframe,
+                             refinement_results=None, refinement_step_names=None,
                              chat_split_log=None, hapax_log=None,
                              glossary_df=None):
         """
