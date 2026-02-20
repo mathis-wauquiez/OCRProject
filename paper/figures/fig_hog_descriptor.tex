@@ -1,0 +1,80 @@
+% ============================================================================
+%  HOG Descriptor Computation Figure
+% ============================================================================
+\begin{figure}[t]
+    \centering
+    \resizebox{\linewidth}{!}{%
+    \begin{tikzpicture}[
+        >=stealth,
+        node distance=0.5cm and 0.8cm,
+        box/.style={
+            rectangle, rounded corners=2pt, draw=black!60,
+            fill=#1, minimum width=2.2cm, minimum height=1.8cm,
+            text centered, font=\footnotesize, text width=2cm
+        },
+        box/.default=white,
+        smallbox/.style={
+            rectangle, draw=black!40, fill=#1,
+            minimum width=1.5cm, minimum height=1.5cm,
+            text centered, font=\scriptsize, text width=1.4cm
+        },
+        smallbox/.default=white,
+        arrow/.style={->, thick, black!60},
+        label/.style={font=\scriptsize\itshape, text=gray!70},
+    ]
+
+    % ── SVG input ──
+    \node[box=green!8] (svg) {SVG\\character};
+
+    % ── Render ──
+    \node[box=yellow!10, right=0.7cm of svg] (render) {Render\\$24n \times 24n$\,px};
+
+    % ── Gaussian derivative ──
+    \node[box=blue!8, right=0.7cm of render] (gradient) {Gaussian\\derivatives\\$\sigma{=}5$};
+
+    % ── Magnitude + Orientation ──
+    \node[smallbox=red!8, above right=0.2cm and 0.7cm of gradient] (magn)
+        {Magnitude\\$m(x,y)$};
+    \node[smallbox=purple!8, below right=0.2cm and 0.7cm of gradient] (orient)
+        {Orientation\\$\theta(x,y)$\\(unsigned)};
+
+    % ── Cell decomposition ──
+    \node[box=orange!10, right=1.2cm of gradient, yshift=0cm] (cells)
+        {Cell grid\\$24{\times}24$\,px};
+
+    % ── Histogram ──
+    \node[box=cyan!10, right=0.7cm of cells] (hist)
+        {Trilinear\\binning\\$B{=}16$ bins};
+
+    % ── Normalize ──
+    \node[box=green!10, right=0.7cm of hist] (norm)
+        {L2-clip-L2\\$t{=}0.2$};
+
+    % ── Output ──
+    \node[box=gray!10, right=0.7cm of norm] (output)
+        {HOG\\descriptor\\$\mathbf{h}^* \in \mathbb{R}^{K \times B}$};
+
+    % ── Arrows ──
+    \draw[arrow] (svg) -- (render);
+    \draw[arrow] (render) -- (gradient);
+    \draw[arrow] (gradient) -- ++(0.5, 0) |- (magn);
+    \draw[arrow] (gradient) -- ++(0.5, 0) |- (orient);
+    \draw[arrow] (magn) -| (cells);
+    \draw[arrow] (orient) -| (cells);
+    \draw[arrow] (cells) -- (hist);
+    \draw[arrow] (hist) -- (norm);
+    \draw[arrow] (norm) -- (output);
+
+    % ── Labels below ──
+    \node[label, below=0.15cm of svg] {Input};
+    \node[label, below=0.15cm of render] {256\,DPI};
+    \node[label, below=0.15cm of gradient] {$k{=}31$\,px};
+    \node[label, below=0.15cm of output] {Feature vector};
+
+    \end{tikzpicture}%
+    }
+    \caption{HOG descriptor computation pipeline.
+    Each character's SVG is rendered onto a pixel grid, smoothed with Gaussian derivative filters, decomposed into cells, and each cell's gradient histogram is computed via trilinear interpolation.
+    The concatenated histograms are normalised using L2-clip-L2 to produce the final descriptor.}
+    \label{fig:hog-pipeline}
+\end{figure}

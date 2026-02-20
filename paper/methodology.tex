@@ -1,0 +1,462 @@
+% ============================================================================
+%  Methodology Section — Historical Document Character Clustering Pipeline
+% ============================================================================
+%
+%  This file is designed to be \input{} into a main paper document.
+%  It assumes the preamble loads:
+%    tikz, pgfplots, amsmath, amssymb, booktabs, graphicx, xcolor,
+%    algorithm2e or algorithmic, hyperref, subcaption
+%
+%  Figures marked [PLACEHOLDER] should be replaced with actual data figures.
+% ============================================================================
+
+\section{Methodology}
+\label{sec:methodology}
+
+Our pipeline processes scanned historical document images to extract, describe, and cluster individual character glyphs.
+It consists of four sequential stages: (1)~character extraction from page images, (2)~preprocessing of extracted patches including vectorization, OCR, and feature computation, (3)~\textit{a contrario} feature matching and graph-based clustering, and (4)~post-clustering refinement.
+Figure~\ref{fig:pipeline-overview} presents an overview of the full pipeline.
+
+\input{figures/fig_pipeline_overview}
+
+
+% ============================================================================
+\subsection{Character Extraction}
+\label{sec:extraction}
+
+The extraction stage takes a scanned page image as input and produces a set of bounding boxes, one per detected character.
+It combines a learned text-detection network with classical image-processing steps to achieve high recall without requiring character-level annotations.
+
+% ---------- CRAFT ----------
+\subsubsection{Text Region Detection with CRAFT}
+\label{sec:craft}
+
+We use CRAFT~\cite{baek2019character} (\textit{Character Region Awareness for Text Detection}) as the backbone detector.
+CRAFT is a fully convolutional network built on a VGG-16 backbone with batch normalisation, followed by a U-Net-style decoder that produces two per-pixel score maps at half the input resolution:
+\begin{itemize}
+    \item a \emph{text score map} $S_\text{text}(x, y) \in [0,1]$, indicating the probability that pixel $(x,y)$ belongs to a character centre region;
+    \item a \emph{link score map} $S_\text{link}(x, y) \in [0,1]$, indicating affinity between adjacent characters (unused in our current configuration).
+\end{itemize}
+We use the pre-trained weights from \texttt{craft\_mlt\_25k.pth} without fine-tuning.
+The input page is rescaled with a magnification ratio of $5.0$ (canvas size 1280\,px) to ensure small characters are sufficiently resolved.
+
+
+% ---------- Watershed ----------
+\subsubsection{Dual-Threshold Watershed Segmentation}
+\label{sec:watershed}
+
+Connected components are extracted from the CRAFT text score map via a dual-threshold watershed procedure:
+\begin{enumerate}
+    \item \textbf{Seed detection.}  Pixels with $S_\text{text} \ge \tau_\text{text}$ (default $\tau_\text{text} = 0.6$) are used as seeds for the watershed algorithm.
+    \item \textbf{Mask expansion.}  The basin mask is defined at a lower threshold $\tau_\text{mask} = 0.3$, allowing character regions to expand into areas with moderate CRAFT scores.  This is particularly important for composite characters (e.g.\ CJK radicals such as~``\begin{CJK}{UTF8}{gbsn}蒸\end{CJK}'') where sub-parts may receive lower text scores.
+    \item \textbf{Component merging.}  Nearby components whose centroids are closer than $d_\text{min} = 8$\,px are merged, connecting split radicals of composite characters.
+\end{enumerate}
+
+% ---------- Filtering ----------
+\subsubsection{Component Filtering and Character Segmentation}
+\label{sec:component-filtering}
+
+The raw CRAFT components are filtered by minimum area ($\ge 18$\,px$^2$) and aspect ratio ($0.2 \le \text{AR} \le 5.0$) to remove noise and non-character detections.
+
+In parallel, the page image is binarised using Otsu's method, and connected components are extracted from the binary image.
+Line-like artefacts are removed by filtering components with extreme aspect ratios ($> 20$) and major axis lengths ($> 100$\,px).
+
+The binary image components are then associated with CRAFT detections via a spatial proximity metric.
+For each CRAFT detection, its centroid is mapped into the CRAFT-preprocessed coordinate space, and the negative Mahalanobis distance to each binary component centroid is computed using the CRAFT region's inertia tensor as the covariance matrix.
+Each binary component is assigned to the closest CRAFT detection (if the distance is below a threshold), forming the final character segmentation.
+
+Additional filters discard characters whose bounding boxes fall outside the expected size range ($30 \times 30$ to $150 \times 150$\,px), have extreme aspect ratios ($> 3$), excessive fill ($> 90\%$), or insufficient area ($< 200$\,px$^2$).
+Characters whose centroids are too close to the contours of large connected components ($> 4000$\,px area) are also removed, as these typically correspond to noise at the edges of decorative elements.
+
+\begin{figure}[t]
+    \centering
+    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+        \textbf{[PLACEHOLDER]} --- Example showing a page crop with: (a)~CRAFT score map, (b)~dual-threshold watershed, (c)~binary image with component overlay, (d)~final character bounding boxes after filtering.
+    \vspace{3cm}}}
+    \caption{Character extraction pipeline on an example page region.
+    From the raw CRAFT score map~(a), a dual-threshold watershed detects character seeds~(b).
+    Binary image components~(c) are spatially associated with CRAFT detections to produce the final character segmentation~(d).}
+    \label{fig:extraction-example}
+\end{figure}
+
+% ============================================================================
+\subsection{Preprocessing}
+\label{sec:preprocessing}
+
+Each extracted character undergoes a preprocessing pipeline that produces (i)~a vectorised representation, (ii)~an OCR label, and (iii)~a HOG feature descriptor.
+This stage also establishes the reading order of characters within the document.
+
+% ---------- Layout Analysis ----------
+\subsubsection{Layout Analysis and Reading Order}
+\label{sec:layout}
+
+A layout analysis module identifies the column structure of the page by projecting the binary character mask onto the horizontal axis and detecting runs above an Otsu-derived threshold.
+Within each column, rows are identified by a transposed projection.
+Subcolumns within each row are detected by a further projection pass, with narrow gaps (smaller than $0.3 \times \text{row height}$ or $3$\,px) merged to avoid false splits from internal character stroke gaps.
+
+The reading order follows the conventional right-to-left, top-to-bottom direction of classical Chinese texts: columns are traversed from right to left, and within each column, characters are read top to bottom.
+Each character receives an integer reading-order index used in downstream visualisation and analysis.
+
+% ---------- Skew ----------
+\subsubsection{Skew Estimation}
+\label{sec:skew}
+
+Document skew is estimated using the Line Segment Detector (LSD)~\cite{von2010lsd} with advanced refinement.
+Long line segments ($> 100$\,px) are classified as horizontal or vertical (within $\pm\pi/8$), and the skew angle $\theta$ is computed as the length-weighted circular mean of their orientations:
+\begin{equation}
+    \theta = \frac{1}{2}\arg\!\left(\sum_i w_i \, e^{2i\alpha_i}\right),
+    \label{eq:skew}
+\end{equation}
+where $w_i$ is the length and $\alpha_i$ the orientation of line segment~$i$.
+This angle is used to deskew the vectorised character representations.
+
+% ---------- Ink Filter ----------
+\subsubsection{Ink Filtering}
+\label{sec:ink-filter}
+
+Before vectorisation, each binary character patch is cleaned by a two-pass morphological filter:
+\begin{enumerate}
+    \item Small white connected components ($< 5$\,px) are removed (fills small holes in strokes).
+    \item Small black connected components ($< 10$\,px) are removed (removes isolated noise specks).
+\end{enumerate}
+
+% ---------- Vectorisation ----------
+\subsubsection{Vectorisation}
+\label{sec:vectorisation}
+
+Cleaned binary patches are converted into Scalable Vector Graphics (SVG) representations using a C++ vectorisation tool based on the Potrace algorithm.
+The vectoriser traces merged shape outlines with a smoothing scale of~$1.0$ and accuracy threshold of~$1.0$.
+The resulting SVGs encode each character as a set of B\'ezier curves, providing a resolution-independent representation.
+After vectorisation, each SVG is deskewed by applying the estimated page rotation (Eq.~\ref{eq:skew}) as a homographic transformation.
+
+The SVG representation serves as the canonical form from which all downstream renderings (for HOG computation, for image registration) are generated.
+
+% ---------- OCR ----------
+\subsubsection{Character Recognition with CHAT}
+\label{sec:chat-ocr}
+
+Characters are labelled using a Kraken-based~\cite{kiessling2019kraken} recognition model (CHAT), which operates at the subcolumn level rather than on individual characters:
+
+\begin{enumerate}
+    \item For each subcolumn identified by the layout analysis (Section~\ref{sec:layout}), the grayscale page image is cropped to the bounding box of its characters and binarised.
+    \item A synthetic baseline is constructed as a vertical line at the median $x$-coordinate of the CRAFT centroids, spanning the full crop height.
+    This provides the line geometry expected by Kraken without requiring a separate segmentation model.
+    \item \texttt{kraken.rpred.rpred()} is called with \texttt{text\_direction="vertical-rl"}, which handles line extraction, dewarping, and character-by-character inference.
+    \item The predicted character sequence is spatially matched to CRAFT detections via the Hungarian algorithm applied to a cost matrix of vertical distances between Kraken cut polygon centres and CRAFT centroid $y$-coordinates.
+    Matches farther than $1.5 \times$ the average character height are rejected.
+    Unmatched CRAFT centroids receive the unknown label~``$\square$''.
+\end{enumerate}
+
+Each character thus receives a recognised label $\ell_i \in \mathcal{A} \cup \{\square\}$ and a confidence score $c_i \in [0,1]$, where $\mathcal{A}$ is the model's alphabet and $\square$ denotes an unrecognised character.
+
+\begin{figure}[t]
+    \centering
+    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+        \textbf{[PLACEHOLDER]} --- Example showing a subcolumn with: (left)~binarised crop with CRAFT centroids and Kraken cut boundaries, (right)~predicted characters at matched positions.
+    \vspace{3cm}}}
+    \caption{CHAT OCR on an example subcolumn.
+    Left: the binarised subcolumn crop with CRAFT centroids (red crosses), the synthetic vertical baseline (yellow), and Kraken cut boundaries (cyan dashed lines).
+    Right: predicted characters coloured by confidence (green $\ge 0.8$, orange $\ge 0.5$, red $< 0.5$).}
+    \label{fig:chat-ocr-example}
+\end{figure}
+
+
+% ---------- HOG ----------
+\subsubsection{Histogram of Oriented Gradients}
+\label{sec:hog}
+
+Each character is described by a Histogram of Oriented Gradients (HOG)~\cite{dalal2005histograms} computed on a rendered image of its SVG.
+The SVG is rendered onto a $24 \times 24$\,px-aligned grid at 256\,DPI with a binarisation threshold of~128, producing a clean grayscale image.
+
+\paragraph{Gradient computation.}
+Gradients are computed using Gaussian derivative filters with standard deviation $\sigma = 5$ and kernel size $6\sigma + 1 = 31$\,px.
+Horizontal and vertical derivatives are obtained via separable convolution: Gaussian smoothing in one direction, followed by the corresponding Gaussian derivative in the other:
+\begin{equation}
+    \frac{\partial I}{\partial x} = \left(G_\sigma * I\right) \circledast d_\sigma,
+    \qquad
+    \frac{\partial I}{\partial y} = \left(d_\sigma * I\right) \circledast G_\sigma,
+\end{equation}
+where $G_\sigma$ is a 1D Gaussian kernel, $d_\sigma$ its derivative, and $*$, $\circledast$ denote vertical and horizontal convolution respectively.
+
+Gradient magnitudes and \emph{unsigned} orientations are computed as:
+\begin{equation}
+    m(x,y) = \sqrt{\left(\frac{\partial I}{\partial x}\right)^2 + \left(\frac{\partial I}{\partial y}\right)^2},
+    \qquad
+    \theta(x,y) = \left(\operatorname{atan2}\!\left(\frac{\partial I}{\partial y}, \frac{\partial I}{\partial x}\right) \bmod \pi\right) / \pi.
+\end{equation}
+Unsigned gradients are used because character strokes have no inherent directionality: a dark-to-light transition and a light-to-dark transition along the same stroke should produce the same descriptor.
+
+\paragraph{Histogram computation.}
+The rendered image is divided into a grid of $24 \times 24$\,px cells.
+Within each cell, gradient magnitudes are accumulated into $B = 16$ orientation bins using trilinear interpolation:
+\begin{equation}
+    h_b = \sum_{(x,y) \in \text{cell}} m(x,y) \cdot \bigl[(1 - \alpha)\,\delta_{b, \lfloor \hat\theta \rfloor} + \alpha\,\delta_{b, (\lfloor \hat\theta \rfloor + 1) \bmod B}\bigr],
+\end{equation}
+where $\hat\theta(x,y) = \theta(x,y) \cdot B$ and $\alpha = \hat\theta - \lfloor\hat\theta\rfloor$.
+
+\paragraph{Normalisation.}
+The descriptor is normalised at the patch level (all cells jointly) using the two-step SIFT-style procedure:
+\begin{equation}
+    \hat{\mathbf{h}} = \frac{\mathbf{h}}{\|\mathbf{h}\|}, \qquad
+    \tilde{\mathbf{h}} = \operatorname{clip}(\hat{\mathbf{h}}, -t, t), \qquad
+    \mathbf{h}^* = \frac{\tilde{\mathbf{h}}}{\|\tilde{\mathbf{h}}\|},
+\end{equation}
+with clipping threshold $t = 0.2$.
+This prevents any single dominant gradient direction from dominating the descriptor.
+
+\input{figures/fig_hog_descriptor}
+
+
+% ============================================================================
+\subsection{A Contrario Feature Matching}
+\label{sec:acontrario}
+
+Character similarity is assessed using an \textit{a contrario} framework~\cite{desolneux2000meaningful} that provides a principled, statistically grounded threshold for declaring two characters as similar.
+
+% ---------- Dissimilarity ----------
+\subsubsection{Dissimilarity Metric: Circular Earth Mover's Distance}
+\label{sec:cemd}
+
+Given two HOG descriptors $\mathbf{h}^A = (h^A_1, \ldots, h^A_K)$ and $\mathbf{h}^B = (h^B_1, \ldots, h^B_K)$, where $K$ is the number of cells and each $h^A_k, h^B_k \in \mathbb{R}^B$ is a normalised $B$-bin histogram, we compute a per-cell dissimilarity using the Circular Earth Mover's Distance (CEMD).
+
+For a single cell pair $(h^A_k, h^B_k)$, let $X_j = \sum_{i=1}^{j} h^A_{k,i} - \sum_{i=1}^{j} h^B_{k,i}$ be the cumulative difference.
+The CEMD is:
+\begin{equation}
+    \text{CEMD}(h^A_k, h^B_k) = \min_{s \in \{0,\ldots,B-2\}} \frac{1}{B}\sum_{j=1}^{B} |X_j - X_s|,
+    \label{eq:cemd}
+\end{equation}
+which finds the optimal circular alignment of the two histograms before computing the $L^1$ transport cost.
+
+The total dissimilarity between two characters is the sum over all cells:
+\begin{equation}
+    D(\mathbf{h}^A, \mathbf{h}^B) = \sum_{k=1}^{K} \text{CEMD}(h^A_k, h^B_k).
+    \label{eq:total-dissimilarity}
+\end{equation}
+
+% ---------- NLFA ----------
+\subsubsection{Number of False Alarms}
+\label{sec:nlfa}
+
+Under the \textit{a contrario} model, we assume that for a query character $A$, the cell-level dissimilarities $D_k = \text{CEMD}(h^A_k, h^B_k)$ to a random background character $B$ are independent random variables.
+By the central limit theorem, the total dissimilarity $D = \sum_k D_k$ is approximately normally distributed with mean $\mu_A = \sum_k \mathbb{E}[D_k]$ and variance $\sigma_A^2 = \sum_k \operatorname{Var}[D_k]$, where the moments are estimated from all pairwise comparisons.
+
+The Number of False Alarms (NFA) for the pair $(A, B)$ is:
+\begin{equation}
+    \text{NFA}(A,B) = N^2 \cdot \Phi\!\left(\frac{D(\mathbf{h}^A, \mathbf{h}^B) - \mu_A}{\sigma_A}\right),
+    \label{eq:nfa}
+\end{equation}
+where $\Phi$ is the standard normal CDF and $N$ is the number of characters.
+The negative log NFA (NLFA) is stored as:
+\begin{equation}
+    \text{NLFA}(A,B) = -\log\Phi\!\left(\frac{D - \mu_A}{\sigma_A}\right).
+\end{equation}
+Two characters are considered meaningfully similar when $\text{NFA}(A,B) \le \varepsilon$, i.e.\ $\text{NLFA}(A,B) \ge -\log\varepsilon + 2\log N$.
+The parameter $\varepsilon$ controls the expected number of false detections under the null model; we use $\varepsilon = 5 \times 10^{-4}$.
+
+
+% ============================================================================
+\subsection{Graph Construction and Community Detection}
+\label{sec:graph-clustering}
+
+% ---------- Graph ----------
+\subsubsection{Graph Construction}
+\label{sec:graph-construction}
+
+A similarity graph $G = (V, E, w)$ is built with one vertex per character ($|V| = N$).
+An edge $(i, j)$ is created when both NLFA values exceed the threshold:
+\begin{equation}
+    (i,j) \in E \iff \text{NLFA}(i,j) \ge \tau_\text{NFA} \;\wedge\; \text{NLFA}(j,i) \ge \tau_\text{NFA},
+    \label{eq:reciprocal}
+\end{equation}
+where $\tau_\text{NFA} = -\log\varepsilon + 2\log N$.
+The reciprocal condition enforces that both characters consider each other as meaningful matches, discarding asymmetric similarities.
+Edge weights are set to the symmetrised NLFA: $w_{ij} = \frac{1}{2}[\text{NLFA}(i,j) + \text{NLFA}(j,i)]$.
+
+
+% ---------- Leiden ----------
+\subsubsection{Community Detection with Leiden}
+\label{sec:leiden}
+
+Communities in $G$ are detected using the Leiden algorithm~\cite{traag2019louvain} with the Reichardt--Bornholdt configuration model quality function (RBConfiguration), which optimises:
+\begin{equation}
+    \mathcal{Q}_\gamma = \sum_{c} \left[e_c - \gamma \binom{n_c}{2}\right],
+\end{equation}
+where $e_c$ is the total weight of edges within community $c$, $n_c$ its size, and $\gamma$ is the resolution parameter.
+Higher $\gamma$ values produce more, smaller clusters.
+We use $\gamma = 1.0$ and run until convergence (\texttt{n\_iterations=-1}) with a fixed seed for reproducibility.
+
+\input{figures/fig_clustering_pipeline}
+
+
+% ============================================================================
+\subsection{Cluster Refinement}
+\label{sec:refinement}
+
+The Leiden partition provides an initial clustering that may contain impure clusters (multiple character types) or over-fragmented characters (a type split across multiple clusters).
+A sequential refinement pipeline addresses these issues through three stages.
+
+% ---------- Hausdorff splitting ----------
+\subsubsection{Stage 1: Hausdorff-Based Cluster Splitting}
+\label{sec:hausdorff-split}
+
+Large clusters ($\ge 5$ members) are inspected for visual heterogeneity using the Hausdorff distance computed on registered binary images.
+
+\paragraph{Image registration.}
+For each pair of characters within a cluster, one is registered onto the other using a multiscale inverse compositional (IC) algorithm~\cite{briand2018ipol}.
+The IC algorithm estimates a homographic transformation $T$ by minimising a Lorentzian robust error function over a Gaussian pyramid with downsampling factor $\eta = 0.5$ and minimum resolution~$32$\,px.
+The Gauss--Newton optimisation uses Farid~$5 \times 5$ gradient kernels and runs for up to 5 iterations per scale with convergence threshold $10^{-3}$.
+
+\paragraph{Hausdorff distance.}
+After registration, the directed Hausdorff distance~\cite{rony2025hausdorff} between the binarised masks $M_1$ and $M_2$ is computed via distance transforms (using the \texttt{distorch} library):
+\begin{equation}
+    d_H(M_1, M_2) = \max\!\left(\sup_{p \in \partial M_1} d(p, \partial M_2),\; \sup_{q \in \partial M_2} d(q, \partial M_1)\right),
+\end{equation}
+where $\partial M$ denotes the boundary of mask $M$.
+The distance computation is fully batched on GPU.
+
+\paragraph{Hierarchical splitting.}
+The pairwise Hausdorff distance matrix within each cluster is used to build a hierarchical linkage (average method).
+The dendrogram is cut at a threshold $\tau_\text{split} = 21.5$: sub-trees below this distance are kept as sub-clusters.
+Characters with unknown OCR labels ($\square$) are excluded from the distance computation and subsequently assigned to the largest resulting sub-cluster of their original Leiden cluster.
+
+\begin{figure}[t]
+    \centering
+    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+        \textbf{[PLACEHOLDER]} --- Example dendrogram showing a cluster being split.
+        Left: character patches sorted by sub-cluster.
+        Right: the linkage dendrogram with the cut threshold shown as a horizontal line.
+    \vspace{3cm}}}
+    \caption{Hausdorff-based cluster splitting.
+    The pairwise Hausdorff distance dendrogram (right) reveals two visually distinct groups.
+    The cut at $\tau_\text{split} = 21.5$ (dashed line) separates them into two sub-clusters (left).}
+    \label{fig:hausdorff-split}
+\end{figure}
+
+
+% ---------- OCR rematch ----------
+\subsubsection{Stage 2: OCR-Based Rematching}
+\label{sec:ocr-rematch}
+
+Small clusters ($\le 3$ members) that result from the splitting stage or from fragmented Leiden partitions are candidates for label-based merging.
+For each small cluster:
+\begin{enumerate}
+    \item The dominant recognised label is determined (excluding unknowns).
+    \item The largest cluster sharing the same dominant label is identified.
+    \item All members of the small cluster are reassigned to the target cluster.
+\end{enumerate}
+This purely label-driven step is fast (no GPU computation) and handles the common case where a rare glyph variant is split from its main cluster.
+
+
+% ---------- PCA z-score rematch ----------
+\subsubsection{Stage 3: PCA Z-Score Rematching}
+\label{sec:pca-rematch}
+
+Remaining small clusters ($\le 3$ members) without matching OCR labels are tested against candidate large clusters ($\ge 10$ members) using an image-space compatibility test:
+\begin{enumerate}
+    \item \textbf{Candidate selection.}  The $k = 5$ nearest large clusters are identified by $L^2$ distance between mean HOG feature vectors.
+    \item \textbf{Registration.}  The query character is registered against the most central member (highest degree centrality in $G$) of each candidate cluster using IC registration.
+    \item \textbf{PCA projection.}  A PCA model is built from the registered images of the candidate cluster's members (retaining $d = 5$ components).
+    The registered query image is projected into this space.
+    \item \textbf{Z-score test.}  For each principal component $j$, the z-score $z_j = |q_j - \mu_j| / \sigma_j$ is computed.
+    If $\max_j z_j < z_\text{max} = 3.0$, the query is deemed compatible with the candidate.
+    \item \textbf{Merge decision.}  Among all compatible candidates, the query is merged into the one with the lowest $\max_j z_j$.
+\end{enumerate}
+
+\begin{figure}[t]
+    \centering
+    \fbox{\parbox{0.95\linewidth}{\centering\vspace{3cm}%
+        \textbf{[PLACEHOLDER]} --- Illustration of PCA z-score rematching.
+        Show a singleton being projected into the PCA space of a candidate cluster and accepted / rejected.
+    \vspace{3cm}}}
+    \caption{PCA z-score rematching.
+    A singleton character (red) is registered against the anchor of a candidate cluster (blue) and projected into the cluster's PCA space.
+    If all z-scores are below the threshold (right panel), the singleton is merged into the cluster.}
+    \label{fig:pca-rematch}
+\end{figure}
+
+
+% ============================================================================
+\subsection{Post-Clustering Refinement}
+\label{sec:post-clustering}
+
+Two optional refinement steps may be applied after the main clustering pipeline.
+
+\subsubsection{CHAT-Based Cluster Splitting}
+\label{sec:chat-split}
+
+Clusters whose OCR label purity falls below 90\% (i.e.\ no single label accounts for $\ge 90\%$ of the known-label members) are further split by grouping members with the same dominant CHAT label into separate sub-clusters, provided each resulting sub-cluster has $\ge 2$~members with that label.
+
+\subsubsection{Hapax Association}
+\label{sec:hapax}
+
+Singleton clusters (``hapax'') whose CHAT confidence exceeds~$0.3$ are merged into the closest cluster sharing the same recognised label.
+The distance criterion is adaptive: the dissimilarity from the hapax to the candidate cluster must not exceed the cluster's internal median dissimilarity (or a fixed threshold if specified).
+
+
+% ============================================================================
+\subsection{Evaluation Metrics}
+\label{sec:metrics}
+
+The quality of the clustering is evaluated against OCR-derived reference labels (excluding unknowns) using the following metrics:
+
+\begin{itemize}
+    \item \textbf{Adjusted Rand Index (ARI)}~\cite{hubert1985comparing}: chance-adjusted pairwise agreement, range $[-1, 1]$.
+    Primary selection criterion for hyperparameter sweeps.
+    \item \textbf{Normalised Mutual Information (NMI)}: shared information between clusterings, range $[0, 1]$.
+    \item \textbf{Homogeneity / Completeness / V-measure}~\cite{rosenberg2007v}: homogeneity measures within-cluster label purity; completeness measures whether all instances of a label are in one cluster; V-measure is their harmonic mean.
+    \item \textbf{Purity and Inverse Purity}: purity $= \frac{1}{N}\sum_k \max_j |c_k \cap t_j|$; inverse purity swaps the roles of clusters and classes.
+    \item \textbf{Pairwise F1 score}: F1 computed from pair-level TP/FP/FN via the contingency matrix.
+    \item \textbf{Accuracy (Hungarian matching)}: optimal one-to-one cluster-to-class assignment via the Hungarian algorithm.
+\end{itemize}
+
+Cluster-level diagnostics include Shannon entropy and normalised entropy of the label distribution within each cluster, as well as per-label completeness (fraction of a label's instances in its dominant cluster).
+
+\input{figures/fig_refinement_pipeline}
+
+
+% ============================================================================
+\subsection{Hyperparameter Summary}
+\label{sec:hyperparameters}
+
+Table~\ref{tab:hyperparameters} summarises the key hyperparameters of the pipeline and their default values.
+
+\begin{table}[t]
+    \centering
+    \small
+    \caption{Key hyperparameters and their default values.}
+    \label{tab:hyperparameters}
+    \begin{tabular}{@{}llll@{}}
+        \toprule
+        \textbf{Stage} & \textbf{Parameter} & \textbf{Symbol} & \textbf{Default} \\
+        \midrule
+        \multirow{3}{*}{Extraction}
+            & CRAFT text threshold    & $\tau_\text{text}$   & 0.6  \\
+            & CRAFT mask threshold    & $\tau_\text{mask}$   & 0.3  \\
+            & Merge distance          & $d_\text{min}$       & 8\,px \\
+        \midrule
+        \multirow{4}{*}{HOG}
+            & Cell size               & ---                  & $24 \times 24$\,px \\
+            & Number of bins          & $B$                  & 16 \\
+            & Gradient $\sigma$       & $\sigma$             & 5 \\
+            & Clip threshold          & $t$                  & 0.2 \\
+        \midrule
+        \multirow{2}{*}{Matching}
+            & Dissimilarity metric    & ---                  & CEMD \\
+            & NFA threshold           & $\varepsilon$        & $5 \times 10^{-4}$ \\
+        \midrule
+        \multirow{2}{*}{Clustering}
+            & Reciprocal edges        & ---                  & Yes \\
+            & Resolution ($\gamma$)   & $\gamma$             & 1.0 \\
+        \midrule
+        \multirow{2}{*}{Splitting}
+            & Hausdorff threshold     & $\tau_\text{split}$  & 21.5 \\
+            & Min.\ cluster size      & ---                  & 5 \\
+            & Linkage method          & ---                  & Average \\
+        \midrule
+        \multirow{3}{*}{Rematching}
+            & Max.\ small cluster     & ---                  & 3 \\
+            & PCA components          & $d$                  & 5 \\
+            & Z-score threshold       & $z_\text{max}$       & 3.0 \\
+        \bottomrule
+    \end{tabular}
+\end{table}

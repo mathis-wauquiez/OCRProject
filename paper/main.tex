@@ -1,0 +1,129 @@
+% ============================================================================
+%  Main document — wrapper for compiling the methodology section standalone
+%
+%  Compile with: pdflatex main.tex  (twice for references)
+%  Or use:       latexmk -pdf main.tex
+% ============================================================================
+\documentclass[11pt, a4paper]{article}
+
+% ── Geometry ──
+\usepackage[margin=2.5cm]{geometry}
+
+% ── Encoding & Fonts ──
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+
+% ── Math ──
+\usepackage{amsmath, amssymb, amsfonts}
+
+% ── Graphics ──
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{subcaption}
+
+% ── TikZ ──
+\usepackage{tikz}
+\usetikzlibrary{
+    arrows.meta,
+    positioning,
+    shapes.geometric,
+    shapes.misc,
+    calc,
+    fit,
+    backgrounds,
+    decorations.pathreplacing,
+}
+
+% ── Tables ──
+\usepackage{booktabs}
+\usepackage{multirow}
+
+% ── Algorithms ──
+\usepackage[ruled, vlined, linesnumbered]{algorithm2e}
+
+% ── Hyperlinks ──
+\usepackage[colorlinks=true, linkcolor=blue!60!black, citecolor=green!50!black, urlcolor=blue!70]{hyperref}
+
+% ── CJK support (for character examples) ──
+% Uncomment if CJK fonts are available on your system:
+% \usepackage{CJKutf8}
+% If CJK is not available, define a dummy environment:
+\newenvironment{CJK}[3]{}{}
+
+% ── Misc ──
+\usepackage{microtype}
+
+
+% ============================================================================
+\title{Character Clustering from Historical Document Images:\\Methodology}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\input{methodology}
+
+% ============================================================================
+%  References
+% ============================================================================
+\bibliographystyle{plain}
+% \bibliography{references}  % uncomment when references.bib is available
+
+% ── Inline references for standalone compilation ──
+\begin{thebibliography}{99}
+
+\bibitem{baek2019character}
+Y.~Baek, B.~Lee, D.~Han, S.~Yun, and H.~Lee.
+\newblock Character region awareness for text detection.
+\newblock In \emph{Proc.\ IEEE/CVF CVPR}, pp.~9365--9374, 2019.
+
+\bibitem{dalal2005histograms}
+N.~Dalal and B.~Triggs.
+\newblock Histograms of oriented gradients for human detection.
+\newblock In \emph{Proc.\ IEEE CVPR}, vol.~1, pp.~886--893, 2005.
+
+\bibitem{desolneux2000meaningful}
+A.~Desolneux, L.~Moisan, and J.-M.~Morel.
+\newblock Meaningful alignments.
+\newblock \emph{Int.\ J.\ Comput.\ Vis.}, 40(1):7--23, 2000.
+
+\bibitem{briand2018ipol}
+T.~Briand, G.~Facciolo, and J.~S\'anchez.
+\newblock A detailed study of the modified inverse compositional algorithm.
+\newblock \emph{Image Processing On Line (IPOL)}, 8:311--364, 2018.
+
+\bibitem{traag2019louvain}
+V.~A.~Traag, L.~Waltman, and N.~J.~van Eck.
+\newblock From {Louvain} to {Leiden}: guaranteeing well-connected communities.
+\newblock \emph{Scientific Reports}, 9(1):5233, 2019.
+
+\bibitem{von2010lsd}
+R.~Grompone~von Gioi, J.~Jakubowicz, J.-M.~Morel, and G.~Randall.
+\newblock {LSD}: a line segment detector.
+\newblock \emph{Image Processing On Line (IPOL)}, 2:35--55, 2012.
+
+\bibitem{kiessling2019kraken}
+B.~Kiessling.
+\newblock Kraken --- an universal text recognizer for the humanities.
+\newblock In \emph{Proc.\ Digital Humanities}, 2019.
+
+\bibitem{hubert1985comparing}
+L.~Hubert and P.~Arabie.
+\newblock Comparing partitions.
+\newblock \emph{J.\ Classification}, 2(1):193--218, 1985.
+
+\bibitem{rosenberg2007v}
+A.~Rosenberg and J.~Hirschberg.
+\newblock V-measure: A conditional entropy-based external cluster evaluation measure.
+\newblock In \emph{Proc.\ EMNLP-CoNLL}, pp.~410--420, 2007.
+
+\bibitem{rony2025hausdorff}
+J.~Rony and H.~Kervadec.
+\newblock Distorch: fast differentiable boundary distances.
+\newblock In \emph{Proc.\ MIDL}, 2025.
+
+\end{thebibliography}
+
+\end{document}
