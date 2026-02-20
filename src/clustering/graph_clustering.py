@@ -3,7 +3,8 @@
 from .algorithms import (
     Membership,
     communityDetectionBase,
-    leidenCommunityDetection as leindenCommunityDetection,
+    leidenCommunityDetection,
+    leidenCommunityDetection as leindenCommunityDetection,  # legacy typo alias
     louvainCommunityDetection,
     greedyModularityCommunityDetection,
     labelPropagationCommunityDetection,

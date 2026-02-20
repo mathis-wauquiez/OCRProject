@@ -38,11 +38,20 @@ import logging
 from src.patch_processing.configs import get_hog_cfg
 from src.patch_processing.hog import HOG
 
-# Cluster splitting
+# Cluster splitting (legacy — kept for backward compat of direct calls)
 from src.clustering.bin_image_metrics import (
     compute_hausdorff, registeredMetric, compute_distance_matrices_batched
 )
 
+# Refinement pipeline
+from .refinement import (
+    ClusterRefinementStep, RefinementResult,
+    HausdorffSplitStep, OCRRematchStep, PCAZScoreRematchStep,
+    UNKNOWN_LABEL as _UNKNOWN_LABEL,
+)
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 from tqdm import tqdm
 
 
@@ -60,7 +69,7 @@ class graphClusteringSweep(AutoReport):
             metric: str = "CEMD",
             keep_reciprocal: bool = True,
             device: str = "cuda",
-            output_dir: str = "./outputs/clustering_results",
+            output_dir: str = "./outputs/clustering/results",
 
             cell_sizes: None | List[int] = None,
             normalization_methods: None | List[None | str] = ['patch'],
@@ -75,11 +84,33 @@ class graphClusteringSweep(AutoReport):
             split_render_scale: float = 0.3,
             split_metrics: Optional[Dict[str, callable]] = None,
 
+            # ── Post-split rematching parameters ──
+            rematch_max_cluster_size: int = 3,
+            rematch_pca_k: int = 5,
+            rematch_z_max: float = 3.0,
+            rematch_n_candidates: int = 5,
+            rematch_min_target_size: int = 10,
+
+            # ── Explicit refinement pipeline (overrides above if given) ──
+            refinement_steps: Optional[list] = None,
+
             embed_images: bool = False,
             image_dpi: int = 100,
             thumbnail_dpi: int = 50,
             use_jpeg: bool = True,
             jpeg_quality: int = 70,
+
+            # ── Post-clustering refinement (optional) ──
+            enable_chat_split: bool = False,
+            chat_split_purity_threshold: float = 0.90,
+            chat_split_min_size: int = 3,
+            chat_split_min_label_count: int = 2,
+
+            enable_hapax_association: bool = False,
+            hapax_min_confidence: float = 0.3,
+            hapax_max_dissimilarity: Optional[float] = None,
+
+            enable_glossary: bool = False,
     ):
         config = ReportConfig(
             dpi=image_dpi,
@@ -124,6 +155,18 @@ class graphClusteringSweep(AutoReport):
         self.split_batch_size       = split_batch_size
         self.split_render_scale     = split_render_scale
         self.split_metrics          = split_metrics
+
+        # ── Post-clustering refinement (optional) ──
+        self.enable_chat_split          = enable_chat_split
+        self.chat_split_purity_threshold = chat_split_purity_threshold
+        self.chat_split_min_size        = chat_split_min_size
+        self.chat_split_min_label_count = chat_split_min_label_count
+
+        self.enable_hapax_association    = enable_hapax_association
+        self.hapax_min_confidence        = hapax_min_confidence
+        self.hapax_max_dissimilarity     = hapax_max_dissimilarity
+
+        self.enable_glossary             = enable_glossary
 
         self.embed_images   = embed_images
         self.image_dpi      = image_dpi
@@ -199,10 +242,72 @@ class graphClusteringSweep(AutoReport):
     #  CLUSTER SPLITTING
     # ================================================================
 
-    def _compute_cluster_linkages(self, dataframe, partition_membership, renderer):
+    @staticmethod
+    def _compute_single_cluster_linkage(
+        cid, idx, dataframe, reg_metric, renderer,
+        batch_size, split_linkage_method, min_cluster_size,
+        gpu_semaphore=None,
+    ):
+        """Compute Hausdorff distance matrix and linkage for one cluster.
+
+        Args:
+            gpu_semaphore: Optional ``threading.Semaphore`` that gates
+                access to the GPU-intensive distance-matrix computation.
+                Threads that don't hold the semaphore can still do CPU
+                work (pair building, numpy/scipy linkage).
+        """
+        size = len(idx)
+
+        if size < min_cluster_size:
+            return cid, dict(indices=idx, linkage=None, size=size)
+
+        subdf = dataframe.iloc[idx]
+
+        # Gate GPU work so only a bounded number of clusters hit the GPU
+        # concurrently, preventing OOM from stacked VRAM allocations.
+        if gpu_semaphore is not None:
+            gpu_semaphore.acquire()
+        try:
+            D_dict = compute_distance_matrices_batched(
+                reg_metric, renderer, subdf,
+                batch_size=batch_size,
+                sym_registration=False,
+            )
+        finally:
+            if gpu_semaphore is not None:
+                gpu_semaphore.release()
+
+        D = D_dict['hausdorff']
+        condensed = squareform(D, checks=False)
+        bad_mask = ~np.isfinite(condensed)
+        if bad_mask.any():
+            finite_max = np.nanmax(condensed[np.isfinite(condensed)]) \
+                if np.isfinite(condensed).any() else 1.0
+            condensed[bad_mask] = finite_max * 10
+        Z = linkage(condensed, method=split_linkage_method)
+
+        return cid, dict(indices=idx, linkage=Z, size=size)
+
+    def _compute_cluster_linkages(self, dataframe, partition_membership, renderer,
+                                  max_workers=None, max_concurrent_gpu=1):
         """
         Expensive step (done once): pairwise Hausdorff distances per
         Leiden cluster → linkage matrices.
+
+        Clusters are processed in parallel using threads.  A semaphore
+        limits the number of clusters that can run GPU-intensive IC
+        registration concurrently (preventing CUDA OOM), while still
+        allowing other threads to overlap CPU work (pair generation,
+        canvas placement, numpy/scipy linkage).
+
+        Args:
+            max_workers: Thread-pool size.  ``None`` lets the executor
+                pick a sensible default.  Set to 1 for sequential
+                execution (debugging).
+            max_concurrent_gpu: Maximum number of clusters allowed to
+                run ``compute_distance_matrices_batched`` on the GPU at
+                the same time.  Defaults to 1 (serialised GPU access)
+                to stay within VRAM limits.
         """
         metrics_dict = {'hausdorff': compute_hausdorff}
         if self.split_metrics is not None:
@@ -210,33 +315,41 @@ class graphClusteringSweep(AutoReport):
 
         reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
         membership = np.asarray(partition_membership)
+        cluster_ids = np.unique(membership)
+
+        # ── Build per-cluster index arrays ──────────────────────────────
+        cluster_indices = {
+            cid: np.where(membership == cid)[0] for cid in cluster_ids
+        }
+
+        # ── Sort clusters largest-first so big jobs start early ─────────
+        sorted_cids = sorted(cluster_ids, key=lambda c: len(cluster_indices[c]),
+                             reverse=True)
+
         cluster_linkages = {}
+        gpu_semaphore = threading.Semaphore(max_concurrent_gpu)
 
-        for cid in tqdm(np.unique(membership),
-                        desc="Computing cluster linkages (Hausdorff)", colour="yellow"):
-            idx = np.where(membership == cid)[0]
-            size = len(idx)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._compute_single_cluster_linkage,
+                    cid, cluster_indices[cid], dataframe,
+                    reg_metric, renderer,
+                    self.split_batch_size,
+                    self.split_linkage_method,
+                    self.split_min_cluster_size,
+                    gpu_semaphore,
+                ): cid
+                for cid in sorted_cids
+            }
 
-            if size < self.split_min_cluster_size:
-                cluster_linkages[cid] = dict(indices=idx, linkage=None, size=size)
-                continue
-
-            subdf = dataframe.iloc[idx]
-            D_dict = compute_distance_matrices_batched(
-                reg_metric, renderer, subdf,
-                batch_size=self.split_batch_size,
-                device=self.device,
-            )
-            D = D_dict['hausdorff']
-            condensed = squareform(D, checks=False)
-            bad_mask = ~np.isfinite(condensed)
-            if bad_mask.any():
-                finite_max = np.nanmax(condensed[np.isfinite(condensed)]) \
-                    if np.isfinite(condensed).any() else 1.0
-                condensed[bad_mask] = finite_max * 10
-            Z = linkage(condensed, method=self.split_linkage_method)
-
-            cluster_linkages[cid] = dict(indices=idx, linkage=Z, size=size)
+            with tqdm(total=len(futures),
+                      desc="Computing cluster linkages (Hausdorff)",
+                      colour="yellow") as pbar:
+                for future in as_completed(futures):
+                    cid, result = future.result()
+                    cluster_linkages[cid] = result
+                    pbar.update(1)
 
         return cluster_linkages
 
@@ -386,7 +499,10 @@ class graphClusteringSweep(AutoReport):
 
     def _compute_label_dataframe(self, dataframe):
         label_data = []
-        for label, label_rows in tqdm(dataframe.groupby(self.target_lbl),
+        known_df = dataframe[
+            dataframe[self.target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
+        ]
+        for label, label_rows in tqdm(known_df.groupby(self.target_lbl),
                                       desc="Computing completeness", colour='blue'):
             label_size = len(label_rows)
             cluster_counts = label_rows['membership'].value_counts()
@@ -429,42 +545,111 @@ class graphClusteringSweep(AutoReport):
             index=dataframe.index
         )
 
-        # ── 3. Pre-split membership & purity ──
+        # ── 3. Pre-split membership ──
         pre_split_membership = np.array(partition.membership)
         dataframe.loc[:, 'membership_pre_split'] = pd.Series(
             pre_split_membership, index=dataframe.index
         )
-        pre_purity_df, pre_representatives = \
-            self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
 
-        # ── 4. Cluster splitting ──
-        did_split = renderer is not None and self.split_thresholds is not None
-        if did_split:
-            (best_threshold, post_split_membership, best_split_log,
-             sweep_results_df, _cluster_linkages) = \
-                self.sweep_split_thresholds(dataframe, pre_split_membership, renderer)
+        # ── 4. Refinement pipeline ──
+        #   Each step takes the current membership and returns a new one.
+        #   Results are collected for per-step reporting.
+        current_membership = pre_split_membership.copy()
+        refinement_results: list[RefinementResult] = []
+        refinement_step_names: list[str] = []
 
-            dataframe.loc[:, 'membership'] = pd.Series(
-                post_split_membership, index=dataframe.index
+        has_renderer = renderer is not None
+        for step in self.refinement_steps:
+            if not has_renderer and isinstance(step, (HausdorffSplitStep, PCAZScoreRematchStep)):
+                continue  # skip GPU steps when no renderer available
+            result = step.run(
+                dataframe, current_membership, renderer,
+                target_lbl=self.target_lbl,
+                graph=graph,
             )
-            purity_dataframe, representatives = \
-                self._compute_purity_and_representatives(dataframe, 'membership')
-        else:
-            best_threshold = None
-            post_split_membership = pre_split_membership
-            best_split_log = None
-            sweep_results_df = None
-            dataframe.loc[:, 'membership'] = pd.Series(
-                partition.membership, index=dataframe.index
-            )
-            purity_dataframe = pre_purity_df
-            representatives = pre_representatives
+            current_membership = result.membership
+            refinement_results.append(result)
+            refinement_step_names.append(step.name)
+
+        post_split_membership = current_membership
+        dataframe.loc[:, 'membership'] = pd.Series(
+            post_split_membership, index=dataframe.index
+        )
+        did_split = len(refinement_results) > 0
+
+        # Extract split-specific metadata for backward-compat reporting
+        split_result = next(
+            (r for r, n in zip(refinement_results, refinement_step_names)
+             if n == 'hausdorff_split'), None
+        )
+        best_threshold = (split_result.metadata.get('best_threshold')
+                          if split_result else None)
+        best_split_log = split_result.log if split_result else None
+        sweep_results_df = (split_result.metadata.get('sweep_df')
+                            if split_result else None)
 
         # ── 5. Reorder by membership ──
+        dataframe['_graph_node_id'] = range(len(dataframe))
         dataframe = dataframe.sort_values(
             by=['membership', 'degree_centrality'],
             ascending=[True, False]
         ).reset_index(drop=True)
+
+        # ── 5a. Realign graph, matrices, and membership arrays ──
+        # After sorting + reset_index the dataframe has new 0..N-1 indices,
+        # but the graph nodes, distance matrices, and raw membership arrays
+        # still use the OLD row order.  Re-map everything to the new order
+        # so that downstream code (subgraph extraction, NN lookup, etc.)
+        # can use dataframe indices directly as graph node IDs.
+        perm = dataframe.pop('_graph_node_id').values
+        old_to_new = {int(old): new for new, old in enumerate(perm)}
+        graph = nx.relabel_nodes(graph, old_to_new)
+
+        perm_t = torch.tensor(perm, device=nlfa.device, dtype=torch.long)
+        nlfa = nlfa[perm_t][:, perm_t]
+        dissimilarities = dissimilarities[perm_t][:, perm_t]
+
+        pre_split_membership = pre_split_membership[perm]
+        post_split_membership = np.asarray(post_split_membership)[perm]
+
+        # ── 5b. Post-clustering refinement (optional) ──
+        from .post_clustering import chat_split_clusters, associate_hapax, build_glossary
+
+        chat_split_log = None
+        hapax_log = None
+        glossary_df = None
+
+        if self.enable_chat_split and self.target_lbl in dataframe.columns:
+            dataframe, chat_split_log = chat_split_clusters(
+                dataframe, dissimilarities,
+                purity_threshold=self.chat_split_purity_threshold,
+                min_split_size=self.chat_split_min_size,
+                min_label_count=self.chat_split_min_label_count,
+                target_lbl=self.target_lbl,
+            )
+
+        if self.enable_hapax_association and self.target_lbl in dataframe.columns:
+            dataframe, hapax_log = associate_hapax(
+                dataframe, dissimilarities,
+                target_lbl=self.target_lbl,
+                min_confidence=self.hapax_min_confidence,
+                max_dissimilarity=self.hapax_max_dissimilarity,
+            )
+
+        if self.enable_glossary and self.target_lbl in dataframe.columns:
+            glossary_df = build_glossary(dataframe, target_lbl=self.target_lbl)
+
+        # ── 5c. Compute purity & representatives AFTER index reset ──
+        #     so that stored representative indices match the new index.
+        pre_purity_df, pre_representatives = \
+            self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
+
+        if did_split:
+            purity_dataframe, representatives = \
+                self._compute_purity_and_representatives(dataframe, 'membership')
+        else:
+            purity_dataframe = pre_purity_df
+            representatives = pre_representatives
 
         # ── 6. Post-split metrics & label completeness ──
         best_metrics = self._evaluate_membership(
@@ -494,6 +679,9 @@ class graphClusteringSweep(AutoReport):
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
+            chat_split_log=chat_split_log,
+            hapax_log=hapax_log,
+            glossary_df=glossary_df,
         )
 
         # ── 8. Build filtered / representative dataframes ──

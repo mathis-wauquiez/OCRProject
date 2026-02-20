@@ -62,6 +62,15 @@ def main(cfg: DictConfig):
         split_min_cluster_size=cfg.method.split_min_cluster_size,
         split_batch_size=cfg.method.split_batch_size,
         split_render_scale=cfg.method.split_render_scale,
+        # ── Post-clustering refinement ──
+        enable_chat_split=cfg.method.get('enable_chat_split', False),
+        chat_split_purity_threshold=cfg.method.get('chat_split_purity_threshold', 0.90),
+        chat_split_min_size=cfg.method.get('chat_split_min_size', 3),
+        chat_split_min_label_count=cfg.method.get('chat_split_min_label_count', 2),
+        enable_hapax_association=cfg.method.get('enable_hapax_association', False),
+        hapax_min_confidence=cfg.method.get('hapax_min_confidence', 0.3),
+        hapax_max_dissimilarity=cfg.method.get('hapax_max_dissimilarity', None),
+        enable_glossary=cfg.method.get('enable_glossary', False),
         # ── Reporting ──
         embed_images=cfg.method.embed_images,
         image_dpi=cfg.method.image_dpi,
@@ -83,6 +92,14 @@ def main(cfg: DictConfig):
 
     import pickle
     pickle.dump(graph, open(output_path / 'graph.gpickle', 'wb'))
+
+    # Save glossary if it was generated
+    if cfg.method.get('enable_glossary', False):
+        from src.clustering.post_clustering import build_glossary
+        glossary_df = build_glossary(dataframe, target_lbl=cfg.data.target_lbl)
+        glossary_df.to_csv(output_path / "glossary.csv", index=False)
+        save_dataframe(glossary_df, output_path / "glossary")
+        logger.info(f"Glossary saved: {len(glossary_df)} entries")
 
     # Add "Output Files" section to the report
     saved_files = [

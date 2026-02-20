@@ -39,9 +39,23 @@ class craftComponentsParams(Updateable):
     # Connected components parameters
 
     text_threshold: float = 0.6
-    """Threshold used on the CRAFT output"""
+    """Threshold used on the CRAFT output for seed detection (peak_local_max)"""
     connectivity: int = 8
     """Connectivity for the connected components"""
+
+    mask_threshold: float | None = None
+    """Lower threshold for watershed basin expansion mask. When set, watershed
+    seeds are detected at text_threshold (high) but basins expand into areas
+    with score > mask_threshold (lower), capturing radicals of composite
+    characters (e.g. 蒸) that have moderate CRAFT scores. Set to None to use
+    text_threshold for both (original behavior). Recommended: 0.2-0.4."""
+
+    link_threshold: float | None = None
+    """Threshold for CRAFT link score combination. When set, text and link
+    scores are combined before watershed: combined = clip(score_text +
+    (score_link > link_threshold), 0, 1). This bridges gaps between
+    sub-components of composite characters. Set to None to disable.
+    Recommended: 0.3-0.7."""
 
     # Components filtering
     min_area: int | None = 10
@@ -55,7 +69,7 @@ class craftComponentsParams(Updateable):
     # Unary potential parameters
     # UNUSED AT THE MOMENT
     characteristic_distance: float = 5. # characteristic n° of px for the
-                                        # influence region of components 
+                                        # influence region of components
     neighborhood_radius: int = 50       # outside, potential is null
 
     method: str = "watershed" # | 'cc'
@@ -126,7 +140,10 @@ class PipelineOutput:
 
     characters: connectedComponent
     "Final character components after all filtering (proximity, size, aspect ratio, etc.)"
-    
+
+    score_link: torch.Tensor = None
+    "Score map output for link/affinity regions from the CRAFT model"
+
     similarity_matrix: np.ndarray = None
     "Similarity matrix between filtered image components and CRAFT components"
     

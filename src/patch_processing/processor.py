@@ -493,11 +493,11 @@ class PatchPreprocessing:
                     ys = [pt[1] for pt in poly]
                     y_min, y_max = min(ys), max(ys)
                     axes[i][0].axhline(
-                        y_min, color='cyan', linewidth=0.6,
+                        y_min, color='cyan', linewidth=3,
                         linestyle='--', alpha=0.7,
                     )
                     axes[i][0].axhline(
-                        y_max, color='cyan', linewidth=0.6,
+                        y_max, color='cyan', linewidth=3,
                         linestyle='--', alpha=0.7,
                     )
 
@@ -505,7 +505,7 @@ class PatchPreprocessing:
             if data.centers_rel:
                 cx_med = float(np.median([cx for _, cx in data.centers_rel]))
                 axes[i][0].axvline(
-                    cx_med, color='yellow', linewidth=1.0,
+                    cx_med, color='yellow', linewidth=5,
                     linestyle='-', alpha=0.8,
                 )
 
@@ -513,7 +513,7 @@ class PatchPreprocessing:
             for (cy, cx) in data.centers_rel:
                 axes[i][0].plot(
                     cx, cy, '+',
-                    color='red', markersize=5, markeredgewidth=0.8,
+                    color='red', markersize=25, markeredgewidth=3.5,
                 )
 
             n_kraken = len(data.raw_pred_chars)
@@ -724,22 +724,24 @@ class PatchPreprocessing:
             'page_skew': page_skew
         })
 
-        # Reading order + optional visualisation
-        # split_to_rectangles is called here (same params as inside ReadingOrder)
-        # so we can reuse the subcolumn structure in the CHAT OCR stage.
+        # Use img_comp labels for both reading order and CHAT OCR so that
+        # the labels in the subcolumn rectangles match page_df['label']
+        # (which comes from img_comp).  Previously craft_comp.labels was
+        # used, but those live in a different label-space, causing most
+        # characters to be silently skipped in _predict_subcol.
         rectangles = split_to_rectangles(
-            craft_comp.labels,
+            img_comp.labels,
             min_col_area=self.reading_order.min_col_area,
         )
 
         if self.output_viz is not None:
             canvas1 = craft_comp.segm_img
             canvas2 = np.array(Image.open(image_folder / file))
-            fig = self.reading_order(craft_comp.labels, page_df,
+            fig = self.reading_order(img_comp.labels, page_df,
                                      canvas1, canvas2)
             self._save_viz(fig, canvas1, canvas2, file)
         else:
-            self.reading_order(craft_comp.labels, page_df)
+            self.reading_order(img_comp.labels, page_df)
 
         # Return (H, W) uint8 image — squeeze the trailing channel added above
         image_hw = img_np[:, :, 0]

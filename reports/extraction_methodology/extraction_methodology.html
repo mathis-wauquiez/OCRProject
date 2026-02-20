@@ -1,0 +1,712 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Character Extraction Pipeline — Methodology Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #f9f9f9;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+        }
+        .metadata {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        /* Collapsible Section Styles - FIXED FOR LARGE CONTENT */
+        .section {
+            background: white;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: visible;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.3s ease;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        
+        .section-header:hover {
+            background: linear-gradient(135deg, #7688f0 0%, #8555b2 100%);
+        }
+        
+        .section-title {
+            margin: 0;
+            font-size: 1.3em;
+            font-weight: 600;
+        }
+        
+        .section-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .toggle-icon {
+            width: 24px;
+            height: 24px;
+            border: 2px solid white;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            transition: transform 0.3s ease;
+        }
+        
+        .section.collapsed .toggle-icon {
+            transform: rotate(0deg);
+        }
+        
+        .section.expanded .toggle-icon {
+            transform: rotate(90deg);
+        }
+        
+        /* FIXED: Use display instead of max-height for large sections */
+        .section-content {
+            display: none;
+            padding: 0 25px;
+            overflow: visible;
+        }
+        
+        .section.expanded .section-content {
+            display: block;
+            padding: 25px;
+        }
+        
+        .section-content-inner {
+            /* Content can grow freely */
+        }
+        
+        /* Optional: Add smooth fade-in animation */
+        .section.expanded .section-content {
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        /* Expand/Collapse All Controls */
+        .controls {
+            background: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .control-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .control-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        .control-btn:active {
+            transform: translateY(0);
+        }
+        
+        /* Rest of the styles */
+        .figure {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .figure img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .table-container {
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        tr:hover {
+            background-color: #e9ecef;
+        }
+        .text-content {
+            color: #444;
+            line-height: 1.8;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            border-left: 4px solid #667eea;
+        }
+        .katex-equation {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 1.2em;
+        }
+    </style>
+    
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+            onload="renderMathInElement(document.body);"></script>
+    
+</head>
+<body>
+    <div class="header">
+        <h1>Character Extraction Pipeline — Methodology Report</h1>
+        <div class="metadata">
+            <p><strong>Generated:</strong> 2026-02-18 23:57:39</p>
+            <p><strong>Author:</strong> OCR Project</p>
+            <p><strong>Items:</strong> 34</p>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button class="control-btn" onclick="expandAll()">📂 Expand All</button>
+        <button class="control-btn" onclick="collapseAll()">📁 Collapse All</button>
+        <span style="margin-left: auto; color: #666; font-size: 0.9em;">
+            Click section headers to toggle
+        </span>
+    </div>
+    
+    
+    <div class="section collapsed" id="section-1">
+        <div class="section-header" onclick="toggleSection(1)">
+            <h2 class="section-title">1. Introduction</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Scope</h3>
+<div class="text-content">This report documents the character extraction methodology used in the OCR pipeline for historical Chinese books. The pipeline takes scanned page images as input and produces per-character segmentation masks, bounding boxes, and downstream OCR predictions.<br>
+<br>
+The document covers:<br>
+<ul><li>The complete extraction pipeline (CRAFT detection → watershed segmentation → binarization → component assignment → filtering)</li><li>A known failure mode for composite characters with vertically-stacked radicals</li><li>A proposed improvement: dual-threshold watershed with optional link score enhancement</li><li>Configuration reference and alternative approaches considered</li></ul></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-2">
+        <div class="section-header" onclick="toggleSection(2)">
+            <h2 class="section-title">2. Current Extraction Methodology</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Overview</h3>
+<div class="text-content">The extraction pipeline has two main stages: (1) character detection and segmentation (GPU), and (2) patch processing and OCR recognition (CPU + GPU). This report focuses on stage 1, which is where the character boundaries are determined.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Pipeline Architecture</h3>
+<div class="text-content"><strong>Stage 1 — Character Detection Pipeline</strong><br>
+<br>
+<pre><code>PIL Image
+  → CRAFT neural network inference
+      → score_text (H/2, W/2)   [character region confidence]
+      → score_link (H/2, W/2)   [affinity between regions]
+  → Watershed segmentation on score_text
+      → CRAFT components (one blob per detected character)
+  → Filter CRAFT components (area, aspect ratio)
+  → Merge nearby CRAFT components (centroid distance &lt; min_dist)
+  → Binarize original image (Otsu threshold)
+      → Image connected components (ink blobs)
+  → Filter image components (remove lines)
+  → Compute similarity: image CCs ↔ CRAFT components
+  → Assign each image CC to nearest CRAFT component
+  → Filter by contour proximity, size, aspect ratio, fill area
+  → Final character components
+</code></pre></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Pipeline Summary</h3>
+<div class="text-content"><em>[Figure placeholder: comprehensive 3×4 pipeline summary]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-3">
+        <div class="section-header" onclick="toggleSection(3)">
+            <h2 class="section-title">2.1 CRAFT Detection</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">CRAFT Model Outputs</h3>
+<div class="text-content">CRAFT (Character Region Awareness For Text detection) is a convolutional neural network that produces two score maps at half the input resolution:<br>
+<br>
+<ul><li><strong>score_text</strong>: per-pixel confidence that a pixel belongs to a character region (values in [0, 1])</li><li><strong>score_link</strong>: per-pixel affinity confidence between adjacent character sub-components (values in [0, 1])</li></ul><br>
+<br>
+The input image is preprocessed by resizing to fit within \(\texttt{canvas\_size} = 1280\) pixels (with \(\texttt{mag\_ratio} = 5.0\)) and normalizing with ImageNet statistics. The model checkpoint is <code>craft_mlt_25k.pth</code> (multi-lingual text, 25k iterations).<br>
+<br>
+<strong>Important</strong>: In the current pipeline, <code>score_link</code> is computed but not used. This is relevant to the proposed improvement.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: CRAFT Score Maps</h3>
+<div class="text-content"><em>[Figure placeholder: CRAFT score_text and score_link heatmaps for a sample page with composite characters]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-4">
+        <div class="section-header" onclick="toggleSection(4)">
+            <h2 class="section-title">2.2 Watershed Segmentation</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Watershed Algorithm</h3>
+<div class="text-content">CRAFT components are extracted from <code>score_text</code> using watershed segmentation (<code>connectedComponent.from_image_watershed()</code>).<br>
+<br>
+The algorithm:<br>
+<ol><li><strong>Binarize</strong>: Create a foreground mask where \(\texttt{score\_text} > \tau_t\) (<code>text_threshold</code>, default 0.6)</li><li><strong>Find seeds</strong>: Detect local maxima in the score map within the foreground mask (<code>peak_local_max</code>, <code>min_distance</code> = <code>min_dist</code>)</li><li><strong>Watershed</strong>: Using elevation surface \(E = -\texttt{score\_text}\), expand each seed basin within the foreground mask</li></ol><br>
+<br>
+<strong>Critical observation</strong>: The same threshold \(\tau_t = 0.6\) is used for both seed detection (step 2) and basin expansion mask (step 3). This means areas with moderate CRAFT scores (0.3–0.5) are excluded from the watershed entirely — they receive no CRAFT label.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Watershed Result</h3>
+<div class="text-content"><em>[Figure placeholder: Watershed segmentation result showing CRAFT component boundaries overlaid on score_text heatmap]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-5">
+        <div class="section-header" onclick="toggleSection(5)">
+            <h2 class="section-title">2.3 CRAFT Component Post-Processing</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Filtering and Merging</h3>
+<div class="text-content">After watershed, CRAFT components are refined in two steps:<br>
+<br>
+<strong>Filtering</strong> — Remove spurious detections:<br>
+<ul><li>Components with area < <code>min_area</code> (18 px)</li><li>Components with aspect ratio outside [<code>min_aspect_ratio</code>, <code>max_aspect_ratio</code>] = [0.2, 5.0]</li></ul><br>
+<br>
+<strong>Merging</strong> — Combine nearby components:<br>
+<ul><li>Compute pairwise centroid distances in CRAFT space</li><li>Build a graph where edges connect components with distance < <code>min_dist</code> (8.0 px in CRAFT space ≈ 16 px in image space)</li><li>Find connected components → merge groups</li><li>All labels in a group are mapped to a single representative</li></ul></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: CRAFT Component Filtering</h3>
+<div class="text-content"><em>[Figure placeholder: CRAFT components coloured by deletion reason]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: CRAFT Merge Groups</h3>
+<div class="text-content"><em>[Figure placeholder: merged CRAFT components with group colours]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-6">
+        <div class="section-header" onclick="toggleSection(6)">
+            <h2 class="section-title">2.4 Image Binarization & Connected Components</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Image Processing</h3>
+<div class="text-content">In parallel with CRAFT analysis, the original image is:<br>
+<br>
+<ol><li><strong>Binarized</strong> using Otsu's method (foreground = ink, background = paper)</li><li><strong>Connected components</strong> extracted via <code>cv2.connectedComponentsWithStats(connectivity=4)</code></li><li><strong>Filtered</strong>: elongated components with aspect ratio > 20 and major axis > 100 px are removed (these are ruling lines, not characters)</li></ol></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Binary Image</h3>
+<div class="text-content"><em>[Figure placeholder: Otsu-binarized image]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: All Image Connected Components</h3>
+<div class="text-content"><em>[Figure placeholder: all extracted image connected components]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Filtered Image Components</h3>
+<div class="text-content"><em>[Figure placeholder: image components after line removal]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-7">
+        <div class="section-header" onclick="toggleSection(7)">
+            <h2 class="section-title">2.5 Similarity Computation & Assignment</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Mahalanobis Distance Assignment</h3>
+<div class="text-content">Each ink connected component (image CC) is assigned to the nearest CRAFT component using centroid-based distance.<br>
+<br>
+For each CRAFT component \(j\) with centroid \(\boldsymbol{\mu}_j\) and inertia tensor \(\Sigma_j\), and each image CC \(i\) with centroid \(\mathbf{c}_i\), the Mahalanobis distance is:<br>
+<br>
+$$d_M(i, j) = (\mathbf{c}_i - \boldsymbol{\mu}_j)^T \, \Sigma_j^{-1} \, (\mathbf{c}_i - \boldsymbol{\mu}_j)$$<br>
+<br>
+The similarity is \(s(i, j) = -d_M(i, j)\). Each image CC is assigned to the CRAFT component with the highest similarity (lowest Mahalanobis distance). CCs with \(\max_j s(i,j) < \tau_s\) (<code>similarity_threshold</code> = −15) are discarded as background.<br>
+<br>
+The inertia tensor \(\Sigma_j\) encodes the shape of the CRAFT blob: for a vertically-elongated character, \(\Sigma_j\) has a large eigenvalue in the vertical direction, making the Mahalanobis distance smaller vertically. This is an elliptical distance metric that naturally adapts to character shape.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Similarity Matrix</h3>
+<div class="text-content"><em>[Figure placeholder: similarity matrix heatmap]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Similarity Matching</h3>
+<div class="text-content"><em>[Figure placeholder: Similarity matching visualization showing lines connecting image CCs to their assigned CRAFT components, color-coded by match quality]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-8">
+        <div class="section-header" onclick="toggleSection(8)">
+            <h2 class="section-title">2.6 Post-Filtering</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Character Filtering</h3>
+<div class="text-content">After assignment, merged character components are filtered:<br>
+<br>
+<ol><li><strong>Contour proximity filter</strong>: Remove small components that are too close (< 50 px) to the contour of large components (> 4000 px area). This removes artifacts near borders and seals.</li><li><strong>Size filter</strong>: Remove characters with bounding box outside [30, 30] — [150, 150] pixels</li><li><strong>Aspect ratio filter</strong>: Remove characters with aspect ratio > 3</li><li><strong>Fill area filter</strong>: Remove characters where filled_area / bbox_area > 0.9</li><li><strong>Minimum area filter</strong>: Remove characters with filled area < 200 px</li></ol></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Contour Proximity Filtering</h3>
+<div class="text-content"><em>[Figure placeholder: contour proximity filter result]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Final Character Segmentation</h3>
+<div class="text-content"><em>[Figure placeholder: final extracted characters]</em></div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Character Deletion Reasons</h3>
+<div class="text-content"><em>[Figure placeholder: characters coloured by deletion reason]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-9">
+        <div class="section-header" onclick="toggleSection(9)">
+            <h2 class="section-title">3. Problem: Composite Character Misassignment</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Failure Mechanism</h3>
+<div class="text-content">Characters with vertically-stacked sub-components present a systematic extraction failure. Consider the character 蒸:<br>
+<br>
+<ul><li>The top portion (body) has high CRAFT score → becomes a CRAFT component with a watershed seed</li><li>The bottom portion (water radical 氺) has moderate CRAFT score (~0.3–0.5) → <strong>falls below</strong> <code>text_threshold</code> (0.6) → <strong>excluded from the watershed mask entirely</strong></li><li>The radical receives no CRAFT label</li><li>During Mahalanobis assignment, the radical's ink CC centroid is spatially closer to the CRAFT blob of the character below</li><li><strong>Result</strong>: the water radical is stolen by the wrong character</li></ul><br>
+<br>
+This affects many composite characters: 蒸, 烝, 黑, 煮, 熟, and any character where a bottom radical separates into a distinct ink blob positioned closer to the next character.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Root Cause: Single-Threshold Watershed</h3>
+<div class="text-content">The root cause is that a <strong>single threshold</strong> (<code>text_threshold</code> = 0.6) serves two conflicting purposes:<br>
+<br>
+<ol><li><strong>Seed detection</strong> — needs a high threshold to avoid spurious seeds in noisy regions</li><li><strong>Basin expansion mask</strong> — needs a lower threshold so that basins can grow into moderate-score areas where radicals reside</li></ol><br>
+<br>
+By using 0.6 for both, we get precise seeds but overly restrictive basin expansion. The radical area (score 0.3–0.5) is treated as background.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Threshold Effect on Watershed Mask</h3>
+<div class="text-content"><em>[Figure placeholder: Side-by-side showing (a) CRAFT score heatmap for a page region with 蒸, (b) watershed mask at threshold 0.6 (radical excluded), (c) watershed mask at threshold 0.3 (radical included)]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-10">
+        <div class="section-header" onclick="toggleSection(10)">
+            <h2 class="section-title">4. Proposed Solution: Dual-Threshold Watershed</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Dual-Threshold Mechanism</h3>
+<div class="text-content">We split the single <code>binary_threshold</code> into two independent thresholds:<br>
+<br>
+<ul><li><strong>Peak threshold</strong> \(\tau_p\) (= <code>text_threshold</code>, default 0.6): controls where watershed seeds are placed. Only strong character regions produce seeds.</li><li><strong>Mask threshold</strong> \(\tau_m\) (= <code>mask_threshold</code>, default 0.3): controls how far watershed basins can expand. Basins grow into moderate-score areas, capturing radicals.</li></ul><br>
+<br>
+The modified watershed algorithm:<br>
+<ol><li>Seed mask: \(M_p = \{(x,y) : \texttt{score}(x,y) > \tau_p\}\)</li><li>Expansion mask: \(M_m = \{(x,y) : \texttt{score}(x,y) > \tau_m\}\)</li><li>Seeds: <code>peak_local_max(score, labels=</code> \(M_p\) <code>)</code></li><li>Watershed: <code>watershed(−score, markers, mask=</code> \(M_m\) <code>)</code></li></ol><br>
+<br>
+Since \(\tau_m < \tau_p\), we have \(M_p \subseteq M_m\): seeds are always within the expansion mask. The key difference is that basins can now grow into the moderate-score radical area.</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-11">
+        <div class="section-header" onclick="toggleSection(11)">
+            <h2 class="section-title">4.1 Why This Works</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Score Landscape Analysis</h3>
+<div class="text-content">Consider the character 蒸 with the character 者 directly below it.<br>
+<br>
+The CRAFT score landscape in the vertical direction looks approximately like:<br>
+<br>
+<pre><code>Score  ^  
+ 1.0   |  ┌──┐               ← 蒸 body (seed here)
+       |  │  │
+ 0.6 ──|──┤  ├── τ_p ────── seed threshold (current)
+       |  │  │
+ 0.4   |  │  └─┐  ← radical area (moderate score)
+ 0.3 ──|──┤    ├── τ_m ──── mask threshold (new)
+       |  │    │
+ 0.1   |  └────┘
+       |          ← inter-character gap (very low score)
+ 0.0   |──────────── background
+       |  ┌──┐
+ 1.0   |  │  │      ← 者 body (separate seed)
+       +──┴──┴─────────→ y
+</code></pre><br>
+<br>
+With \(\tau_p = 0.6\): the 蒸 body gets a seed. The radical area (score ~0.4) is above \(\tau_m = 0.3\) → included in the expansion mask. The inter-character gap (score ~0.1) is below \(\tau_m\) → remains excluded.<br>
+<br>
+The 蒸 body's basin expands downward through the radical area (following the gradient of \(-\texttt{score}\)) and stops at the inter-character gap. The radical is now part of the 蒸 CRAFT component, and downstream Mahalanobis assignment works correctly.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Before / After Comparison</h3>
+<div class="text-content"><em>[Figure placeholder: Before/after comparison of CRAFT components on a page with composite characters, showing the radical correctly included after dual-threshold watershed]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-12">
+        <div class="section-header" onclick="toggleSection(12)">
+            <h2 class="section-title">4.2 Risk Analysis</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Potential Risks and Mitigations</h3>
+<div class="text-content"><strong>Over-expansion risk</strong>: If \(\tau_m\) is too low, basins could bridge inter-character gaps where the score is slightly above zero. Mitigation: the inter-character gap in historical Chinese text typically has CRAFT score < 0.1, well below the recommended \(\tau_m = 0.3\).<br>
+<br>
+<strong>Noise inclusion</strong>: A lower mask threshold could include background noise. Mitigation: seeds remain at \(\tau_p = 0.6\), so no new spurious seeds are created. Only existing basins expand.<br>
+<br>
+<strong>Adjacent character merging</strong>: Only possible if the gap between adjacent characters has score > \(\tau_m\). For well-separated vertical text, this is unlikely.<br>
+<br>
+<strong>Backward compatibility</strong>: Setting <code>mask_threshold: null</code> in the configuration restores the original single-threshold behavior.</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-13">
+        <div class="section-header" onclick="toggleSection(13)">
+            <h2 class="section-title">5. Complementary Enhancement: Link Score Combination</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Link Score Methodology</h3>
+<div class="text-content">CRAFT's <code>score_link</code> output detects affinity between adjacent text sub-components. The canonical CRAFT approach (from <code>craft_utils.py:29</code>) combines text and link scores before connected component extraction:<br>
+<br>
+$$\texttt{score\_combined} = \text{clip}\big(\texttt{score\_text} + \mathbb{1}[\texttt{score\_link} > \tau_L],\; 0,\; 1\big)$$<br>
+<br>
+where \(\tau_L\) is the link threshold. This fills in the gap between sub-components by adding 1.0 where the link score exceeds the threshold, making the region contiguous.<br>
+<br>
+<strong>This is complementary to the dual-threshold approach</strong>:<br>
+<ul><li>Dual threshold works when the radical has moderate CRAFT score (0.3–0.5)</li><li>Link score works when the gap has high affinity even if the radical itself has low text score</li></ul><br>
+<br>
+<strong>Caveat</strong>: The CRAFT model (<code>craft_mlt_25k.pth</code>) was trained on modern multilingual text. The <code>score_link</code> map was designed to connect characters within words (relevant for Latin and Korean scripts). Its behavior on historical Chinese woodblock prints — where each character is standalone — is uncertain. The link score may not fire between stacked radicals, or it may over-fire between adjacent characters in a column.<br>
+<br>
+<strong>Recommendation</strong>: <code>link_threshold</code> is disabled by default (<code>null</code>). Enable it experimentally after visual inspection of <code>score_link</code> on your data.</div>
+<h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Figure: Link Score Heatmap</h3>
+<div class="text-content"><em>[Figure placeholder: score_link heatmap for a page with composite characters — does the link score bridge the radical gap?]</em></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-14">
+        <div class="section-header" onclick="toggleSection(14)">
+            <h2 class="section-title">6. Configuration Reference</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Full Parameter Table</h3>
+<div class="text-content">All parameters are set in <code>confs/extraction_pipeline.yaml</code> and can be overridden via Hydra command line.<br>
+<br>
+<strong>CRAFT Detection</strong> (<code>craftDetectorParams</code>):<br>
+<br>
+<div class="table-container"><table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>mag_ratio</code></td><td>5.0</td><td>Image upscaling factor for CRAFT</td></tr><tr><td><code>canvas_size</code></td><td>1280</td><td>Max image dimension after upscaling</td></tr><tr><td><code>chckpt</code></td><td>craft_mlt_25k.pth</td><td>Model checkpoint</td></tr></tbody></table></div><br>
+<br>
+<strong>CRAFT Component Analysis</strong> (<code>craftComponentAnalysisParams</code>):<br>
+<br>
+<div class="table-container"><table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>text_threshold</code></td><td>0.6</td><td>Threshold for seed detection (high)</td></tr><tr><td><code>mask_threshold</code></td><td>0.3</td><td>Threshold for watershed mask expansion (lower). Set to <code>null</code> for original behavior.</td></tr><tr><td><code>link_threshold</code></td><td>null</td><td>Link score combination threshold. Set to <code>null</code> to disable.</td></tr><tr><td><code>min_dist</code></td><td>8.0</td><td>Merge distance for nearby CRAFT components (px)</td></tr><tr><td><code>min_area</code></td><td>18</td><td>Minimum CRAFT component area</td></tr><tr><td><code>min_aspect_ratio</code></td><td>0.2</td><td>Minimum CRAFT component aspect ratio</td></tr><tr><td><code>max_aspect_ratio</code></td><td>5.0</td><td>Maximum CRAFT component aspect ratio</td></tr></tbody></table></div><br>
+<br>
+<strong>Image Component Analysis</strong> (<code>imageComponentsPipelineParams</code>):<br>
+<br>
+<div class="table-container"><table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code>threshold</code></td><td>otsu</td><td>Binarization method</td></tr><tr><td><code>similarity_threshold</code></td><td>−10.0</td><td>Mahalanobis distance cutoff</td></tr><tr><td><code>similarity_metric</code></td><td>mahalanobis</td><td>Distance metric</td></tr><tr><td><code>min_box_size</code></td><td>[30, 30]</td><td>Min character bbox [w, h]</td></tr><tr><td><code>max_box_size</code></td><td>[150, 150]</td><td>Max character bbox [w, h]</td></tr><tr><td><code>max_aspect_ratio</code></td><td>3</td><td>Max character aspect ratio</td></tr><tr><td><code>max_filled_area_portion</code></td><td>0.9</td><td>Max fill ratio</td></tr><tr><td><code>min_area</code></td><td>200</td><td>Min character filled area</td></tr><tr><td><code>cc_filtering</code></td><td>true</td><td>Enable contour proximity filter</td></tr><tr><td><code>cc_distance_threshold</code></td><td>50</td><td>Contour proximity distance</td></tr><tr><td><code>cc_min_comp_size</code></td><td>4000</td><td>Min size for reference contours</td></tr></tbody></table></div></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-15">
+        <div class="section-header" onclick="toggleSection(15)">
+            <h2 class="section-title">7. Alternative Approaches Considered</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Evaluated Alternatives</h3>
+<div class="text-content"><strong>A. Bounding Box Containment with Vertical Expansion</strong><br>
+<br>
+For each CRAFT component, expand its bounding box vertically by a configurable factor. Assign ink CCs by checking containment in the expanded bbox. Pro: simple and geometric. Con: axis-aligned boxes are crude; vertical expansion factor is hard to set globally.<br>
+<br>
+<strong>B. CRAFT Label Map Pixel-Level Overlap</strong><br>
+<br>
+Upscale the CRAFT watershed label map to image resolution and compute pixel overlap between each ink CC and each CRAFT region. Pro: spatially precise. Con: expensive (per-pixel mapping); does not solve the problem when the radical area has no CRAFT label (the root cause).<br>
+<br>
+<strong>C. Composite Similarity Score (Mahalanobis + Spatial)</strong><br>
+<br>
+Add a bbox overlap bonus to the Mahalanobis similarity: \(S = S_{\text{Maha}} + \alpha \cdot S_{\text{bbox}}\). Pro: builds on existing code. Con: still centroid-based; adds tuning complexity.<br>
+<br>
+<strong>D. Vertical Territory Assignment</strong><br>
+<br>
+Define character territories using midpoints between adjacent CRAFT bounding boxes. Pro: robust for columnar text. Con: requires column detection at a pipeline stage where it's not yet available.<br>
+<br>
+<strong>E. Modified Mahalanobis with Vertical Bias</strong><br>
+<br>
+Inflate the vertical component of the CRAFT inertia tensor: \(\Sigma' = \Sigma + \text{diag}(0, \sigma_v^2)\). Pro: minimal code change. Con: also extends reach in the wrong direction (upward); hard to tune.<br>
+<br>
+<strong>Why dual-threshold watershed was chosen</strong>: It addresses the root cause (restrictive watershed mask) rather than patching downstream assignment. It is model-independent, has a single interpretable parameter (\(\tau_m\)), and is fully backward-compatible.</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section collapsed" id="section-16">
+        <div class="section-header" onclick="toggleSection(16)">
+            <h2 class="section-title">8. Verification Plan</h2>
+            <div class="section-toggle">
+                <span class="toggle-text">Click to expand</span>
+                <div class="toggle-icon">▶</div>
+            </div>
+        </div>
+        <div class="section-content">
+            <div class="section-content-inner">
+                <h3 style="color: #555; margin: 25px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #eee;">Testing Steps</h3>
+<div class="text-content"><ol><li><strong>Backward compatibility</strong>: Run with <code>mask_threshold: null</code>, <code>link_threshold: null</code> and verify identical output to the unmodified pipeline.</li><li><strong>Visual inspection</strong>: Use <code>visualization.create_pipeline_summary()</code> to compare CRAFT components and similarity matching before and after on pages containing composite characters (蒸, 烝, 黑, 煮, 熟).</li><li><strong>Score map analysis</strong>: Visualize the CRAFT <code>score_text</code> heatmap for problematic characters to confirm that the radical area has scores in the 0.3–0.5 range (validating the threshold approach).</li><li><strong>Threshold sweep</strong>: Test <code>mask_threshold</code> in {0.2, 0.3, 0.4, 0.5} and monitor:<br>- Total CRAFT components per page<br>- Total final characters per page<br>- Radical misassignment rate (manual check)</li><li><strong>Over-merging check</strong>: Verify that adjacent characters with normal spacing are NOT merged at <code>mask_threshold = 0.3</code>.</li></ol></div>
+            </div>
+        </div>
+    </div>
+    
+    
+    <script>
+        // Toggle individual section
+        function toggleSection(index) {
+            const section = document.getElementById('section-' + index);
+            const toggleText = section.querySelector('.toggle-text');
+            
+            section.classList.toggle('collapsed');
+            section.classList.toggle('expanded');
+            
+            if (section.classList.contains('expanded')) {
+                toggleText.textContent = 'Click to collapse';
+            } else {
+                toggleText.textContent = 'Click to expand';
+            }
+        }
+        
+        // Expand all sections
+        function expandAll() {
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('collapsed');
+                section.classList.add('expanded');
+                const toggleText = section.querySelector('.toggle-text');
+                if (toggleText) toggleText.textContent = 'Click to collapse';
+            });
+        }
+        
+        // Collapse all sections
+        function collapseAll() {
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('expanded');
+                section.classList.add('collapsed');
+                const toggleText = section.querySelector('.toggle-text');
+                if (toggleText) toggleText.textContent = 'Click to expand';
+            });
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+                e.preventDefault();
+                expandAll();
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+                e.preventDefault();
+                collapseAll();
+            }
+        });
+    </script>
+</body>
+</html>

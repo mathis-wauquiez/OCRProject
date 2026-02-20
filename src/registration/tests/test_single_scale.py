@@ -15,8 +15,8 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    os.makedirs('code_tests', exist_ok=True)
-    os.makedirs('code_tests/single_scale_viz', exist_ok=True)
+    os.makedirs('outputs/tests/registration', exist_ok=True)
+    os.makedirs('outputs/tests/registration/single_scale_viz', exist_ok=True)
 
     def _to_numpy(img):
         """Convert BCHW → HWC and clamp for plotting."""
@@ -353,7 +353,7 @@ if __name__ == "__main__":
     ax6.set_title('Convergence: Iterations'); ax6.grid(True, alpha=0.3, axis='y')
 
     plt.tight_layout()
-    plt.savefig('code_tests/ic_benchmark_resolution.png', dpi=150, bbox_inches='tight')
+    plt.savefig('outputs/tests/registration/ic_benchmark_resolution.png', dpi=150, bbox_inches='tight')
     plt.show()
     print("\nSaved: ic_benchmark_resolution.png")
 
@@ -414,7 +414,7 @@ if __name__ == "__main__":
         ax.legend(); ax.grid(True, alpha=0.3, axis='y')
     axes[1].set_yscale('log')
     plt.tight_layout()
-    plt.savefig('code_tests/ic_benchmark_error_functions.png', dpi=150, bbox_inches='tight')
+    plt.savefig('outputs/tests/registration/ic_benchmark_error_functions.png', dpi=150, bbox_inches='tight')
     plt.show()
     print("\nSaved: ic_benchmark_error_functions.png")
 
@@ -463,7 +463,7 @@ if __name__ == "__main__":
 
             out_path = save_eval_plot(
                 I1=I1, I2=I2, T_hat=T_est, ic=ic,
-                save_dir="code_tests/single_scale_viz", tag=f"{size}_{grad_method}")
+                save_dir="outputs/tests/registration/single_scale_viz", tag=f"{size}_{grad_method}")
             print("Saved:", out_path)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
@@ -478,7 +478,7 @@ if __name__ == "__main__":
         ax.legend(); ax.grid(True, alpha=0.3, axis='y')
     axes[1].set_yscale('log')
     plt.tight_layout()
-    plt.savefig('code_tests/ic_benchmark_gradient_methods.png', dpi=150, bbox_inches='tight')
+    plt.savefig('outputs/tests/registration/ic_benchmark_gradient_methods.png', dpi=150, bbox_inches='tight')
     plt.show()
     print("\nSaved: ic_benchmark_gradient_methods.png")
 
@@ -518,7 +518,7 @@ if __name__ == "__main__":
         ax.annotate(f'{s}x{s}', (p, t), textcoords="offset points",
                     xytext=(0, 10), ha='center', fontsize=9)
     plt.tight_layout()
-    plt.savefig('code_tests/ic_benchmark_complexity.png', dpi=150, bbox_inches='tight')
+    plt.savefig('outputs/tests/registration/ic_benchmark_complexity.png', dpi=150, bbox_inches='tight')
     plt.show()
     print("\nSaved: ic_benchmark_complexity.png")
 

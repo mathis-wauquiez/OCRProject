@@ -192,9 +192,6 @@ metrics_dict = {
     'hausdorff': compute_hausdorff,
 }
 
-# Initialize the registered metric
-reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
-
 
 
 
@@ -204,31 +201,43 @@ reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
 #! ===============================
 
 def compute_distance_matrices_batched(
-    reg_metric, renderer, subdf, 
+    reg_metric, renderer, subdf,
     batch_size=64,   # pairs per batch — tune to your VRAM
     device='cuda',
-    use_tqdm=False
+    use_tqdm=False,
+    sym_registration=None,
 ):
     """
     Batched pairwise distance matrix computation.
-    
+
     Instead of N² sequential IC registrations, we batch pairs of images
     through the multiscale IC and compute all metrics in parallel.
+
+    Always computes only the upper triangle (i < j) and mirrors results,
+    since distance matrices are symmetric.
+
+    Args:
+        sym_registration: Whether to run reverse IC registration and average
+            forward + reverse metrics.  Defaults to ``reg_metric.sym``.
+            Set to ``False`` to halve GPU time by using forward-only
+            registration (Hausdorff is naturally symmetric on point sets;
+            the small asymmetry from warp direction is negligible for
+            same-cluster glyphs).
     """
+    if sym_registration is None:
+        sym_registration = reg_metric.sym
+
     indices = subdf.index.tolist()
     N = len(indices)
     metric_names = list(reg_metric.metrics.keys())
-    
+
     distance_matrices = {key: np.zeros((N, N)) for key in metric_names}
-    
-    # ── Build all (i, j) pairs with i < j (symmetric) ──────────────────
-    if reg_metric.sym:
-        pairs = [(i, j) for i in range(N) for j in range(i + 1, N)]
-    else:
-        pairs = [(i, j) for i in range(N) for j in range(N) if i != j]
-    
+
+    # ── Build upper-triangle pairs (i < j) ─────────────────────────────
+    pairs = [(i, j) for i in range(N) for j in range(i + 1, N)]
+
     n_pairs = len(pairs)
-    
+
     # ── Process in batches ──────────────────────────────────────────────
     it = range(0, n_pairs, batch_size)
     if use_tqdm:
@@ -236,11 +245,11 @@ def compute_distance_matrices_batched(
     for start in it:
         batch_pairs = pairs[start : start + batch_size]
         B = len(batch_pairs)
-        
+
         # Stack image pairs → (B, 1, H, W)
         I1_batch = torch.stack([renderer[indices[i]].to(device) for i, j in batch_pairs]).unsqueeze(1)
         I2_batch = torch.stack([renderer[indices[j]].to(device) for i, j in batch_pairs]).unsqueeze(1)
-        
+
         # ── Batched registration ────────────────────────────────────
         try:
             T = reg_metric.ic.run(I1_batch, I2_batch)  # (B,) transforms
@@ -249,32 +258,31 @@ def compute_distance_matrices_batched(
             for i_loc, j_loc in batch_pairs:
                 for key in metric_names:
                     distance_matrices[key][i_loc, j_loc] = 999
-                    if reg_metric.sym:
-                        distance_matrices[key][j_loc, i_loc] = 999
+                    distance_matrices[key][j_loc, i_loc] = 999
             continue
-        
+
         # Warp I2 → (B, 1, H, W)
         I2_warped = T.warp(I2_batch)[:, 0]          # (B, H, W)
-        
+
         # Visibility mask → (B, H, W)
         H, W = I1_batch.shape[2], I1_batch.shape[3]
         mask = T.visibility_mask(H, W, delta=0)      # (B, H, W)
         I2_warped[~mask] = 0
-        
+
         # Binarise
         I1_bin = (I1_batch[:, 0] > 0.5)              # (B, H, W)
         I2_bin = (I2_warped > 0.5)                    # (B, H, W)
-        
+
         # ── Batched metrics ─────────────────────────────────────────
         batch_metrics = _compute_metrics_batched(I1_bin, I2_bin, metric_names)
-        
+
         # ── Symmetrise: also register I2→I1 ─────────────────────────
-        if reg_metric.sym:
+        if sym_registration:
             try:
                 T_rev = reg_metric.ic.run(I2_batch, I1_batch)
             except Exception:
                 T_rev = None
-            
+
             if T_rev is not None:
                 I1_warped = T_rev.warp(I1_batch)[:, 0]
                 mask_rev = T_rev.visibility_mask(H, W, delta=0)
@@ -282,25 +290,24 @@ def compute_distance_matrices_batched(
                 I2_bin_rev = (I2_batch[:, 0] > 0.5)
                 I1_bin_rev = (I1_warped > 0.5)
                 batch_metrics_rev = _compute_metrics_batched(I2_bin_rev, I1_bin_rev, metric_names)
-                
+
                 # Average forward + reverse
                 for key in metric_names:
                     batch_metrics[key] = (batch_metrics[key] + batch_metrics_rev[key]) / 2
-        
-        # ── Write to distance matrices ──────────────────────────────
+
+        # ── Write to distance matrices (always mirror) ──────────────
         for k, (i_loc, j_loc) in enumerate(batch_pairs):
             for key in metric_names:
                 val = batch_metrics[key][k].item() if torch.is_tensor(batch_metrics[key]) else batch_metrics[key][k]
                 distance_matrices[key][i_loc, j_loc] = val
-                if reg_metric.sym:
-                    distance_matrices[key][j_loc, i_loc] = val
-    
+                distance_matrices[key][j_loc, i_loc] = val
+
     # ── Diagonal ────────────────────────────────────────────────────────
     for key in metric_names:
         if key in ('dice', 'jaccard'):
             np.fill_diagonal(distance_matrices[key], 1.0)
         # hamming=0, hausdorff=0 on diagonal (already zero from np.zeros)
-    
+
     return distance_matrices
 
 
