@@ -10,3 +10,13 @@ from .algorithms import (
     labelPropagationCommunityDetection,
     graphClustering,
 )
+
+from .nfa_clustering import (
+    HDBSCANClustering,
+    AffinityPropagationClustering,
+    HDBSCANNFACommunityDetection,
+    AffinityPropagationNFACommunityDetection,
+)
+
+from .mrf_refinement import MRFRefinementStep
+from .kmedoids_refinement import KMedoidsSplitMergeStep
