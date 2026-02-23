@@ -15,9 +15,6 @@ import torch
 import numpy as np
 import pandas as pd
 
-# sci
-from scipy.stats import entropy
-
 # path / typing
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -26,6 +23,8 @@ from typing import List, Dict, Optional
 from .feature_matching import featureMatching
 from .params import featureMatchingParameters
 from .clustering_sweep_report import ClusteringSweepReporter, UNKNOWN_LABEL
+from .graph import build_graph
+from .cluster_stats import compute_purity, compute_label_completeness
 
 # Reporting base
 from ..auto_report import AutoReport, ReportConfig, Theme
@@ -226,134 +225,22 @@ class graphClusteringSweep(AutoReport):
         )
 
     # ================================================================
-    #  Graph construction
+    #  Graph construction (delegates to clustering.graph)
     # ================================================================
 
     def get_graph(self, nlfa, dissimilarities, epsilon):
-        if self.edges_type == 'nlfa':
-            weight_matrix = nlfa
-        elif self.edges_type in ['dissim', 'dissimilarities']:
-            weight_matrix = dissimilarities
-        elif self.edges_type in ['link', 'constant']:
-            weight_matrix = torch.ones_like(nlfa)
-
-        return self._get_matrix_graph(
-            linkage_matrix=nlfa, threshold=epsilon,
-            weight_matrix=weight_matrix
-        )
-
-    def _get_matrix_graph(self, linkage_matrix, threshold, weight_matrix):
-        N = len(linkage_matrix)
-        if self.edges_type == 'nlfa':
-            threshold = -(np.log(threshold) - 2 * np.log(N))
-
-        connected = linkage_matrix >= threshold
-        if self.keep_reciprocal:
-            connected &= linkage_matrix.T >= threshold
-            weight_matrix = .5 * (weight_matrix + weight_matrix.T)
-
-        edges = torch.nonzero(connected, as_tuple=False)
-        edges = edges[edges[:, 0] != edges[:, 1]]
-        edges_list = [
-            (int(i.item()), int(j.item()), weight_matrix[i, j].item())
-            for i, j in edges
-        ]
-
-        G = nx.Graph()
-        G.add_nodes_from(range(N))
-        G.add_weighted_edges_from(edges_list)
-        return G, edges
+        return build_graph(nlfa, dissimilarities, epsilon,
+                           self.edges_type, self.keep_reciprocal)
 
     # ================================================================
-    #  Purity & representatives (pure computation)
+    #  Purity & completeness (delegates to clustering.cluster_stats)
     # ================================================================
 
     def _compute_purity_and_representatives(self, dataframe, membership_col):
-        purity_data = []
-        representatives = {}
-
-        for cluster, cluster_data in dataframe.groupby(membership_col):
-            cluster_size = len(cluster_data)
-            known_mask = cluster_data[self.target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
-            known_data = cluster_data[known_mask]
-            unknown_count = (~known_mask).sum()
-
-            label_counts = (
-                known_data[self.target_lbl].value_counts()
-                if len(known_data) > 0
-                else pd.Series(dtype=int)
-            )
-            if len(label_counts) > 0:
-                known_size = len(known_data)
-                label_probs = label_counts / known_size
-                cluster_entropy = entropy(label_probs, base=2)
-                cluster_ne = (cluster_entropy / np.log2(len(label_counts))
-                              if len(label_counts) > 1 else 0)
-                purity = label_counts.iloc[0] / known_size
-                dominant_label = label_counts.index[0]
-                unique_labels = len(label_counts)
-            else:
-                cluster_entropy = np.nan
-                cluster_ne = np.nan
-                purity = np.nan
-                dominant_label = UNKNOWN_LABEL
-                unique_labels = 0
-                label_counts = pd.Series(dtype=int)
-
-            label_representatives = {}
-            for label in label_counts.index:
-                if label == UNKNOWN_LABEL:
-                    continue
-                label_nodes = cluster_data[cluster_data[self.target_lbl] == label]
-                most_central_idx = label_nodes['degree_centrality'].idxmax()
-                label_representatives[label] = most_central_idx
-            representatives[cluster] = label_representatives
-
-            purity_data.append({
-                'Cluster': cluster,
-                'Size': cluster_size,
-                'Known_Size': len(known_data),
-                'Unknown_Count': unknown_count,
-                'Purity': purity,
-                'Entropy': cluster_entropy,
-                'Normalized entropy': cluster_ne,
-                'Dominant_Label': dominant_label,
-                'Unique_Labels': unique_labels,
-            })
-
-        purity_df = pd.DataFrame(purity_data)
-        purity_df.set_index('Cluster', inplace=True)
-        return purity_df, representatives
-
-    # ================================================================
-    #  Completeness (label-level stats)
-    # ================================================================
+        return compute_purity(dataframe, membership_col, self.target_lbl)
 
     def _compute_label_dataframe(self, dataframe):
-        label_data = []
-        known_df = dataframe[
-            dataframe[self.target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
-        ]
-        for label, label_rows in tqdm(known_df.groupby(self.target_lbl),
-                                      desc="Computing completeness", colour='blue'):
-            label_size = len(label_rows)
-            cluster_counts = label_rows['membership'].value_counts()
-            cluster_probs = cluster_counts / label_size
-            label_entropy = entropy(cluster_probs, base=2)
-            label_ne = (label_entropy / np.log2(len(cluster_counts))
-                        if len(cluster_counts) > 1 else 0)
-            best_share = cluster_counts.iloc[0] / label_size
-
-            label_data.append({
-                'Label': label,
-                'Size': label_size,
-                'Best share': best_share,
-                'Entropy': label_entropy,
-                'Normalized entropy': label_ne,
-                'Dominant_Cluster': cluster_counts.index[0],
-                'Unique_Clusters': len(cluster_counts)
-            })
-        return pd.DataFrame(label_data)
+        return compute_label_completeness(dataframe, self.target_lbl)
 
     # ================================================================
     #  report_graph: ALL computation, then ONE reporting call
