@@ -69,17 +69,9 @@ class HOG:
         self.dy_conv = dy_conv
         self.pre_gradient_conv = pre_gradient_conv
 
-    def preprocess(self, input):
-        preprocessed = self.pre_gradient_conv(input)
-        return self.dx_conv(preprocessed), self.dy_conv(preprocessed)
-
-    def normalize(self, patches):
-         # === UNUSED AT THE MOMENT ===
-        raise NotImplementedError
-        f = lambda patch: nn.functional.interpolate(patch, (self._params.psize, self._params.psize), mode='bilinear')
-
-        patches = [f(patch.unsqueeze(0)).squeeze(0) for patch in patches]
-        return torch.stack(patches)
+    def get_derivatives(self, input):
+        g_filtered = self.pre_gradient_conv(input)
+        return self.dx_conv(g_filtered), self.dy_conv(g_filtered)
 
     def compute_hog_histograms_trilinear(self, magn_patches, ori_patches):
         """
@@ -174,7 +166,7 @@ class HOG:
 
     def __call__(self, patches: Tensor):
         with torch.no_grad():
-            dx, dy = self.preprocess(patches) # B, C, H, W
+            dx, dy = self.get_derivatives(patches) # B, C, H, W
             magn = torch.sqrt(dx**2 + dy**2)
             # angle = torch.arctan2(dy, dx) / np.pi / 2 + .5
 

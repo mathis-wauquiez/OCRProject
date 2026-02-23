@@ -68,8 +68,20 @@ class graphClusteringSweep:
             grdt_sigmas: None | List[float] = None,
             nums_bins: None | List[int] = None,
 
-            # ── Injected components (instantiated externally, e.g. by Hydra) ──
-            reporter: Optional[ClusteringSweepReporter] = None,
+            # ── Cluster splitting parameters ──
+            split_thresholds: Optional[List[float]] = None,
+            split_linkage_method: str = 'average',
+            split_min_cluster_size: int = 2,
+            split_batch_size: int = 256,
+
+            # ── Post-split rematching parameters ──
+            rematch_max_cluster_size: int = 3,
+            rematch_pca_k: int = 2,
+            rematch_z_max: float = 4.0,
+            rematch_n_candidates: int = 5,
+            rematch_min_target_size: int = 10,
+
+            # ── Explicit refinement pipeline (overrides above if given) ──
             refinement_steps: Optional[list] = None,
 
             # ── Post-clustering refinement (optional) ──

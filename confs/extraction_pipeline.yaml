@@ -28,7 +28,7 @@ craftComponentAnalysisParams:
   # Dual-threshold watershed: allows basins to expand into moderate-score areas
   # where radicals of composite characters (e.g. 蒸) may have lower CRAFT scores.
   # Set to null to use text_threshold for both seeds and mask (original behavior).
-  mask_threshold: 0.3
+  mask_threshold: null
 
   # Link score combination: bridges gaps between sub-components of composite
   # characters using CRAFT's affinity map. Set to null to disable (recommended
