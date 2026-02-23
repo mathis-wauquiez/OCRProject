@@ -112,8 +112,7 @@ We provide evidence that the method adapts to other historical printed books.
 
 The paper is organised as follows.
 Section~\ref{sec:methodology} describes the pipeline.
-Section~\ref{sec:proposed-methods} outlines proposed extensions.
-Section~\ref{sec:experiments} details the evaluation protocol.
+Section~\ref{sec:experiments} details the evaluation protocol and ablation studies.
 Section~\ref{sec:conclusion} concludes.
 
 
@@ -124,19 +123,13 @@ Section~\ref{sec:conclusion} concludes.
 
 
 % ============================================================================
-%  3. Proposed Extensions
-% ============================================================================
-\input{proposed_methods}
-
-
-% ============================================================================
-%  4. Experiments
+%  3. Experiments
 % ============================================================================
 \input{experiments}
 
 
 % ============================================================================
-%  5. Conclusion
+%  4. Conclusion
 % ============================================================================
 \section{Conclusion}
 \label{sec:conclusion}
@@ -144,8 +137,7 @@ Section~\ref{sec:conclusion} concludes.
 We have presented a fully unsupervised pipeline for \emph{reverse typography}: the automatic reconstruction of a vectorised character glossary from historical printed books, respecting the original calligraphy.
 The method combines CRAFT text detection, affine scale-space vectorisation, \textit{a contrario} statistical matching, Leiden community detection, and a two-stage refinement pipeline (Hausdorff splitting followed by OCR-guided PCA rematching).
 Demonstrated on the \emph{Ying huan zhi lue}, an 1848 Chinese book in which every character was uniquely carved from woodblocks, the pipeline handles the full variability of historical printing without any annotated training data.
-The extensions outlined in Section~\ref{sec:proposed-methods}---alternative clustering strategies, principled refinement, registration-based template computation, and deformation-invariant features---provide directions for further improving the glossary quality.
-Future work will focus on cross-corpus generalisation and systematic comparison of these extensions through the ablation framework described in Section~\ref{sec:experiments}.
+Future work will focus on cross-corpus generalisation and on extending the feature representation to learned embeddings and deformation-invariant descriptors.
 
 
 % ============================================================================
@@ -155,7 +147,7 @@ Future work will focus on cross-corpus generalisation and systematic comparison 
 % \bibliography{references}  % uncomment when references.bib is available
 
 % ── Inline references for standalone compilation ──
-\begin{thebibliography}{18}
+\begin{thebibliography}{12}
 
 \bibitem{baek2019character}
 Baek, Y., Lee, B., Han, D., Yun, S., Lee, H.:
@@ -216,36 +208,6 @@ In: Proc.\ EMNLP-CoNLL, pp.~410--420 (2007)
 Rony, J., Kervadec, H.:
 Distorch: fast differentiable boundary distances.
 In: Proc.\ MIDL (2025)
-
-\bibitem{frey2007clustering}
-Frey, B.J., Dueck, D.:
-Clustering by passing messages between data points.
-Science \textbf{315}(5814), 972--976 (2007)
-
-\bibitem{mcinneshdbscan2017}
-McInnes, L., Healy, J., Astels, S.:
-hdbscan: Hierarchical density based clustering.
-J.\ Open Source Software \textbf{2}(11), 205 (2017)
-
-\bibitem{belongie2002shape}
-Belongie, S., Malik, J., Puzicha, J.:
-Shape matching and object recognition using shape contexts.
-IEEE Trans.\ PAMI \textbf{24}(4), 509--522 (2002)
-
-\bibitem{edelsbrunner2008persistent}
-Edelsbrunner, H., Harer, J.:
-Persistent homology---a survey.
-In: Surveys on Discrete and Computational Geometry, pp.~257--282. AMS (2008)
-
-\bibitem{learned2004data}
-Learned-Miller, E.:
-Data driven image models through continuous joint alignment.
-IEEE Trans.\ PAMI \textbf{28}(2), 236--250 (2006)
-
-\bibitem{yedidia2003understanding}
-Yedidia, J.S., Freeman, W.T., Weiss, Y.:
-Understanding belief propagation and its generalizations.
-In: Exploring AI in the New Millennium, pp.~239--269 (2003)
 
 \end{thebibliography}
 

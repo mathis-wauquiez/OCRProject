@@ -101,7 +101,7 @@ We report ARI, NMI, V-measure, and the number of clusters.
         A10 & HDBSCAN min\_samples & $\{1, 3, 5, 10, 15\}$ \\
         A11 & Refinement method & None, 2-stage, K-medoids, MRF, HDBSCAN \\
         A12 & MRF weight $\beta$ & $\{0.1, 0.5, 1, 2, 5\} / \text{med.\ NLFA}$ \\
-        A13 & Stage ablation & Full, $-$S1, $-$S2, $-$S3, none \\
+        A13 & Stage ablation & Full, $-$S1, $-$S2, none \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -154,4 +154,4 @@ We report the performance drop relative to per-corpus tuning, testing whether th
 
 \subsubsection{Scalability}
 
-The pipeline is run on subsets of increasing size ($n \in \{500, 1\text{k}, 2\text{k}, 5\text{k}, 10\text{k}, 15\text{k}\}$) to verify complexity bounds: NFA computation $O(N^2)$, HDBSCAN $O(N k + N \log N)$, MST alignment $O(mk \cdot HW)$ per cluster, MRF-BP $O(|\mathcal{E}| \cdot K \cdot T)$.
+The pipeline is run on subsets of increasing size ($n \in \{500, 1\text{k}, 2\text{k}, 5\text{k}, 10\text{k}, 15\text{k}\}$) to verify complexity bounds: NFA computation $O(N^2)$, Leiden community detection, Hausdorff splitting $O(m^2)$ per cluster, and PCA rematching.
