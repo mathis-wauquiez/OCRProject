@@ -34,7 +34,7 @@ def _find_chinese_font():
     return FontProperties()
 
 
-UNKNOWN_LABEL = '▯'  # U+25AF
+from .metrics import UNKNOWN_LABEL
 
 def plot_community_tsne(
     cluster_id,

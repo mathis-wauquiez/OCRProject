@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 from collections import defaultdict
 
-UNKNOWN_LABEL = '\u25af'  # ▯
+from .metrics import UNKNOWN_LABEL
 
 
 # ================================================================

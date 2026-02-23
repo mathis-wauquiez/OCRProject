@@ -22,28 +22,21 @@ from typing import List, Dict, Optional
 from .feature_matching import featureMatching
 from .params import featureMatchingParameters
 from .clustering_sweep_report import (
-    ClusteringSweepReporter, UNKNOWN_LABEL,
+    ClusteringSweepReporter,
     RefinementReport, ClusterQuality,
 )
 from .graph import build_graph
-from .cluster_stats import compute_purity, compute_label_completeness
-
-# Reporting base
-import logging
+from .metrics import UNKNOWN_LABEL, compute_metrics, compute_cluster_purity, compute_label_completeness
 
 # HOG
 from src.patch_processing.configs import get_hog_cfg
 from src.patch_processing.hog import HOG
 
-
 # Refinement pipeline
 from .refinement import (
     RefinementResult,
-    HausdorffSplitStep, OCRRematchStep, PCAZScoreRematchStep,
+    HausdorffSplitStep, PCAZScoreRematchStep,
 )
-
-# New refinement methods
-from .kmedoids_refinement import KMedoidsSplitMergeStep
 
 from tqdm import tqdm
 
@@ -68,20 +61,8 @@ class graphClusteringSweep:
             grdt_sigmas: None | List[float] = None,
             nums_bins: None | List[int] = None,
 
-            # ── Cluster splitting parameters ──
-            split_thresholds: Optional[List[float]] = None,
-            split_linkage_method: str = 'average',
-            split_min_cluster_size: int = 2,
-            split_batch_size: int = 256,
-
-            # ── Post-split rematching parameters ──
-            rematch_max_cluster_size: int = 3,
-            rematch_pca_k: int = 2,
-            rematch_z_max: float = 4.0,
-            rematch_n_candidates: int = 5,
-            rematch_min_target_size: int = 10,
-
-            # ── Explicit refinement pipeline (overrides above if given) ──
+            # ── Injected components (instantiated externally, e.g. by Hydra) ──
+            reporter: Optional[ClusteringSweepReporter] = None,
             refinement_steps: Optional[list] = None,
 
             # ── Post-clustering refinement (optional) ──
@@ -146,7 +127,6 @@ class graphClusteringSweep:
             target_labels = target_labels[mask]
             membership = [m for m, keep in zip(membership, mask) if keep]
 
-        from .metrics import compute_metrics
         return compute_metrics(
             reference_labels=target_labels,
             predicted_labels=membership
@@ -161,11 +141,11 @@ class graphClusteringSweep:
                            self.edges_type, self.keep_reciprocal)
 
     # ================================================================
-    #  Purity & completeness (delegates to clustering.cluster_stats)
+    #  Purity & completeness (delegates to clustering.metrics)
     # ================================================================
 
     def _compute_purity_and_representatives(self, dataframe, membership_col):
-        return compute_purity(dataframe, membership_col, self.target_lbl)
+        return compute_cluster_purity(dataframe, membership_col, self.target_lbl)
 
     def _compute_label_dataframe(self, dataframe):
         return compute_label_completeness(dataframe, self.target_lbl)

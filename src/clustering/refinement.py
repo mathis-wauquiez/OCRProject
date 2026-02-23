@@ -31,8 +31,7 @@ from .bin_image_metrics import (
     compute_hausdorff,
     registeredMetric,
 )
-
-UNKNOWN_LABEL = '\u25af'  # ▯
+from .metrics import UNKNOWN_LABEL
 
 
 # ════════════════════════════════════════════════════════════════════

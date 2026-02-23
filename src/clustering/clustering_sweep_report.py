@@ -26,8 +26,7 @@ from .graph_visu import (
     purity_figure, completeness_figure, report_community, plot_nearest_neighbors,
 )
 from .tsne_plot import plot_community_tsne
-
-UNKNOWN_LABEL = '\u25af'  # ▯
+from .metrics import UNKNOWN_LABEL
 
 
 # ════════════════════════════════════════════════════════════════════
