@@ -76,7 +76,7 @@
         (pcarematch) {PCA z-score rematching};
 
     % ── Output ──
-    \node[io, below=0.5cm of pcarematch] (output) {Character clusters};
+    \node[io, below=0.5cm of pcarematch] (output) {Vectorised character glossary};
 
     % ── Arrows ──
     \draw[arrow] (input) -- (extraction);
@@ -97,8 +97,8 @@
 
     \end{tikzpicture}%
     }
-    \caption{Overview of the character clustering pipeline.
-    Scanned page images are processed through four sequential stages to produce clusters of visually similar character glyphs.
+    \caption{Overview of the reverse typography pipeline.
+    Scanned page images are processed through four sequential stages to produce a vectorised character glossary.
     Stages are annotated with their computational scope (per-page vs.\ global) and primary hardware usage.}
     \label{fig:pipeline-overview}
 \end{figure}
