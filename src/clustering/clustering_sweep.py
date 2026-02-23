@@ -27,7 +27,6 @@ from .graph import build_graph
 from .cluster_stats import compute_purity, compute_label_completeness
 
 # Reporting base
-from ..auto_report import AutoReport, ReportConfig, Theme
 import logging
 
 # HOG
@@ -47,7 +46,7 @@ from .kmedoids_refinement import KMedoidsSplitMergeStep
 from tqdm import tqdm
 
 
-class graphClusteringSweep(AutoReport):
+class graphClusteringSweep:
     def __init__(
             self,
             feature: str,
@@ -102,23 +101,6 @@ class graphClusteringSweep(AutoReport):
 
             enable_glossary: bool = False,
     ):
-        config = ReportConfig(
-            dpi=image_dpi,
-            output_format='jpeg' if use_jpeg else 'png',
-            image_quality=jpeg_quality,
-            theme=Theme.DEFAULT,
-            show_progress=False,
-            max_image_size=(1920, 1080),
-            include_toc=True
-        )
-        super().__init__(
-            title="Clustering Sweep",
-            author="Mathis",
-            output_dir=Path(output_dir) / "reports",
-            config=config,
-            log_level=logging.INFO
-        )
-
         featureMatcher = featureMatching(featureMatchingParameters(
             metric=metric, epsilon=epsilons[0], partial_output=False
         ))
@@ -166,12 +148,6 @@ class graphClusteringSweep(AutoReport):
 
         self.enable_glossary             = enable_glossary
 
-        self.embed_images   = embed_images
-        self.image_dpi      = image_dpi
-        self.thumbnail_dpi  = thumbnail_dpi
-        self.use_jpeg       = use_jpeg
-        self.jpeg_quality   = jpeg_quality
-
         # ── Build refinement pipeline ──────────────────────────────────────
         # If an explicit list is provided, use it; otherwise build from params.
         if refinement_steps is not None:
@@ -199,14 +175,17 @@ class graphClusteringSweep(AutoReport):
             ))
             self.refinement_steps = steps
 
-        self.report_name   = self.metadata.report_id
-        self.image_counter = 0
-        if not self.embed_images:
-            self.assets_dir = self.output_dir / f"assets_{self.report_name}"
-            self.assets_dir.mkdir(parents=True, exist_ok=True)
-
-        # ── Create the reporter ──
-        self.reporter = ClusteringSweepReporter(self)
+        # ── Create the reporter (owns the AutoReport) ──
+        self.reporter = ClusteringSweepReporter(
+            target_lbl=self.target_lbl,
+            split_linkage_method=self.split_linkage_method,
+            split_thresholds=self.split_thresholds,
+            embed_images=embed_images,
+            image_dpi=image_dpi,
+            use_jpeg=use_jpeg,
+            jpeg_quality=jpeg_quality,
+            output_dir=str(Path(output_dir) / "reports"),
+        )
 
     # ================================================================
     #  Evaluation
@@ -371,11 +350,22 @@ class graphClusteringSweep(AutoReport):
             representatives = pre_representatives
 
         # ── 6. Post-split metrics & label completeness ──
+        _to_list = lambda m: m if isinstance(m, list) else m.tolist()
         best_metrics = self._evaluate_membership(
             target_labels=dataframe[self.target_lbl],
             membership=dataframe['membership'].tolist()
         )
         label_dataframe = self._compute_label_dataframe(dataframe)
+
+        # Pre/post split metrics for the split comparison report
+        pre_split_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl],
+            membership=_to_list(pre_split_membership),
+        )
+        post_split_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl],
+            membership=_to_list(post_split_membership),
+        )
 
         # ── 7. Delegate ALL reporting in one call ──
         self.reporter.report_graph_results(
@@ -398,6 +388,9 @@ class graphClusteringSweep(AutoReport):
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
+            feature_matcher=self.featureMatcher,
+            pre_split_metrics=pre_split_metrics,
+            post_split_metrics=post_split_metrics,
             refinement_results=refinement_results,
             refinement_step_names=refinement_step_names,
             chat_split_log=chat_split_log,

@@ -2,13 +2,16 @@
 ClusteringSweepReporter — All figure creation, HTML assembly, and section-based
 report generation for the clustering sweep.
 
-Holds a back-reference to the parent sweep object for config access
-and AutoReport method delegation.
+Inherits AutoReport directly, so it owns the report.  The parent sweep
+constructs it with explicit configuration; no back-reference needed.
 """
 
 import io
 import base64
+import logging
 import warnings
+from pathlib import Path
+from typing import Optional, List
 
 import numpy as np
 import pandas as pd
@@ -16,6 +19,7 @@ import matplotlib.pyplot as plt
 from scipy.stats import entropy
 from tqdm import tqdm
 
+from ..auto_report import AutoReport, ReportConfig, Theme
 from .graph_visu import (
     matches_per_threshold, random_match_figure, size_distribution_figure,
     purity_figure, completeness_figure, report_community, plot_nearest_neighbors,
@@ -37,27 +41,62 @@ def _get_b64(fig, dpi=75):
     return img_str
 
 
-class ClusteringSweepReporter:
+class ClusteringSweepReporter(AutoReport):
     """
     Encapsulates every reporting / visualisation method for the clustering sweep.
 
-    Parameters
-    ----------
-    sweep : graphClusteringSweep
-        The parent sweep object (inherits AutoReport).
-        Used for config values and ``report_*()`` delegation.
+    Inherits from ``AutoReport`` so it *owns* the report directly (sections,
+    items, HTML generation).  Configuration values that the reporter needs are
+    passed explicitly at construction time — no back-reference to the sweep.
     """
 
-    def __init__(self, sweep):
-        self.sweep = sweep
+    def __init__(
+        self,
+        *,
+        target_lbl: str,
+        split_linkage_method: str,
+        split_thresholds: List[float],
+        # image / file config
+        embed_images: bool = False,
+        image_dpi: int = 100,
+        use_jpeg: bool = True,
+        jpeg_quality: int = 70,
+        # AutoReport passthrough
+        output_dir: str = "./outputs/clustering/results/reports",
+        report_config: Optional[ReportConfig] = None,
+    ):
+        if report_config is None:
+            report_config = ReportConfig(
+                dpi=image_dpi,
+                output_format='jpeg' if use_jpeg else 'png',
+                image_quality=jpeg_quality,
+                theme=Theme.DEFAULT,
+                show_progress=False,
+                max_image_size=(1920, 1080),
+                include_toc=True,
+            )
+        super().__init__(
+            title="Clustering Sweep",
+            author="Mathis",
+            output_dir=Path(output_dir),
+            config=report_config,
+            log_level=logging.INFO,
+        )
 
-    # ── Convenience delegates to AutoReport ──────────────────────────
+        self.target_lbl = target_lbl
+        self.split_linkage_method = split_linkage_method
+        self.split_thresholds = split_thresholds
 
-    def _report(self, *a, **kw):          return self.sweep.report(*a, **kw)
-    def _report_figure(self, *a, **kw):   return self.sweep.report_figure(*a, **kw)
-    def _report_table(self, *a, **kw):    return self.sweep.report_table(*a, **kw)
-    def _report_raw_html(self, *a, **kw): return self.sweep.report_raw_html(*a, **kw)
-    def _section(self, *a, **kw):         return self.sweep.section(*a, **kw)
+        self.embed_images = embed_images
+        self.image_dpi = image_dpi
+        self.use_jpeg = use_jpeg
+        self.jpeg_quality = jpeg_quality
+
+        self.report_name = self.metadata.report_id
+        self.image_counter = 0
+        if not self.embed_images:
+            self.assets_dir = self.output_dir / f"assets_{self.report_name}"
+            self.assets_dir.mkdir(parents=True, exist_ok=True)
 
     # ================================================================
     #  Figure saving (external file or embedded base64)
@@ -65,41 +104,41 @@ class ClusteringSweepReporter:
 
     def _save_figure(self, fig, prefix="fig"):
         """Save figure efficiently.  Returns an HTML ``<img>`` tag."""
-        self.sweep.image_counter += 1
+        self.image_counter += 1
 
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', message='Glyph.*missing from font')
 
-            if self.sweep.embed_images:
+            if self.embed_images:
                 buf = io.BytesIO()
-                fmt = 'jpeg' if self.sweep.use_jpeg else 'png'
+                fmt = 'jpeg' if self.use_jpeg else 'png'
                 save_kwargs = {'format': fmt, 'bbox_inches': 'tight',
-                               'dpi': self.sweep.image_dpi}
-                if self.sweep.use_jpeg:
-                    save_kwargs['pil_kwargs'] = {'quality': self.sweep.jpeg_quality}
+                               'dpi': self.image_dpi}
+                if self.use_jpeg:
+                    save_kwargs['pil_kwargs'] = {'quality': self.jpeg_quality}
 
                 fig.savefig(buf, **save_kwargs)
                 buf.seek(0)
                 img_str = base64.b64encode(buf.read()).decode()
                 plt.close(fig)
 
-                mime = 'jpeg' if self.sweep.use_jpeg else 'png'
+                mime = 'jpeg' if self.use_jpeg else 'png'
                 return (f'<img src="data:image/{mime};base64,{img_str}" '
                         f'style="max-width: 100%; height: auto;" loading="lazy">')
             else:
-                ext = 'jpg' if self.sweep.use_jpeg else 'png'
-                filename = f"{prefix}_{self.sweep.image_counter:04d}.{ext}"
-                filepath = self.sweep.assets_dir / filename
+                ext = 'jpg' if self.use_jpeg else 'png'
+                filename = f"{prefix}_{self.image_counter:04d}.{ext}"
+                filepath = self.assets_dir / filename
 
-                save_kwargs = {'format': 'jpeg' if self.sweep.use_jpeg else 'png',
-                               'bbox_inches': 'tight', 'dpi': self.sweep.image_dpi}
-                if self.sweep.use_jpeg:
-                    save_kwargs['pil_kwargs'] = {'quality': self.sweep.jpeg_quality}
+                save_kwargs = {'format': 'jpeg' if self.use_jpeg else 'png',
+                               'bbox_inches': 'tight', 'dpi': self.image_dpi}
+                if self.use_jpeg:
+                    save_kwargs['pil_kwargs'] = {'quality': self.jpeg_quality}
 
                 fig.savefig(filepath, **save_kwargs)
                 plt.close(fig)
 
-                return (f'<img src="assets_{self.sweep.report_name}/{filename}" '
+                return (f'<img src="assets_{self.report_name}/{filename}" '
                         f'style="max-width: 100%; height: auto;" loading="lazy">')
 
     # ================================================================
@@ -112,8 +151,8 @@ class ClusteringSweepReporter:
             results_df.groupby('hog_config')['adjusted_rand_index'].idxmax()
         ].sort_values('adjusted_rand_index', ascending=False)
 
-        with self._section("HOG Configuration Sweep"):
-            self._report_table(best_per_config,
+        with self.section("HOG Configuration Sweep"):
+            self.report_table(best_per_config,
                                title="Best Results per HOG Configuration")
 
             for config_name in hog_configs:
@@ -127,17 +166,17 @@ class ClusteringSweepReporter:
                     pivot = subset.pivot_table(
                         values=metric, index='gamma', columns='epsilon'
                     )
-                    self._report_table(
+                    self.report_table(
                         pivot, title=f'{metric} (gamma × epsilon) — {config_name}'
                     )
 
                 # Per-config parameter heatmaps (ε × γ grids for all metrics)
                 heatmap_subset = subset[['epsilon', 'gamma'] + metric_names]
                 fig = self.report_parameter_heatmaps(heatmap_subset)
-                self._report_figure(fig, title=f"Parameter Heatmaps — {config_name}")
+                self.report_figure(fig, title=f"Parameter Heatmaps — {config_name}")
 
             fig = self._hog_comparison_heatmaps(results_df)
-            self._report_figure(fig, title="HOG Configuration Comparison")
+            self.report_figure(fig, title="HOG Configuration Comparison")
 
     def _hog_comparison_heatmaps(self, results_df):
         import seaborn as sns
@@ -270,7 +309,7 @@ class ClusteringSweepReporter:
             </div>
         </div>
         """
-        self._report_raw_html(topo_html, title="Graph Topology Summary")
+        self.report_raw_html(topo_html, title="Graph Topology Summary")
 
         # Degree distribution histogram
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
@@ -293,7 +332,7 @@ class ClusteringSweepReporter:
         ax.grid(alpha=0.3)
 
         plt.tight_layout()
-        self._report_figure(fig, title="Degree Distribution")
+        self.report_figure(fig, title="Degree Distribution")
 
     # ================================================================
     #  Executive summary card
@@ -343,14 +382,14 @@ class ClusteringSweepReporter:
             </div>
         </div>
         """
-        self._report_raw_html(summary_html, title="Executive Summary")
+        self.report_raw_html(summary_html, title="Executive Summary")
 
     # ================================================================
     #  Split threshold sweep
     # ================================================================
 
     def report_split_sweep(self, sweep_results_df, best_threshold):
-        self._report_table(
+        self.report_table(
             sweep_results_df.set_index('split_threshold'),
             title="Split Threshold Sweep — All Metrics"
         )
@@ -386,14 +425,15 @@ class ClusteringSweepReporter:
         ax.legend(); ax.grid(alpha=0.3)
 
         plt.tight_layout()
-        self._report_figure(fig, title="Split Threshold Sweep")
+        self.report_figure(fig, title="Split Threshold Sweep")
 
     # ================================================================
     #  Before / after split comparison
     # ================================================================
 
     def report_split_comparison(self, dataframe, pre_membership, post_membership,
-                                split_log, best_threshold):
+                                split_log, best_threshold,
+                                pre_metrics, post_metrics):
         split_log_df = pd.DataFrame(split_log)
 
         n_pre   = len(np.unique(pre_membership))
@@ -406,8 +446,8 @@ class ClusteringSweepReporter:
                     color: white; padding: 30px; border-radius: 10px; margin: 20px 0;">
             <h2 style="margin: 0 0 15px 0;">🔪 Cluster Splitting Summary</h2>
             <p>Best threshold: <strong>{best_threshold}</strong> |
-               Linkage: <strong>{self.sweep.split_linkage_method}</strong> |
-               Swept {len(self.sweep.split_thresholds)} threshold(s)</p>
+               Linkage: <strong>{self.split_linkage_method}</strong> |
+               Swept {len(self.split_thresholds)} threshold(s)</p>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 15px;">
                 <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
                     <h4 style="margin:0;">Before</h4><p style="font-size:1.8em; margin:5px 0;">{n_pre}</p><small>clusters</small></div>
@@ -420,13 +460,13 @@ class ClusteringSweepReporter:
             </div>
         </div>
         """
-        self._report_raw_html(summary_html, title="Cluster Splitting Summary")
+        self.report_raw_html(summary_html, title="Cluster Splitting Summary")
 
         actually_split = split_log_df[split_log_df['n_subclusters'] > 1].sort_values(
             'n_subclusters', ascending=False
         )
         if len(actually_split) > 0:
-            self._report_table(actually_split, title="Clusters That Were Split")
+            self.report_table(actually_split, title="Clusters That Were Split")
 
         # Size distributions
         fig, axes = plt.subplots(1, 2, figsize=(16, 5))
@@ -441,7 +481,7 @@ class ClusteringSweepReporter:
             ax.set_xlabel('Cluster size'); ax.set_ylabel('Count')
             ax.set_yscale('log')
         plt.tight_layout()
-        self._report_figure(fig, title="Size Distribution: Before vs After Splitting")
+        self.report_figure(fig, title="Size Distribution: Before vs After Splitting")
 
         # Sub-cluster count distribution
         fig, ax = plt.subplots(figsize=(10, 4))
@@ -452,19 +492,10 @@ class ClusteringSweepReporter:
         ax.set_title('Distribution of Split Degree')
         ax.set_xticks(sc.index)
         plt.tight_layout()
-        self._report_figure(fig, title="How Many Sub-Clusters Per Original Cluster")
+        self.report_figure(fig, title="How Many Sub-Clusters Per Original Cluster")
 
         # Metrics comparison
-        _to_list = lambda m: m if isinstance(m, list) else m.tolist()
-        pre_metrics = self.sweep._evaluate_membership(
-            target_labels=dataframe[self.sweep.target_lbl],
-            membership=_to_list(pre_membership)
-        )
-        post_metrics = self.sweep._evaluate_membership(
-            target_labels=dataframe[self.sweep.target_lbl],
-            membership=_to_list(post_membership)
-        )
-        self._report_table(
+        self.report_table(
             pd.DataFrame({'Before Split': pre_metrics, 'After Split': post_metrics}).T,
             title="Clustering Metrics: Before vs After Splitting"
         )
@@ -479,12 +510,12 @@ class ClusteringSweepReporter:
             'original_size', ascending=False
         )
         if len(actually_split) == 0:
-            self._report_raw_html('<p>No clusters were split at this threshold.</p>',
+            self.report_raw_html('<p>No clusters were split at this threshold.</p>',
                                   title="Split Visualization")
             return
 
         max_thumbs = 12
-        target_lbl = self.sweep.target_lbl
+        target_lbl = self.target_lbl
         vis_html = '<div style="display: grid; gap: 40px;">'
 
         for _, row in tqdm(actually_split.iterrows(), total=len(actually_split),
@@ -537,7 +568,7 @@ class ClusteringSweepReporter:
 
             vis_html += '</div></div>'
         vis_html += '</div>'
-        self._report_raw_html(vis_html, title=f"Split Visualization (threshold={best_threshold})")
+        self.report_raw_html(vis_html, title=f"Split Visualization (threshold={best_threshold})")
 
     # ================================================================
     #  Per-cluster section (representatives + t-SNE)
@@ -545,7 +576,7 @@ class ClusteringSweepReporter:
 
     def report_clusters_section(self, dataframe, membership_col, purity_dataframe,
                                 representatives, graph, title_prefix):
-        target_lbl = self.sweep.target_lbl
+        target_lbl = self.target_lbl
 
         if membership_col != 'membership':
             df_view = dataframe.copy(deep=False)
@@ -586,7 +617,7 @@ class ClusteringSweepReporter:
             clusters_html += '</div>'
 
         clusters_html += '</div>'
-        self._report_raw_html(clusters_html,
+        self.report_raw_html(clusters_html,
                               title=f"{title_prefix} ({len(cluster_sizes)} clusters)")
 
     # ================================================================
@@ -597,7 +628,7 @@ class ClusteringSweepReporter:
                                    best_metrics, nlfa, best_epsilon, best_gamma,
                                    best_threshold):
         """Returns hapax_df (singleton-cluster rows)."""
-        target_lbl = self.sweep.target_lbl
+        target_lbl = self.target_lbl
 
         best_metrics_df = pd.DataFrame([{
             'epsilon': best_epsilon, 'gamma': best_gamma,
@@ -608,8 +639,8 @@ class ClusteringSweepReporter:
         hapax_clusters = cluster_sizes[cluster_sizes == 1].index
         hapax_df = dataframe[dataframe['membership'].isin(hapax_clusters)]
 
-        with self._section("Summary & Metrics"):
-            self._report_table(
+        with self.section("Summary & Metrics"):
+            self.report_table(
                 best_metrics_df.T,
                 title=f'Best Parameters (ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_t={best_threshold})'
             )
@@ -617,24 +648,24 @@ class ClusteringSweepReporter:
                 dataframe, purity_dataframe, label_dataframe,
                 best_epsilon, best_gamma, best_split_threshold=best_threshold
             )
-            self._report(matches_per_threshold(nlfa, best_epsilon),
+            self.report(matches_per_threshold(nlfa, best_epsilon),
                          title="Average number of matches = f(epsilon)")
-            self._report(size_distribution_figure(dataframe['membership'],
+            self.report(size_distribution_figure(dataframe['membership'],
                                                   dataframe[target_lbl]),
                          title="Cluster Size Distribution")
-            self._report_figure(purity_figure(purity_dataframe),
+            self.report_figure(purity_figure(purity_dataframe),
                                 title="Purity of the clusters")
-            self._report_figure(completeness_figure(label_dataframe),
+            self.report_figure(completeness_figure(label_dataframe),
                                 title="Completeness")
 
-            self._report_table(pd.DataFrame({
+            self.report_table(pd.DataFrame({
                 'Count': [len(hapax_df)],
                 'Percentage': [100 * len(hapax_df) / len(dataframe)],
                 'Unique_Labels': [hapax_df[target_lbl].nunique()]
             }), title="Hapax (Singleton Clusters)")
 
             unknown_df = dataframe[dataframe[target_lbl] == UNKNOWN_LABEL]
-            self._report_table(pd.DataFrame({
+            self.report_table(pd.DataFrame({
                 'Total Unknown': [len(unknown_df)],
                 'Percentage': [100 * len(unknown_df) / len(dataframe)],
                 'Clusters Containing Unknown': [unknown_df['membership'].nunique()],
@@ -650,9 +681,10 @@ class ClusteringSweepReporter:
     #  Examples section
     # ================================================================
 
-    def report_examples(self, dataframe, dissimilarities, graph, best_epsilon):
+    def report_examples(self, dataframe, dissimilarities, graph, best_epsilon,
+                        feature_matcher):
         rng = np.random.RandomState(42)
-        with self._section("Examples"):
+        with self.section("Examples"):
             # Nearest-neighbor examples
             nn_html = '<div style="display: grid; gap: 30px;">'
             for i in tqdm(range(30), desc="Random NN examples", colour='cyan'):
@@ -666,13 +698,13 @@ class ClusteringSweepReporter:
                     {self._save_figure(fig, prefix="nn_example")}
                 </div>'''
             nn_html += '</div>'
-            self._report_raw_html(nn_html, title="Random Nearest Neighbor Examples (30 samples)")
+            self.report_raw_html(nn_html, title="Random Nearest Neighbor Examples (30 samples)")
 
             # Random match examples
             match_html = '<div style="display: grid; gap: 30px;">'
             for i in tqdm(range(30), desc="Random match figures", colour='yellow'):
                 fig1, fig2, idx = random_match_figure(
-                    self.sweep.featureMatcher, dataframe['histogram'],
+                    feature_matcher, dataframe['histogram'],
                     best_epsilon, svgs=dataframe['svg']
                 )
                 match_html += f'''
@@ -686,17 +718,17 @@ class ClusteringSweepReporter:
                     </div>
                 </div>'''
             match_html += '</div>'
-            self._report_raw_html(match_html, title="Random Match Examples (30 samples)")
+            self.report_raw_html(match_html, title="Random Match Examples (30 samples)")
 
     # ================================================================
     #  Hapax analysis section
     # ================================================================
 
     def report_hapax(self, dataframe, hapax_df, dissimilarities, graph):
-        target_lbl = self.sweep.target_lbl
+        target_lbl = self.target_lbl
         rng = np.random.RandomState(42)
 
-        with self._section("Hapax Analysis"):
+        with self.section("Hapax Analysis"):
             idxs = list(rng.permutation(hapax_df.index))[:10]
             hapax_nn_html = '<div style="display: grid; gap: 30px;">'
             for idx in tqdm(idxs, desc="Hapax NN examples", colour='red'):
@@ -709,7 +741,7 @@ class ClusteringSweepReporter:
                     <img src="data:image/png;base64,{_get_b64(fig)}" style="max-width: 100%; height: auto;">
                 </div>'''
             hapax_nn_html += '</div>'
-            self._report_raw_html(hapax_nn_html,
+            self.report_raw_html(hapax_nn_html,
                                   title="Hapax Nearest Neighbor Examples (10 samples)")
 
             # All hapax thumbnails
@@ -725,7 +757,7 @@ class ClusteringSweepReporter:
                     <div style="font-size: 9px; color: #666;">idx: {idx}</div>
                 </div>''')
             parts.append('</div>')
-            self._report_raw_html(''.join(parts), title=f"All Hapax ({len(hapax_df)} items)")
+            self.report_raw_html(''.join(parts), title=f"All Hapax ({len(hapax_df)} items)")
 
     # ================================================================
     #  Master orchestrator
@@ -745,7 +777,7 @@ class ClusteringSweepReporter:
             return
 
         if not log:
-            self._report_raw_html(
+            self.report_raw_html(
                 f'<p>No actions taken by <strong>{step_name}</strong>.</p>',
                 title=f"Refinement: {step_name}"
             )
@@ -781,8 +813,8 @@ class ClusteringSweepReporter:
             </div>
         </div>
         """
-        self._report_raw_html(summary_html, title=f"Refinement: {step_name}")
-        self._report_table(log_df, title=f"{step_name} — merge log")
+        self.report_raw_html(summary_html, title=f"Refinement: {step_name}")
+        self.report_table(log_df, title=f"{step_name} — merge log")
 
     # ================================================================
     #  Label fragmentation reporting
@@ -790,7 +822,7 @@ class ClusteringSweepReporter:
 
     def report_fragmentation(self, dataframe, label_dataframe):
         """Report labels that are split across multiple clusters."""
-        target_lbl = self.sweep.target_lbl
+        target_lbl = self.target_lbl
 
         fragmented = label_dataframe[
             (label_dataframe['Unique_Clusters'] > 1) &
@@ -798,7 +830,7 @@ class ClusteringSweepReporter:
         ].sort_values('Unique_Clusters', ascending=False)
 
         if len(fragmented) == 0:
-            self._report_raw_html(
+            self.report_raw_html(
                 '<p>No fragmented labels — every known label is in a single cluster.</p>',
                 title="Label Fragmentation"
             )
@@ -819,8 +851,8 @@ class ClusteringSweepReporter:
                best share = {worst['Best share']:.0%})</p>
         </div>
         """
-        self._report_raw_html(summary_html, title="Fragmentation Summary")
-        self._report_table(
+        self.report_raw_html(summary_html, title="Fragmentation Summary")
+        self.report_table(
             fragmented.set_index('Label'),
             title=f"Fragmented Labels ({n_frag} labels across >1 cluster)"
         )
@@ -868,11 +900,7 @@ class ClusteringSweepReporter:
             </div>'''
 
         vis_html += '</div>'
-        self._report_raw_html(vis_html, title="Top Fragmented Labels (visual)")
-
-    # ================================================================
-    #  Methodology report
-    # ================================================================
+        self.report_raw_html(vis_html, title="Top Fragmented Labels (visual)")
 
     # ================================================================
     #  Master orchestrator
@@ -886,6 +914,8 @@ class ClusteringSweepReporter:
                              purity_dataframe, representatives,
                              pre_purity_df, pre_representatives,
                              best_metrics, label_dataframe,
+                             feature_matcher,
+                             pre_split_metrics=None, post_split_metrics=None,
                              refinement_results=None, refinement_step_names=None,
                              chat_split_log=None, hapax_log=None,
                              glossary_df=None):
@@ -899,7 +929,7 @@ class ClusteringSweepReporter:
             refinement_step_names = []
 
         # Section 1: Graph topology + best-config summary
-        with self._section("Graph Topology"):
+        with self.section("Graph Topology"):
             self.report_graph_topology(graph, best_epsilon, best_gamma)
 
             # Best-config parameter summary for quick reference
@@ -919,10 +949,10 @@ class ClusteringSweepReporter:
                 </table>
             </div>
             """
-            self._report_raw_html(config_html, title="Best Configuration Parameters")
+            self.report_raw_html(config_html, title="Best Configuration Parameters")
 
         # Section 2: Pre-split clusters
-        with self._section("Clusters (Pre-Split)"):
+        with self.section("Clusters (Pre-Split)"):
             self.report_clusters_section(
                 dataframe, 'membership_pre_split', pre_purity_df,
                 pre_representatives, graph,
@@ -931,24 +961,25 @@ class ClusteringSweepReporter:
 
         # Section 3: Cluster splitting (Hausdorff-specific)
         if did_split and best_split_log is not None:
-            with self._section("Cluster Splitting"):
-                if sweep_results_df is not None and len(self.sweep.split_thresholds) > 1:
+            with self.section("Cluster Splitting"):
+                if sweep_results_df is not None and len(self.split_thresholds) > 1:
                     self.report_split_sweep(sweep_results_df, best_threshold)
                 self.report_split_comparison(
                     dataframe, pre_split_membership, post_split_membership,
-                    best_split_log, best_threshold
+                    best_split_log, best_threshold,
+                    pre_metrics=pre_split_metrics, post_metrics=post_split_metrics,
                 )
                 self.report_split_visualization(dataframe, best_split_log, best_threshold)
 
         # Section 4: Per-refinement-step reports (rematch steps)
         if refinement_results:
-            with self._section("Refinement Steps"):
+            with self.section("Refinement Steps"):
                 for name, result in zip(refinement_step_names, refinement_results):
                     self.report_refinement_step(name, result, dataframe)
 
         # Section 5: Post-refinement clusters
         if did_split:
-            with self._section("Clusters (Post-Refinement)"):
+            with self.section("Clusters (Post-Refinement)"):
                 self.report_clusters_section(
                     dataframe, 'membership', purity_dataframe,
                     representatives, graph,
@@ -956,7 +987,7 @@ class ClusteringSweepReporter:
                 )
 
         # Section 6: Label fragmentation
-        with self._section("Label Fragmentation"):
+        with self.section("Label Fragmentation"):
             self.report_fragmentation(dataframe, label_dataframe)
 
         # Section 7: Summary & metrics
@@ -966,7 +997,8 @@ class ClusteringSweepReporter:
         )
 
         # Section 8: Examples
-        self.report_examples(dataframe, dissimilarities, graph, best_epsilon)
+        self.report_examples(dataframe, dissimilarities, graph, best_epsilon,
+                             feature_matcher=feature_matcher)
 
         # Section 5: Hapax
         self.report_hapax(dataframe, hapax_df, dissimilarities, graph)
@@ -988,11 +1020,11 @@ class ClusteringSweepReporter:
     # ================================================================
 
     def report_chat_split(self, dataframe, split_log):
-        target_lbl = self.sweep.target_lbl
+        target_lbl = self.target_lbl
 
-        with self._section("CHAT-Based Cluster Splitting"):
+        with self.section("CHAT-Based Cluster Splitting"):
             if not split_log:
-                self._report_raw_html(
+                self.report_raw_html(
                     '<p style="color:#666;">No clusters were split — all were '
                     'pure w.r.t. CHAT predictions.</p>',
                     title="No Splits Required",
@@ -1012,7 +1044,7 @@ class ClusteringSweepReporter:
                     'Sub-clusters': len(entry['sub_sizes']),
                     'Sub-cluster Sizes': str(entry['sub_sizes']),
                 })
-            self._report_table(
+            self.report_table(
                 pd.DataFrame(rows),
                 title=f"Clusters Split ({len(split_log)} clusters affected)",
             )
@@ -1059,7 +1091,7 @@ class ClusteringSweepReporter:
                     examples_html += '</div></div>'
 
             examples_html += '</div>'
-            self._report_raw_html(examples_html,
+            self.report_raw_html(examples_html,
                                   title=f"Split Examples (showing {n_examples})")
 
     # ================================================================
@@ -1067,9 +1099,9 @@ class ClusteringSweepReporter:
     # ================================================================
 
     def report_hapax_association(self, dataframe, hapax_log):
-        target_lbl = self.sweep.target_lbl
+        target_lbl = self.target_lbl
 
-        with self._section("Hapax-to-Cluster Association"):
+        with self.section("Hapax-to-Cluster Association"):
             accepted = [e for e in hapax_log if e['accepted']]
             rejected = [e for e in hapax_log if not e['accepted']]
 
@@ -1084,10 +1116,10 @@ class ClusteringSweepReporter:
                 'Remaining': len(rejected),
                 'Match Rate': f'{100 * len(accepted) / max(len(hapax_log), 1):.1f}%',
             }]
-            self._report_table(pd.DataFrame(summary_rows), title="Association Summary")
+            self.report_table(pd.DataFrame(summary_rows), title="Association Summary")
 
             if reason_counts:
-                self._report_table(
+                self.report_table(
                     pd.DataFrame([{'Reason': k, 'Count': v}
                                   for k, v in sorted(reason_counts.items(),
                                                      key=lambda x: -x[1])]),
@@ -1119,7 +1151,7 @@ class ClusteringSweepReporter:
                 match_html += '</div>'
                 if len(accepted) > 30:
                     match_html += f'<p style="color:#999;">... and {len(accepted)-30} more</p>'
-                self._report_raw_html(match_html,
+                self.report_raw_html(match_html,
                                       title=f"Matched Hapax ({len(accepted)} total)")
 
     # ================================================================
@@ -1127,7 +1159,7 @@ class ClusteringSweepReporter:
     # ================================================================
 
     def report_glossary(self, glossary_df, dataframe):
-        with self._section("Character Glossary"):
+        with self.section("Character Glossary"):
             # Summary statistics
             n_entries = len(glossary_df)
             total_patches = glossary_df['count'].sum()
@@ -1140,7 +1172,7 @@ class ClusteringSweepReporter:
                 'Total Patches': int(total_patches),
                 'Mean Purity': f'{mean_purity:.3f}' if not np.isnan(mean_purity) else 'N/A',
             }])
-            self._report_table(summary, title="Glossary Summary")
+            self.report_table(summary, title="Glossary Summary")
 
             # Top entries table
             top_n = min(50, len(glossary_df))
@@ -1149,7 +1181,7 @@ class ClusteringSweepReporter:
             ].copy()
             top.index = range(1, len(top) + 1)
             top.index.name = 'Rank'
-            self._report_table(top, title=f"Top {top_n} Characters by Frequency")
+            self.report_table(top, title=f"Top {top_n} Characters by Frequency")
 
             # Visual glossary grid
             grid_html = ('<div style="display: grid; '
@@ -1188,4 +1220,4 @@ class ClusteringSweepReporter:
                 </div>'''
 
             grid_html += '</div>'
-            self._report_raw_html(grid_html, title="Visual Glossary")
+            self.report_raw_html(grid_html, title="Visual Glossary")
