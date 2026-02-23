@@ -874,68 +874,6 @@ class ClusteringSweepReporter:
     #  Methodology report
     # ================================================================
 
-    def report_methodology(self, best_epsilon, best_gamma, best_threshold,
-                           refinement_step_names):
-        """Static summary of the full pipeline methodology."""
-        s = self.sweep  # shorthand
-
-        steps_html = ''
-        for i, name in enumerate(refinement_step_names, 1):
-            steps_html += f'<li><strong>Step {i}:</strong> {name}</li>'
-        if not steps_html:
-            steps_html = '<li>No refinement steps configured.</li>'
-
-        html = f"""
-        <div style="background: #f8f9fa; padding: 30px; border-radius: 10px;
-                    border: 1px solid #dee2e6; margin: 20px 0; line-height: 1.7;">
-            <h2 style="margin: 0 0 20px 0; color: #333;">Pipeline Methodology</h2>
-
-            <h3 style="color: #667eea;">1. Feature Extraction (HOG)</h3>
-            <ul>
-                <li>Cell sizes: {s.cell_sizes}</li>
-                <li>Gradient sigma: {s.grdt_sigmas}</li>
-                <li>Orientation bins: {s.nums_bins}</li>
-                <li>Normalization: {s.normalization_methods}</li>
-                <li>Device: {s.device}</li>
-            </ul>
-
-            <h3 style="color: #667eea;">2. A-Contrario Feature Matching</h3>
-            <ul>
-                <li>Metric: {s.featureMatcher._params.metric}</li>
-                <li>Epsilon (&epsilon;): {best_epsilon}</li>
-                <li>Reciprocal matching: {s.keep_reciprocal}</li>
-                <li>Edge type: {s.edges_type}</li>
-            </ul>
-
-            <h3 style="color: #667eea;">3. Graph Construction & Community Detection</h3>
-            <ul>
-                <li>Algorithm: Leiden (RBConfigurationVertexPartition)</li>
-                <li>Resolution &gamma;: {best_gamma}</li>
-                <li>Edge filtering: NLFA &ge; threshold</li>
-            </ul>
-
-            <h3 style="color: #667eea;">4. Refinement Pipeline</h3>
-            <ol>{steps_html}</ol>
-            <ul>
-                <li>Split thresholds: {s.split_thresholds}</li>
-                <li>Linkage method: {s.split_linkage_method}</li>
-                <li>Min cluster size for splitting: {s.split_min_cluster_size}</li>
-                <li>Rematch max cluster size: {s.rematch_max_cluster_size}</li>
-                <li>PCA components (k): {s.rematch_pca_k}</li>
-                <li>Z-score threshold: {s.rematch_z_max}</li>
-            </ul>
-
-            <h3 style="color: #667eea;">5. Evaluation</h3>
-            <ul>
-                <li>Metrics: ARI, NMI, AMI, Homogeneity, Completeness, V-measure,
-                    F1, Purity, Hungarian accuracy</li>
-                <li>Unknown label (&squaf;): excluded from all metric computations</li>
-                <li>Target label column: <code>{s.target_lbl}</code></li>
-            </ul>
-        </div>
-        """
-        self._report_raw_html(html, title="Methodology")
-
     # ================================================================
     #  Master orchestrator
     # ================================================================
@@ -959,11 +897,6 @@ class ClusteringSweepReporter:
             refinement_results = []
         if refinement_step_names is None:
             refinement_step_names = []
-
-        # Section 0: Methodology
-        with self._section("Methodology"):
-            self.report_methodology(best_epsilon, best_gamma, best_threshold,
-                                    refinement_step_names)
 
         # Section 1: Graph topology + best-config summary
         with self._section("Graph Topology"):
