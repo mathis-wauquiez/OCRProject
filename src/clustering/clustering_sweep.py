@@ -50,11 +50,7 @@ from .refinement import (
     UNKNOWN_LABEL as _UNKNOWN_LABEL,
 )
 
-# New clustering and refinement methods
-from .nfa_clustering import (
-    HDBSCANClustering, AffinityPropagationClustering,
-    HDBSCANNFACommunityDetection, AffinityPropagationNFACommunityDetection,
-)
+# New refinement methods
 from .mrf_refinement import MRFRefinementStep
 from .kmedoids_refinement import KMedoidsSplitMergeStep
 

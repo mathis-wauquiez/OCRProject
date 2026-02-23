@@ -61,6 +61,20 @@ def graph_wrap(function):
     return wrapped
 
 
+# ---- NLFA-to-distance conversion ----
+
+def nlfa_to_distance(nlfa, d_max=50.0):
+    """Convert NLFA similarity matrix to distance matrix for precomputed clustering.
+
+    NLFA values are higher for more similar pairs, so distance = d_max - NLFA.
+    """
+    nlfa_sym = 0.5 * (nlfa + nlfa.T)
+    D = d_max - nlfa_sym
+    np.clip(D, 0.0, d_max, out=D)
+    np.fill_diagonal(D, 0.0)
+    return D
+
+
 # ---- Distance-based clustering methods ----
 
 @sklearn_wrap

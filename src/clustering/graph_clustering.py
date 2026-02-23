@@ -9,13 +9,7 @@ from .algorithms import (
     greedyModularityCommunityDetection,
     labelPropagationCommunityDetection,
     graphClustering,
-)
-
-from .nfa_clustering import (
-    HDBSCANClustering,
-    AffinityPropagationClustering,
-    HDBSCANNFACommunityDetection,
-    AffinityPropagationNFACommunityDetection,
+    nlfa_to_distance,
 )
 
 from .mrf_refinement import MRFRefinementStep
