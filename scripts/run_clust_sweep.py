@@ -7,6 +7,7 @@ Usage:
 """
 
 import hydra
+from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 import logging
@@ -41,6 +42,10 @@ def main(cfg: DictConfig):
 
     logger.info(f"Loaded {len(dataframe)} patches")
     
+    # Instantiate reporter and refinement steps from config
+    reporter = instantiate(cfg.reporter)
+    refinement_steps = [instantiate(s) for s in cfg.refinement_steps]
+
     # Create clustering sweep
     sweep = graphClusteringSweep(
         feature=cfg.method.feature,
@@ -55,18 +60,8 @@ def main(cfg: DictConfig):
         metric=cfg.method.metric,
         keep_reciprocal=cfg.method.keep_reciprocal,
         device=cfg.method.device,
-        output_dir=cfg.data.output_path,
-        # ── Cluster splitting ──
-        split_thresholds=list(cfg.method.split_thresholds),
-        split_linkage_method=cfg.method.split_linkage_method,
-        split_min_cluster_size=cfg.method.split_min_cluster_size,
-        split_batch_size=cfg.method.split_batch_size,
-        split_render_scale=cfg.method.split_render_scale,
-        # ── Reporting ──
-        embed_images=cfg.method.embed_images,
-        image_dpi=cfg.method.image_dpi,
-        use_jpeg=cfg.method.use_jpeg,
-        jpeg_quality=cfg.method.jpeg_quality,
+        reporter=reporter,
+        refinement_steps=refinement_steps,
     )
     
     # Run sweep

@@ -15,14 +15,16 @@ import torch
 import numpy as np
 import pandas as pd
 
-# path / typing
-from pathlib import Path
+# typing
 from typing import List, Dict, Optional
 
 # internal
 from .feature_matching import featureMatching
 from .params import featureMatchingParameters
-from .clustering_sweep_report import ClusteringSweepReporter, UNKNOWN_LABEL
+from .clustering_sweep_report import (
+    ClusteringSweepReporter, UNKNOWN_LABEL,
+    RefinementReport, ClusterQuality,
+)
 from .graph import build_graph
 from .cluster_stats import compute_purity, compute_label_completeness
 
@@ -60,7 +62,6 @@ class graphClusteringSweep:
             metric: str = "CEMD",
             keep_reciprocal: bool = True,
             device: str = "cuda",
-            output_dir: str = "./outputs/clustering/results",
 
             cell_sizes: None | List[int] = None,
             normalization_methods: None | List[None | str] = ['patch'],
@@ -83,12 +84,6 @@ class graphClusteringSweep:
             # ── Explicit refinement pipeline (overrides above if given) ──
             refinement_steps: Optional[list] = None,
 
-            embed_images: bool = False,
-            image_dpi: int = 100,
-            thumbnail_dpi: int = 50,
-            use_jpeg: bool = True,
-            jpeg_quality: int = 70,
-
             # ── Post-clustering refinement (optional) ──
             enable_chat_split: bool = False,
             chat_split_purity_threshold: float = 0.90,
@@ -101,6 +96,11 @@ class graphClusteringSweep:
 
             enable_glossary: bool = False,
     ):
+        if reporter is None:
+            raise ValueError("reporter (ClusteringSweepReporter) must be provided")
+        if refinement_steps is None:
+            raise ValueError("refinement_steps must be provided")
+
         featureMatcher = featureMatching(featureMatchingParameters(
             metric=metric, epsilon=epsilons[0], partial_output=False
         ))
@@ -120,21 +120,9 @@ class graphClusteringSweep:
         self.keep_reciprocal    = keep_reciprocal
         self.device             = device
 
-        # ── Cluster splitting config ──
-        self.split_thresholds       = split_thresholds if split_thresholds is not None else [21.5]
-        self.split_linkage_method   = split_linkage_method
-        self.split_min_cluster_size = split_min_cluster_size
-        self.split_batch_size       = split_batch_size
-
-        # ── Post-split rematching config ──
-        self.rematch_max_cluster_size   = rematch_max_cluster_size
-        self.rematch_pca_k              = rematch_pca_k
-        self.rematch_z_max              = rematch_z_max
-        self.rematch_n_candidates       = rematch_n_candidates
-        self.rematch_min_target_size    = rematch_min_target_size
-
-        # ── Refinement pipeline ──
-        self.refinement_steps           = refinement_steps
+        # ── Injected components ──
+        self.reporter           = reporter
+        self.refinement_steps   = refinement_steps
 
         # ── Post-clustering refinement (optional) ──
         self.enable_chat_split          = enable_chat_split
@@ -147,45 +135,6 @@ class graphClusteringSweep:
         self.hapax_max_dissimilarity     = hapax_max_dissimilarity
 
         self.enable_glossary             = enable_glossary
-
-        # ── Build refinement pipeline ──────────────────────────────────────
-        # If an explicit list is provided, use it; otherwise build from params.
-        if refinement_steps is not None:
-            self.refinement_steps = refinement_steps
-        else:
-            steps: list = []
-            if self.split_thresholds:
-                steps.append(HausdorffSplitStep(
-                    thresholds=self.split_thresholds,
-                    linkage_method=self.split_linkage_method,
-                    min_cluster_size=self.split_min_cluster_size,
-                    batch_size=self.split_batch_size,
-                    evaluate_fn=self._evaluate_membership,
-                ))
-            steps.append(OCRRematchStep(
-                max_cluster_size=rematch_max_cluster_size,
-            ))
-            steps.append(PCAZScoreRematchStep(
-                max_cluster_size=rematch_max_cluster_size,
-                pca_k=rematch_pca_k,
-                z_max=rematch_z_max,
-                n_candidates=rematch_n_candidates,
-                min_target_size=rematch_min_target_size,
-                device=device,
-            ))
-            self.refinement_steps = steps
-
-        # ── Create the reporter (owns the AutoReport) ──
-        self.reporter = ClusteringSweepReporter(
-            target_lbl=self.target_lbl,
-            split_linkage_method=self.split_linkage_method,
-            split_thresholds=self.split_thresholds,
-            embed_images=embed_images,
-            image_dpi=image_dpi,
-            use_jpeg=use_jpeg,
-            jpeg_quality=jpeg_quality,
-            output_dir=str(Path(output_dir) / "reports"),
-        )
 
     # ================================================================
     #  Evaluation
@@ -222,7 +171,125 @@ class graphClusteringSweep:
         return compute_label_completeness(dataframe, self.target_lbl)
 
     # ================================================================
-    #  report_graph: ALL computation, then ONE reporting call
+    #  report_graph sub-steps
+    # ================================================================
+
+    def _run_refinement(self, dataframe, pre_split_membership, renderer, graph):
+        """Run the refinement pipeline and return post-split membership + logs."""
+        current_membership = pre_split_membership.copy()
+        results: list[RefinementResult] = []
+        step_names: list[str] = []
+
+        has_renderer = renderer is not None
+        for step in self.refinement_steps:
+            if not has_renderer and isinstance(step, (HausdorffSplitStep, PCAZScoreRematchStep)):
+                continue  # skip GPU steps when no renderer available
+            result = step.run(
+                dataframe, current_membership, renderer,
+                target_lbl=self.target_lbl,
+                graph=graph,
+                evaluate_fn=self._evaluate_membership,
+            )
+            current_membership = result.membership
+            results.append(result)
+            step_names.append(step.name)
+
+        return current_membership, results, step_names
+
+    def _reorder_by_membership(self, dataframe, graph, nlfa, dissimilarities,
+                               pre_split_membership, post_split_membership):
+        """Sort dataframe by membership, realign graph / matrices / arrays."""
+        dataframe['_graph_node_id'] = range(len(dataframe))
+        dataframe = dataframe.sort_values(
+            by=['membership', 'degree_centrality'],
+            ascending=[True, False]
+        ).reset_index(drop=True)
+
+        perm = dataframe.pop('_graph_node_id').values
+        old_to_new = {int(old): new for new, old in enumerate(perm)}
+        graph = nx.relabel_nodes(graph, old_to_new)
+
+        perm_t = torch.tensor(perm, device=nlfa.device, dtype=torch.long)
+        nlfa = nlfa[perm_t][:, perm_t]
+        dissimilarities = dissimilarities[perm_t][:, perm_t]
+
+        pre_split_membership = pre_split_membership[perm]
+        post_split_membership = np.asarray(post_split_membership)[perm]
+
+        return (dataframe, graph, nlfa, dissimilarities,
+                pre_split_membership, post_split_membership)
+
+    def _run_post_clustering(self, dataframe, dissimilarities):
+        """Run optional post-clustering steps (CHAT split, hapax, glossary)."""
+        from .post_clustering import chat_split_clusters, associate_hapax, build_glossary
+
+        chat_split_log = None
+        hapax_log = None
+        glossary_df = None
+
+        if self.enable_chat_split and self.target_lbl in dataframe.columns:
+            dataframe, chat_split_log = chat_split_clusters(
+                dataframe, dissimilarities,
+                purity_threshold=self.chat_split_purity_threshold,
+                min_split_size=self.chat_split_min_size,
+                min_label_count=self.chat_split_min_label_count,
+                target_lbl=self.target_lbl,
+            )
+
+        if self.enable_hapax_association and self.target_lbl in dataframe.columns:
+            dataframe, hapax_log = associate_hapax(
+                dataframe, dissimilarities,
+                target_lbl=self.target_lbl,
+                min_confidence=self.hapax_min_confidence,
+                max_dissimilarity=self.hapax_max_dissimilarity,
+            )
+
+        if self.enable_glossary and self.target_lbl in dataframe.columns:
+            glossary_df = build_glossary(dataframe, target_lbl=self.target_lbl)
+
+        return dataframe, chat_split_log, hapax_log, glossary_df
+
+    def _compute_quality(self, dataframe, pre_split_membership,
+                         post_split_membership, did_split):
+        """Compute purity, metrics, and label completeness."""
+        pre_purity_df, pre_representatives = \
+            self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
+
+        if did_split:
+            purity_dataframe, representatives = \
+                self._compute_purity_and_representatives(dataframe, 'membership')
+        else:
+            purity_dataframe = pre_purity_df
+            representatives = pre_representatives
+
+        _to_list = lambda m: m if isinstance(m, list) else m.tolist()
+        best_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl],
+            membership=dataframe['membership'].tolist()
+        )
+        label_dataframe = self._compute_label_dataframe(dataframe)
+
+        pre_split_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl],
+            membership=_to_list(pre_split_membership),
+        )
+        post_split_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl],
+            membership=_to_list(post_split_membership),
+        )
+
+        quality = ClusterQuality(
+            purity_dataframe=purity_dataframe,
+            representatives=representatives,
+            pre_purity_df=pre_purity_df,
+            pre_representatives=pre_representatives,
+            best_metrics=best_metrics,
+            label_dataframe=label_dataframe,
+        )
+        return quality, pre_split_metrics, post_split_metrics
+
+    # ================================================================
+    #  report_graph: orchestrator
     # ================================================================
 
     def report_graph(self, dataframe, nlfa, dissimilarities,
@@ -250,124 +317,54 @@ class graphClusteringSweep:
         )
 
         # ── 4. Refinement pipeline ──
-        #   Each step takes the current membership and returns a new one.
-        #   Results are collected for per-step reporting.
-        current_membership = pre_split_membership.copy()
-        refinement_results: list[RefinementResult] = []
-        refinement_step_names: list[str] = []
+        post_split_membership, refinement_results, refinement_step_names = \
+            self._run_refinement(dataframe, pre_split_membership, renderer, graph)
 
-        has_renderer = renderer is not None
-        for step in self.refinement_steps:
-            if not has_renderer and isinstance(step, (HausdorffSplitStep, PCAZScoreRematchStep)):
-                continue  # skip GPU steps when no renderer available
-            result = step.run(
-                dataframe, current_membership, renderer,
-                target_lbl=self.target_lbl,
-                graph=graph,
-            )
-            current_membership = result.membership
-            refinement_results.append(result)
-            refinement_step_names.append(step.name)
-
-        post_split_membership = current_membership
         dataframe.loc[:, 'membership'] = pd.Series(
             post_split_membership, index=dataframe.index
         )
         did_split = len(refinement_results) > 0
 
-        # Extract split-specific metadata for backward-compat reporting
+        # ── 5. Reorder by membership ──
+        dataframe, graph, nlfa, dissimilarities, \
+            pre_split_membership, post_split_membership = \
+            self._reorder_by_membership(
+                dataframe, graph, nlfa, dissimilarities,
+                pre_split_membership, post_split_membership,
+            )
+
+        # ── 6. Post-clustering refinement (optional) ──
+        dataframe, chat_split_log, hapax_log, glossary_df = \
+            self._run_post_clustering(dataframe, dissimilarities)
+
+        # ── 7. Compute quality metrics ──
+        quality, pre_split_metrics, post_split_metrics = \
+            self._compute_quality(
+                dataframe, pre_split_membership,
+                post_split_membership, did_split,
+            )
+
+        # ── 8. Build refinement report ──
         split_result = next(
             (r for r, n in zip(refinement_results, refinement_step_names)
              if n == 'hausdorff_split'), None
         )
-        best_threshold = (split_result.metadata.get('best_threshold')
-                          if split_result else None)
-        best_split_log = split_result.log if split_result else None
-        sweep_results_df = (split_result.metadata.get('sweep_df')
-                            if split_result else None)
-
-        # ── 5. Reorder by membership ──
-        dataframe['_graph_node_id'] = range(len(dataframe))
-        dataframe = dataframe.sort_values(
-            by=['membership', 'degree_centrality'],
-            ascending=[True, False]
-        ).reset_index(drop=True)
-
-        # ── 5a. Realign graph, matrices, and membership arrays ──
-        # After sorting + reset_index the dataframe has new 0..N-1 indices,
-        # but the graph nodes, distance matrices, and raw membership arrays
-        # still use the OLD row order.  Re-map everything to the new order
-        # so that downstream code (subgraph extraction, NN lookup, etc.)
-        # can use dataframe indices directly as graph node IDs.
-        perm = dataframe.pop('_graph_node_id').values
-        old_to_new = {int(old): new for new, old in enumerate(perm)}
-        graph = nx.relabel_nodes(graph, old_to_new)
-
-        perm_t = torch.tensor(perm, device=nlfa.device, dtype=torch.long)
-        nlfa = nlfa[perm_t][:, perm_t]
-        dissimilarities = dissimilarities[perm_t][:, perm_t]
-
-        pre_split_membership = pre_split_membership[perm]
-        post_split_membership = np.asarray(post_split_membership)[perm]
-
-        # ── 5b. Post-clustering refinement (optional) ──
-        from .post_clustering import chat_split_clusters, associate_hapax, build_glossary
-
-        chat_split_log = None
-        hapax_log = None
-        glossary_df = None
-
-        if self.enable_chat_split and self.target_lbl in dataframe.columns:
-            dataframe, chat_split_log = chat_split_clusters(
-                dataframe, dissimilarities,
-                purity_threshold=self.chat_split_purity_threshold,
-                min_split_size=self.chat_split_min_size,
-                min_label_count=self.chat_split_min_label_count,
-                target_lbl=self.target_lbl,
-            )
-
-        if self.enable_hapax_association and self.target_lbl in dataframe.columns:
-            dataframe, hapax_log = associate_hapax(
-                dataframe, dissimilarities,
-                target_lbl=self.target_lbl,
-                min_confidence=self.hapax_min_confidence,
-                max_dissimilarity=self.hapax_max_dissimilarity,
-            )
-
-        if self.enable_glossary and self.target_lbl in dataframe.columns:
-            glossary_df = build_glossary(dataframe, target_lbl=self.target_lbl)
-
-        # ── 5c. Compute purity & representatives AFTER index reset ──
-        #     so that stored representative indices match the new index.
-        pre_purity_df, pre_representatives = \
-            self._compute_purity_and_representatives(dataframe, 'membership_pre_split')
-
-        if did_split:
-            purity_dataframe, representatives = \
-                self._compute_purity_and_representatives(dataframe, 'membership')
-        else:
-            purity_dataframe = pre_purity_df
-            representatives = pre_representatives
-
-        # ── 6. Post-split metrics & label completeness ──
-        _to_list = lambda m: m if isinstance(m, list) else m.tolist()
-        best_metrics = self._evaluate_membership(
-            target_labels=dataframe[self.target_lbl],
-            membership=dataframe['membership'].tolist()
-        )
-        label_dataframe = self._compute_label_dataframe(dataframe)
-
-        # Pre/post split metrics for the split comparison report
-        pre_split_metrics = self._evaluate_membership(
-            target_labels=dataframe[self.target_lbl],
-            membership=_to_list(pre_split_membership),
-        )
-        post_split_metrics = self._evaluate_membership(
-            target_labels=dataframe[self.target_lbl],
-            membership=_to_list(post_split_membership),
+        refinement = RefinementReport(
+            pre_split_membership=pre_split_membership,
+            post_split_membership=post_split_membership,
+            did_split=did_split,
+            results=refinement_results,
+            step_names=refinement_step_names,
+            best_threshold=(split_result.metadata.get('best_threshold')
+                            if split_result else None),
+            best_split_log=split_result.log if split_result else None,
+            sweep_results_df=(split_result.metadata.get('sweep_df')
+                              if split_result else None),
+            pre_split_metrics=pre_split_metrics,
+            post_split_metrics=post_split_metrics,
         )
 
-        # ── 7. Delegate ALL reporting in one call ──
+        # ── 9. Delegate ALL reporting in one call ──
         self.reporter.report_graph_results(
             dataframe=dataframe,
             graph=graph,
@@ -376,29 +373,15 @@ class graphClusteringSweep:
             dissimilarities=dissimilarities,
             best_epsilon=best_epsilon,
             best_gamma=best_gamma,
-            pre_split_membership=pre_split_membership,
-            post_split_membership=post_split_membership,
-            best_threshold=best_threshold,
-            best_split_log=best_split_log,
-            sweep_results_df=sweep_results_df,
-            did_split=did_split,
-            purity_dataframe=purity_dataframe,
-            representatives=representatives,
-            pre_purity_df=pre_purity_df,
-            pre_representatives=pre_representatives,
-            best_metrics=best_metrics,
-            label_dataframe=label_dataframe,
+            refinement=refinement,
+            quality=quality,
             feature_matcher=self.featureMatcher,
-            pre_split_metrics=pre_split_metrics,
-            post_split_metrics=post_split_metrics,
-            refinement_results=refinement_results,
-            refinement_step_names=refinement_step_names,
             chat_split_log=chat_split_log,
             hapax_log=hapax_log,
             glossary_df=glossary_df,
         )
 
-        # ── 8. Build filtered / representative dataframes ──
+        # ── 10. Build filtered / representative dataframes ──
         min_size = 2
         filtered_dataframe = dataframe[
             dataframe.groupby(self.target_lbl)[self.target_lbl]

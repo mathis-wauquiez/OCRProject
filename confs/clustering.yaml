@@ -12,7 +12,7 @@ data:
   input_path: "outputs/preprocessing/book1"
   output_path: "outputs/clustering/book1"
 
-  
+
 # Clustering method
 method:
   feature: "histogram"
@@ -20,7 +20,7 @@ method:
   metric: "CEMD"
   keep_reciprocal: true
   device: "cuda"
-  
+
   # Parameter sweep ranges
 
   # cell_sizes: [16, 24, 32]  # Cell size for HOG computation
@@ -31,7 +31,7 @@ method:
   # epsilons: [0.0005]
   # gammas: [1.0, 1.25]
   gammas: [1.0]
-  
+
   cell_sizes: [22]  # Cell size for HOG computation
   # cell_sizes: [48]  # Cell size for HOG computation
   normalization_methods : ['patch'] # patch >> all
