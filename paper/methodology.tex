@@ -5,7 +5,7 @@
 \section{Methodology}
 \label{sec:methodology}
 
-Our pipeline processes scanned historical document images to extract, describe, and cluster individual character glyphs through four stages: (1)~character extraction, (2)~preprocessing including vectorisation, OCR, and feature computation, (3)~\textit{a contrario} matching and graph-based clustering, and (4)~post-clustering refinement.
+Our pipeline processes scanned historical document images to produce a vectorised character glossary through four stages: (1)~character extraction, (2)~preprocessing including vectorisation, OCR, and feature computation, (3)~\textit{a contrario} matching and graph-based clustering, and (4)~post-clustering refinement and glossary construction.
 Figure~\ref{fig:pipeline-overview} presents an overview.
 
 \input{figures/fig_pipeline_overview}
@@ -35,8 +35,16 @@ Each extracted character undergoes preprocessing to produce a vectorised represe
 A projection-based layout module identifies columns and rows.
 The reading order follows right-to-left, top-to-bottom (classical Chinese), assigning each character an integer index.
 
-\paragraph{Vectorisation.}
-Binary patches are cleaned by morphological filtering (removing small holes and noise specks), then converted to SVG via Potrace-based vectorisation.
+\paragraph{Vectorisation via affine scale-space.}
+Binary patches are cleaned by morphological filtering (removing small holes and noise specks), then vectorised using affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}.
+This geometric PDE evolves each level line of the image according to its curvature:
+\begin{equation}
+    \frac{\partial u}{\partial t} = |\nabla u|\, \kappa^{1/3},
+    \label{eq:gass}
+\end{equation}
+where $\kappa$ denotes the curvature of the level line through each point.
+The $1/3$ exponent makes this evolution affine-invariant: the smoothed shape is independent of the viewing angle, which is essential for comparing characters printed under different conditions.
+The resulting smooth level lines are converted to SVG vector outlines.
 Document skew is estimated using LSD~\cite{von2010lsd} and corrected via the length-weighted circular mean of line segment orientations:
 \begin{equation}
     \theta = \tfrac{1}{2}\arg\!\left(\textstyle\sum_i w_i \, e^{2\mathrm{i}\alpha_i}\right).
@@ -140,3 +148,12 @@ The query is registered against each candidate's most central member, projected 
 \label{sec:metrics}
 
 Clustering quality is evaluated using: Adjusted Rand Index (ARI)~\cite{hubert1985comparing} as the primary metric, Normalised Mutual Information (NMI), homogeneity/completeness/V-measure~\cite{rosenberg2007v}, pairwise F1 score, and Hungarian-matching accuracy.
+Characters with unknown ground-truth labels are excluded from all metric computations.
+
+
+% ============================================================================
+\subsection{Glossary Construction}
+\label{sec:glossary}
+
+The final output of the pipeline is a \emph{character glossary}: for each cluster, we select the most central member (minimising mean intra-cluster dissimilarity) as the representative, and record the dominant OCR label, cluster size, and purity.
+The glossary is sorted by frequency, producing an inventory of all distinct character forms in the book along with their vectorised outlines---the desired output of reverse typography.

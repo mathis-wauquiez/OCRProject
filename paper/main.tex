@@ -1,5 +1,5 @@
 % ============================================================================
-%  Main document — A Contrario Character Clustering from Historical Documents
+%  Main document — Reverse Typography in Historical Prints via A Contrario Matching
 %
 %  ICDAR / Springer LNCS format
 %  Compile with: pdflatex main.tex  (twice for references)
@@ -48,10 +48,10 @@
 
 % ============================================================================
 \title{%
-    Unsupervised Character Clustering in Historical Document Images
-    via A Contrario Feature Matching%
+    Reverse Typography in Historical Prints
+    via A Contrario Character Matching%
 }
-\titlerunning{A Contrario Character Clustering}
+\titlerunning{Reverse Typography via A Contrario Matching}
 
 \author{Anonymous Author(s)}
 \authorrunning{Anonymous}
@@ -64,13 +64,18 @@
 %  Abstract
 % ============================================================================
 \begin{abstract}
-We present an unsupervised pipeline for clustering individual character glyphs extracted from scanned historical document images.
-The method combines a learned text detector (CRAFT) for character-level extraction, Histogram of Oriented Gradients (HOG) descriptors for visual representation, and an \textit{a contrario} statistical framework for principled pairwise matching.
-The resulting similarity graph is partitioned using community detection (Leiden algorithm), followed by a composable refinement pipeline that fuses visual and linguistic signals.
-We further propose and evaluate alternative clustering strategies---HDBSCAN with NFA-derived distances, Affinity Propagation, and Markov Random Field inference---as well as registration methods for intra-cluster alignment and deformation-invariant features for registration-free comparison.
-Comprehensive ablation studies and a rigorous evaluation protocol with bootstrap significance testing are provided.
+The history of Chinese printing dates back to the 8th century.
+Whether using carved woodblocks or movable types---techniques that coexisted for over a millennium---craftsmen imitated character models painted by a calligrapher.
+The resulting printed characters vary with the regularity of craftsmanship, quality of paper and ink, and centuries of document ageing.
+We address the problem of \emph{reverse typography}: reconstructing faithful vectorised versions of the characters present in a given historical printed book, producing a glossary that respects the original calligraphy.
+Our fully unsupervised pipeline leverages three key techniques:
+(i)~CRAFT, a learned text detector for reliable character-level extraction;
+(ii)~affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}, an affine-invariant geometric partial differential equation that restores character shapes to clean vector outlines;
+and (iii)~an \emph{a~contrario} statistical framework~\cite{desolneux2000meaningful} that determines whether two character images depict the same glyph without manual threshold tuning.
+Similar characters are connected in a graph partitioned by the Leiden algorithm, followed by a refinement pipeline fusing visual and linguistic signals.
+The method is demonstrated on the \emph{Ying huan zhi lue} (Brief Records of the World), a famous 1848 Chinese book printed from carved woodblocks in which each character was uniquely engraved, and evidence is given that the approach generalises to other historical printed books.
 
-\keywords{Historical document analysis \and Character clustering \and A contrario methods \and HOG features \and Community detection}
+\keywords{Reverse typography \and Historical document analysis \and Character clustering \and A contrario methods \and Affine scale-space}
 \end{abstract}
 
 
@@ -80,29 +85,35 @@ Comprehensive ablation studies and a rigorous evaluation protocol with bootstrap
 \section{Introduction}
 \label{sec:introduction}
 
-Historical document analysis requires identifying and grouping recurrent character forms---a task complicated by varying handwriting styles, ink degradation, and the absence of labelled training data.
-Unlike modern OCR systems trained on millions of annotated examples, historical scripts often lack sufficient ground truth for supervised approaches.
+The history of Chinese printing spans more than twelve centuries.
+Woodblock printing appeared in the 8th century: entire pages were carved in reverse on wood planks or ceramic plates, inked, and pressed onto paper.
+Movable-type printing, invented by Bi Sheng around~1040, allowed individual characters to be cast in ceramic, wood, or metal and assembled into pages.
+Both technologies coexisted for more than a thousand years, each producing distinct patterns of character variation.
+In every case, craftsmen carving wood or moulding metal imitated character models painted by a calligrapher.
+The variability of printed characters therefore depends on the regularity of craftsmanship, quality of paper and ink, and centuries of document ageing.
 
-We propose a fully unsupervised pipeline that:
+\emph{Reverse typography} addresses the inverse problem: given a historical printed book, reconstruct faithful vectorised versions of the character models used to produce it.
+The goal is to automatically generate a \emph{character glossary}---an inventory of all distinct character forms, each represented as a clean vector outline respecting the original calligraphy.
+Such a glossary enables digital preservation, palaeographic study of printing workshops, font reconstruction, and cross-document comparison of printing traditions.
+Modern OCR systems, trained on millions of annotated examples, adapt poorly to historical prints due to degraded ink, irregular spacing, archaic character variants, and the absence of labelled training data.
+A fully unsupervised approach is therefore required.
+
+Our pipeline leverages three key techniques:
 \begin{enumerate}[nosep]
-    \item detects individual characters using a pre-trained text detector without fine-tuning;
-    \item describes each character via HOG features computed on vectorised representations;
-    \item determines similarity through an \textit{a contrario} statistical test that provides a principled, adaptive threshold without manual tuning;
-    \item clusters characters via graph-based community detection with multi-stage refinement.
+    \item \textbf{CRAFT}~\cite{baek2019character}, a learned text detector that provides reliable character-level extraction without fine-tuning;
+    \item \textbf{Affine scale-space vectorisation}~\cite{alvarez1993axioms,ciomaga2017curvature}, an affine-invariant geometric PDE that smooths character boundaries into clean vector outlines while preserving their essential shape;
+    \item \textbf{A contrario matching}~\cite{desolneux2000meaningful}, a statistical framework providing a principled, adaptive test for whether two character images depict the same glyph.
 \end{enumerate}
+Characters deemed similar are connected in a graph partitioned by the Leiden community detection algorithm~\cite{traag2019louvain}, and a composable refinement pipeline fusing visual registration and linguistic signals produces the final clusters from which the glossary is assembled.
 
-Beyond this baseline pipeline, we develop and compare several methodological improvements:
-\begin{itemize}[nosep]
-    \item \textbf{Clustering:} HDBSCAN on continuous NFA distances, Affinity Propagation, and Markov Random Field fusion of visual and OCR signals (Sect.~\ref{sec:proposed-clustering}).
-    \item \textbf{Refinement:} K-medoids with NFA-guided spectral split/merge (Sect.~\ref{sec:proposed-refinement}).
-    \item \textbf{Registration:} MST-based hierarchical alignment and congealing with robust median templates (Sect.~\ref{sec:proposed-registration}).
-    \item \textbf{Features:} Shape Context descriptors and persistent homology for deformation-invariant comparison (Sect.~\ref{sec:proposed-features}).
-\end{itemize}
+We demonstrate the method on the \emph{Ying huan zhi lue} (Brief Records of the World), a famous 1848 Chinese book by Xu Jiyu, printed from individually carved woodblocks.
+In this book, every character occurrence was uniquely engraved---a maximally challenging scenario for clustering, since no two instances of the same character share the same printing block.
+We provide evidence that the method adapts to other historical printed books.
 
 The paper is organised as follows.
-Section~\ref{sec:methodology} describes the baseline pipeline.
-Section~\ref{sec:proposed-methods} presents the proposed improvements.
-Section~\ref{sec:experiments} details the experiment plan and evaluation protocol.
+Section~\ref{sec:methodology} describes the pipeline.
+Section~\ref{sec:proposed-methods} outlines proposed extensions.
+Section~\ref{sec:experiments} details the evaluation protocol.
 Section~\ref{sec:conclusion} concludes.
 
 
@@ -113,7 +124,7 @@ Section~\ref{sec:conclusion} concludes.
 
 
 % ============================================================================
-%  3. Proposed Methods
+%  3. Proposed Extensions
 % ============================================================================
 \input{proposed_methods}
 
@@ -130,11 +141,11 @@ Section~\ref{sec:conclusion} concludes.
 \section{Conclusion}
 \label{sec:conclusion}
 
-We have presented a comprehensive unsupervised pipeline for character clustering in historical document images, grounded in the \textit{a contrario} statistical framework.
-The baseline pipeline---CRAFT detection, HOG features, NFA matching, Leiden clustering, and three-stage refinement---provides a strong starting point.
-The proposed improvements (HDBSCAN clustering, MRF fusion, K-medoids split/merge, MST alignment, congealing, and topological features) address specific limitations at each stage.
-The ablation framework and evaluation protocol enable rigorous comparison of all components.
-Future work will focus on cross-corpus generalisation and integration of learned feature representations.
+We have presented a fully unsupervised pipeline for \emph{reverse typography}: the automatic reconstruction of a vectorised character glossary from historical printed books, respecting the original calligraphy.
+The method combines CRAFT text detection, affine scale-space vectorisation, \textit{a contrario} statistical matching, Leiden community detection, and a composable three-stage refinement pipeline.
+Demonstrated on the \emph{Ying huan zhi lue}, an 1848 Chinese book in which every character was uniquely carved from woodblocks, the pipeline handles the full variability of historical printing without any annotated training data.
+The extensions outlined in Section~\ref{sec:proposed-methods}---alternative clustering strategies, principled refinement, registration-based template computation, and deformation-invariant features---provide directions for further improving the glossary quality.
+Future work will focus on cross-corpus generalisation and systematic comparison of these extensions through the ablation framework described in Section~\ref{sec:experiments}.
 
 
 % ============================================================================
@@ -144,7 +155,7 @@ Future work will focus on cross-corpus generalisation and integration of learned
 % \bibliography{references}  % uncomment when references.bib is available
 
 % ── Inline references for standalone compilation ──
-\begin{thebibliography}{16}
+\begin{thebibliography}{18}
 
 \bibitem{baek2019character}
 Baek, Y., Lee, B., Han, D., Yun, S., Lee, H.:
@@ -160,6 +171,16 @@ In: Proc.\ IEEE CVPR, vol.~1, pp.~886--893 (2005)
 Desolneux, A., Moisan, L., Morel, J.-M.:
 Meaningful alignments.
 Int.\ J.\ Comput.\ Vis.\ \textbf{40}(1), 7--23 (2000)
+
+\bibitem{alvarez1993axioms}
+Alvarez, L., Guichard, F., Lions, P.-L., Morel, J.-M.:
+Axioms and fundamental equations of image processing.
+Archive for Rational Mechanics and Analysis \textbf{123}(3), 199--257 (1993)
+
+\bibitem{ciomaga2017curvature}
+Ciomaga, A., Monasse, P., Morel, J.-M.:
+The image curvature microscope: Accurate curvature computation at subpixel resolution.
+Image Processing On Line (IPOL) \textbf{7}, 197--217 (2017)
 
 \bibitem{briand2018ipol}
 Briand, T., Facciolo, G., S\'anchez, J.:

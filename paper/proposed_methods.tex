@@ -2,10 +2,12 @@
 %  Proposed Methods — Clustering, Refinement, Registration, Features
 % ============================================================================
 
-\section{Proposed Methods}
+\section{Proposed Extensions}
 \label{sec:proposed-methods}
 
-We propose four categories of improvements over the baseline: alternative clustering strategies (Sect.~\ref{sec:proposed-clustering}), principled refinement (Sect.~\ref{sec:proposed-refinement}), registration methods (Sect.~\ref{sec:proposed-registration}), and deformation-invariant features (Sect.~\ref{sec:proposed-features}).
+The baseline pipeline described in Section~\ref{sec:methodology} already produces a functional character glossary.
+We now outline four categories of potential extensions that address specific limitations identified during development: alternative clustering strategies (Sect.~\ref{sec:proposed-clustering}), principled refinement (Sect.~\ref{sec:proposed-refinement}), registration methods for intra-cluster template computation (Sect.~\ref{sec:proposed-registration}), and deformation-invariant features (Sect.~\ref{sec:proposed-features}).
+These directions are presented to guide future evaluation.
 
 
 % ============================================================================
@@ -13,7 +15,7 @@ We propose four categories of improvements over the baseline: alternative cluste
 \label{sec:proposed-clustering}
 
 The baseline binarises NLFA values into edges, discarding the graded similarity signal.
-We propose three alternatives operating on the continuous NLFA matrix.
+Three alternatives operating on the continuous NLFA matrix may improve on this.
 
 
 \paragraph{HDBSCAN with NFA-derived distance.}
@@ -52,7 +54,7 @@ This subsumes the three baseline refinement stages: unary potentials encode the 
 \subsection{Principled Refinement: K-Medoids with Split/Merge}
 \label{sec:proposed-refinement}
 
-The three ad hoc refinement stages are replaced by a single iterative algorithm.
+An alternative to the three sequential refinement stages is a single iterative algorithm.
 Starting from the baseline partition, medoids are computed as $m_C = \argmin_{I_i \in C} \sum_{I_j \in C} d(I_i, I_j)$.
 
 \emph{Reassignment:} Each character is compared to the $k$-nearest alternative medoids; if a better match exists, it is reassigned.
