@@ -160,6 +160,16 @@ class graphClusteringSweep(AutoReport):
         self.split_render_scale     = split_render_scale
         self.split_metrics          = split_metrics
 
+        # ── Post-split rematching config ──
+        self.rematch_max_cluster_size   = rematch_max_cluster_size
+        self.rematch_pca_k              = rematch_pca_k
+        self.rematch_z_max              = rematch_z_max
+        self.rematch_n_candidates       = rematch_n_candidates
+        self.rematch_min_target_size    = rematch_min_target_size
+
+        # ── Refinement pipeline ──
+        self.refinement_steps           = refinement_steps
+
         # ── Post-clustering refinement (optional) ──
         self.enable_chat_split          = enable_chat_split
         self.chat_split_purity_threshold = chat_split_purity_threshold
