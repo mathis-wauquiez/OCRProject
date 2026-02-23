@@ -498,6 +498,8 @@ class graphClusteringSweep(AutoReport):
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
+            refinement_results=refinement_results,
+            refinement_step_names=refinement_step_names,
             chat_split_log=chat_split_log,
             hapax_log=hapax_log,
             glossary_df=glossary_df,
