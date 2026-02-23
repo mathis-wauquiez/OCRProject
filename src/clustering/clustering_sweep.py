@@ -25,7 +25,6 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 # internal
-from .algorithms import communityDetectionBase
 from .feature_matching import featureMatching
 from .params import featureMatchingParameters
 from .clustering_sweep_report import ClusteringSweepReporter, UNKNOWN_LABEL
@@ -90,8 +89,8 @@ class graphClusteringSweep(AutoReport):
 
             # ── Post-split rematching parameters ──
             rematch_max_cluster_size: int = 3,
-            rematch_pca_k: int = 5,
-            rematch_z_max: float = 3.0,
+            rematch_pca_k: int = 2,
+            rematch_z_max: float = 4.0,
             rematch_n_candidates: int = 5,
             rematch_min_target_size: int = 10,
 

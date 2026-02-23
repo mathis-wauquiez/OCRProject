@@ -49,7 +49,7 @@ class featureMatching:
         available_memory -= 100 * 2**20 # remove 100 MB to be sure everything fits in memory
         element_size = query_histograms.element_size()
 
-        slice_memory = N2 * Nh * Nbins * element_size * 4
+        slice_memory = N2 * Nh * Nbins * element_size * 20
 
         # Compute the batch size as the maximum amount of (N2, Nh, Nbins) slices we can fit in memory
         batch_size = max(1, available_memory // slice_memory)

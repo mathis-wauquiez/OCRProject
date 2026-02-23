@@ -27,8 +27,8 @@ method:
   # grdt_sigmas: [5]       # Gradient sigma for smoothing
   # nums_bins: [8, 16]        # Number of orientation bins
 
-  # epsilons: [0.00025, 0.00038, .0005]
-  epsilons: [0.0005]
+  epsilons: [0.00025, 0.00038, .0005]
+  # epsilons: [0.0005]
   # gammas: [1.0, 1.25]
   gammas: [1.0]
   
@@ -39,26 +39,27 @@ method:
   nums_bins: [16]        # Number of orientation bins
 
 
-  # ── Cluster splitting (hierarchical sub-clustering) ──
+  # Cluster splitting (hierarchical sub-clustering)
   split_thresholds: [21.5] # Hausdorff distance threshold for cutting the dendrogram
   split_linkage_method: "average" # scipy linkage method: average, complete, single, ward, ...
   split_min_cluster_size: 5       # clusters smaller than this are not split
   split_batch_size: 256           # batch size for Hausdorff distance computation
   split_render_scale: 1         # SVG render scale for binary image distance
 
-  # ── Post-clustering refinement (all optional) ──
+  # == __ Post-clustering refinement __ == 
   enable_chat_split: true           # split clusters with mixed CHAT labels
-  chat_split_purity_threshold: 0.90 # skip if dominant label >= this fraction
+  chat_split_purity_threshold: 1 # skip if dominant label >= this fraction
   chat_split_min_size: 3            # clusters smaller than this are never split
   chat_split_min_label_count: 2     # CHAT label needs >= this many patches
 
   enable_hapax_association: true     # merge singletons into matching clusters
-  hapax_min_confidence: 0.3         # ignore hapax with CHAT conf below this
+  hapax_min_confidence: 0.5          # ignore hapax with CHAT conf below this
   hapax_max_dissimilarity: null      # null = adaptive (per-cluster median)
 
   enable_glossary: true              # generate character glossary
 
-  # ── Reporting options ──
+
+  # Reporting options
   embed_images: true       # true: base64-embedded images; false: external files
   image_dpi: 75            # DPI for saved figures
   use_jpeg: false          # use JPEG instead of PNG (smaller files, lossy)

@@ -17,6 +17,18 @@ from .refinement import ClusterRefinementStep, RefinementResult
 log = logging.getLogger(__name__)
 
 
+def nlfa_to_distance(nlfa, d_max=50.0):
+    """Convert NLFA similarity matrix to distance matrix for precomputed clustering.
+
+    NLFA values are higher for more similar pairs, so distance = d_max - NLFA.
+    """
+    nlfa_sym = 0.5 * (nlfa + nlfa.T)
+    D = d_max - nlfa_sym
+    np.clip(D, 0.0, d_max, out=D)
+    np.fill_diagonal(D, 0.0)
+    return D
+
+
 class KMedoidsSplitMerge:
     """K-Medoids with NFA-guided split/merge.
 
@@ -169,7 +181,6 @@ class KMedoidsSplitMergeStep(ClusterRefinementStep):
 
     def run(self, dataframe, membership, renderer, *, target_lbl, **ctx):
         import torch
-        from .algorithms import nlfa_to_distance
 
         nlfa = ctx.get('nlfa')
         if nlfa is None:
