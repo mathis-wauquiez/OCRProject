@@ -7,10 +7,7 @@ from typing import Dict, List
 import warnings
 import tqdm
 
-from src.clustering.metrics import compute_metrics
-
-# Define the unknown label constant
-UNKNOWN_LABEL = '▯'  # U+25AF - represents unrecognized characters
+from src.clustering.metrics import compute_metrics, UNKNOWN_LABEL
 
 
 def extract_data(

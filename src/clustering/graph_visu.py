@@ -3,7 +3,7 @@ import torch
 import numpy as np
 
 import matplotlib.pyplot as plt
-UNKNOWN_LABEL = '▯'  # U+25AF - represents unrecognized characters
+from .metrics import UNKNOWN_LABEL
 
 plt.rcParams['font.family'] = ['Noto Sans CJK JP', 'DejaVu Sans', 'sans-serif']
 
