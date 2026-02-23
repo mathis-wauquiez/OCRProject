@@ -524,8 +524,3 @@ class OCRGuidedPCARematchStep(ClusterRefinementStep):
                 z_max=self.z_max,
             ),
         )
-
-
-# Backward-compatibility aliases
-OCRRematchStep = OCRGuidedPCARematchStep
-PCAZScoreRematchStep = OCRGuidedPCARematchStep

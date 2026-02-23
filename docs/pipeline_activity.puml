@@ -116,20 +116,6 @@ partition "3c. report_graph (best config)" {
     ── Merge if max|z| < z_max;
   }
 
-  partition "4b. New Refinement Methods" {
-    :④ MRFRefinementStep (optional)
-    ── Unary: OCR probability matrix ──
-    ── Pairwise: β · NLFA (Potts) ──
-    ── Max-sum loopy BP ──
-    ── Damped convergence;
-
-    :⑤ KMedoidsSplitMergeStep (optional)
-    ── Reassign to nearest medoid ──
-    ── Spectral split (Fiedler vector) ──
-    ── NFA-validated merge ──
-    ── Iterate until stable;
-  }
-
   |#FFF3E0| Step 5: Post-Clustering |
   if (enable_chat_split?) then (yes)
     :chat_split_clusters
@@ -169,16 +155,11 @@ stop
 ' ══════════════════════════════════════════════════════════════════
 
 legend bottom
-  **Registration Sub-Pipeline (used by HausdorffSplit, OCRGuidedPCA, MST, Congealing):**
+  **Registration Sub-Pipeline (used by HausdorffSplit, OCRGuidedPCA):**
   ""InverseCompositional"" → single-scale Gauss-Newton with robust error function
   ""GaussianPyramid"" → coarse-to-fine image stack
   ""MultiscaleIC"" → coarse→fine IC alignment  → ""PlanarTransform""
   ""PlanarTransform.warp()"" → bicubic grid sampling with visibility mask
-
-  **Deformation-Invariant Features (alternative to registration):**
-  ""ShapeContextDescriptor"" → contour sampling → log-polar histograms → chi² + Hungarian
-  ""PersistentHomologyDescriptor"" → distance transform → cubical complex (gudhi) → H0/H1 → Wasserstein
-  ""TopologicalPreFilter"" → (n_components, n_loops) fast rejection
 endlegend
 
 @enduml

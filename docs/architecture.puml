@@ -372,64 +372,11 @@ package "src.clustering — Refinement Steps" as refine_pkg #FFEBEE {
     max|z| < z_max.
   }
 
-  class MRFRefinementStep {
-    name = "mrf_bp"
-    mrf : MRFBeliefPropagation
-    --
-    Unary: OCR probabilities
-    Pairwise: generalized Potts (NLFA)
-    Inference: max-sum loopy BP
-    Requires nlfa in ctx.
-  }
-
-  class KMedoidsSplitMergeStep {
-    name = "kmedoids_split_merge"
-    kmedoids : KMedoidsSplitMerge
-    --
-    reassign → spectral split (Fiedler)
-    → NFA-validated merge
-    Requires nlfa in ctx.
-  }
-
   ClusterRefinementStep <|-- HausdorffSplitStep
   ClusterRefinementStep <|-- OCRGuidedPCARematchStep
-  ClusterRefinementStep <|-- MRFRefinementStep
-  ClusterRefinementStep <|-- KMedoidsSplitMergeStep
   ClusterRefinementStep ..> RefinementResult : produces
 
   graphClusteringSweep --> "0..*" ClusterRefinementStep : chains
-}
-
-' ══════════════════════════════════════════════════════════════════
-'  STEP 6b: REFINEMENT INTERNALS
-' ══════════════════════════════════════════════════════════════════
-
-package "src.clustering — Refinement Engines" as refine_eng #FFEBEE {
-
-  class MRFBeliefPropagation {
-    beta, max_iter, damping
-    --
-    +fit(nlfa, edges, ocr_probs, init_labels) : dict
-    .. max-sum loopy BP ..
-    .. damped message passing ..
-    .. converges on stable assignment ..
-  }
-
-  class KMedoidsSplitMerge {
-    max_iter, split_threshold_sigma
-    min_split_size, merge_nlfa_threshold
-    --
-    +fit(init_labels, nlfa, D) : dict
-    -_medoids(labels, D) : dict
-    -_reassign(labels, D, medoids) : int
-    -_split(labels, D, nlfa, threshold) : int
-    -_merge(labels, nlfa, medoids) : int
-    .. Fiedler vector spectral bisection ..
-    .. NFA-validated cross-edge merging ..
-  }
-
-  MRFRefinementStep --> MRFBeliefPropagation : wraps
-  KMedoidsSplitMergeStep --> KMedoidsSplitMerge : wraps
 }
 
 ' ══════════════════════════════════════════════════════════════════
@@ -565,46 +512,10 @@ package "src.registration — Cluster Alignment" as align_pkg #F3E5F5 {
 }
 
 ' ══════════════════════════════════════════════════════════════════
-'  DEFORMATION-INVARIANT FEATURES
-' ══════════════════════════════════════════════════════════════════
-
-package "src.clustering — Deformation Features" as deform_pkg #FFF3E0 {
-
-  class ShapeContextDescriptor {
-    n_sample_points, n_angular_bins, n_radial_bins
-    --
-    +describe(binary) : ndarray (N_s, n_bins)
-    +distance(desc_a, desc_b) : float
-    .. contour sampling ..
-    .. log-polar histograms ..
-    .. chi-squared + Hungarian matching ..
-  }
-
-  class PersistentHomologyDescriptor {
-    +compute_persistence(binary) : dict {H0, H1}
-    +wasserstein_distance(dgm_a, dgm_b, q) : float
-    +topological_distance(img_a, img_b) : float
-    .. gudhi cubical complex ..
-    .. distance transform filtration ..
-    .. H0 = components, H1 = loops ..
-  }
-
-  class TopologicalPreFilter {
-    _ph : PersistentHomologyDescriptor
-    _thresh : float
-    --
-    +signature(binary) : (n_comp, n_loops)
-    +compatibility_mask(signatures) : ndarray (N,N)
-  }
-
-  TopologicalPreFilter --> PersistentHomologyDescriptor : uses
-}
-
-' ══════════════════════════════════════════════════════════════════
 '  EVALUATION & METRICS
 ' ══════════════════════════════════════════════════════════════════
 
-package "src.clustering — Evaluation" as eval_pkg #E0F7FA {
+package "src.clustering — Metrics" as eval_pkg #E0F7FA {
 
   class "<<module>> metrics" as metrics_mod {
     +compute_metrics(ref, pred) : dict
@@ -619,31 +530,6 @@ package "src.clustering — Evaluation" as eval_pkg #E0F7FA {
     inverse purity, pairwise F1,
     Hungarian-matched accuracy
   }
-
-  class AblationRunner {
-    ablations : List[AblationConfig]
-    +add_ablation(config)
-    +run(pipeline_fn, data, default_params, ref) : DataFrame
-  }
-  class AblationConfig <<dataclass>> {
-    name, description
-    parameter_name, parameter_values
-    default_value
-  }
-
-  class "<<module>> evaluation" as eval_mod {
-    +bootstrap_metrics(ref, pred, n_bootstrap) : dict
-    +paired_significance_test(ref, a, b) : dict
-    +get_feature_ablations() : List[AblationConfig]
-    +get_acontrario_ablations()
-    +get_clustering_ablations()
-    +get_refinement_ablations()
-    +run_scalability_benchmark(stages, subsets) : DataFrame
-  }
-
-  AblationRunner --> AblationConfig : has many
-  AblationRunner --> metrics_mod : uses
-  eval_mod --> metrics_mod : uses
 }
 
 ' ══════════════════════════════════════════════════════════════════

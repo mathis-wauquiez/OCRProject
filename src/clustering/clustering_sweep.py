@@ -1,6 +1,6 @@
 """
 graphClusteringSweep — Pure computation: graph building, HOG sweep,
-hierarchical splitting, metrics evaluation.
+refinement pipeline, metrics evaluation.
 
 Delegates ALL reporting to ClusteringSweepReporter.
 """
@@ -17,15 +17,12 @@ import pandas as pd
 
 # sci
 from scipy.stats import entropy
-from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import squareform
 
 # path / typing
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Optional
 
 # internal
-from .algorithms import communityDetectionBase
 from .feature_matching import featureMatching
 from .params import featureMatchingParameters
 from .clustering_sweep_report import ClusteringSweepReporter, UNKNOWN_LABEL
@@ -38,24 +35,12 @@ import logging
 from src.patch_processing.configs import get_hog_cfg
 from src.patch_processing.hog import HOG
 
-# Cluster splitting (legacy — kept for backward compat of direct calls)
-from src.clustering.bin_image_metrics import (
-    compute_hausdorff, registeredMetric, compute_distance_matrices_batched
-)
-
 # Refinement pipeline
 from .refinement import (
     ClusterRefinementStep, RefinementResult,
     HausdorffSplitStep, OCRGuidedPCARematchStep,
-    UNKNOWN_LABEL as _UNKNOWN_LABEL,
 )
 
-# New refinement methods
-from .mrf_refinement import MRFRefinementStep
-from .kmedoids_refinement import KMedoidsSplitMergeStep
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 from tqdm import tqdm
 
 
@@ -86,13 +71,11 @@ class graphClusteringSweep(AutoReport):
             split_min_cluster_size: int = 2,
             split_batch_size: int = 256,
             split_render_scale: float = 0.3,
-            split_metrics: Optional[Dict[str, callable]] = None,
 
             # ── Post-split rematching parameters ──
             rematch_max_cluster_size: int = 3,
             rematch_pca_k: int = 5,
             rematch_z_max: float = 3.0,
-            rematch_n_candidates: int = 5,
             rematch_min_target_size: int = 10,
 
             # ── Explicit refinement pipeline (overrides above if given) ──
@@ -158,17 +141,33 @@ class graphClusteringSweep(AutoReport):
         self.split_min_cluster_size = split_min_cluster_size
         self.split_batch_size       = split_batch_size
         self.split_render_scale     = split_render_scale
-        self.split_metrics          = split_metrics
 
         # ── Post-split rematching config ──
         self.rematch_max_cluster_size   = rematch_max_cluster_size
         self.rematch_pca_k              = rematch_pca_k
         self.rematch_z_max              = rematch_z_max
-        self.rematch_n_candidates       = rematch_n_candidates
         self.rematch_min_target_size    = rematch_min_target_size
 
         # ── Refinement pipeline ──
-        self.refinement_steps           = refinement_steps
+        if refinement_steps is not None:
+            self.refinement_steps = refinement_steps
+        else:
+            self.refinement_steps = [
+                HausdorffSplitStep(
+                    thresholds=self.split_thresholds,
+                    linkage_method=self.split_linkage_method,
+                    min_cluster_size=self.split_min_cluster_size,
+                    batch_size=self.split_batch_size,
+                    render_scale=self.split_render_scale,
+                ),
+                OCRGuidedPCARematchStep(
+                    max_cluster_size=self.rematch_max_cluster_size,
+                    pca_k=self.rematch_pca_k,
+                    z_max=self.rematch_z_max,
+                    min_target_size=self.rematch_min_target_size,
+                    device=self.device,
+                ),
+            ]
 
         # ── Post-clustering refinement (optional) ──
         self.enable_chat_split          = enable_chat_split
@@ -251,200 +250,6 @@ class graphClusteringSweep(AutoReport):
         G.add_nodes_from(range(N))
         G.add_weighted_edges_from(edges_list)
         return G, edges
-
-    # ================================================================
-    #  CLUSTER SPLITTING
-    # ================================================================
-
-    @staticmethod
-    def _compute_single_cluster_linkage(
-        cid, idx, dataframe, reg_metric, renderer,
-        batch_size, split_linkage_method, min_cluster_size,
-        gpu_semaphore=None,
-    ):
-        """Compute Hausdorff distance matrix and linkage for one cluster.
-
-        Args:
-            gpu_semaphore: Optional ``threading.Semaphore`` that gates
-                access to the GPU-intensive distance-matrix computation.
-                Threads that don't hold the semaphore can still do CPU
-                work (pair building, numpy/scipy linkage).
-        """
-        size = len(idx)
-
-        if size < min_cluster_size:
-            return cid, dict(indices=idx, linkage=None, size=size)
-
-        subdf = dataframe.iloc[idx]
-
-        # Gate GPU work so only a bounded number of clusters hit the GPU
-        # concurrently, preventing OOM from stacked VRAM allocations.
-        if gpu_semaphore is not None:
-            gpu_semaphore.acquire()
-        try:
-            D_dict = compute_distance_matrices_batched(
-                reg_metric, renderer, subdf,
-                batch_size=batch_size,
-                sym_registration=False,
-            )
-        finally:
-            if gpu_semaphore is not None:
-                gpu_semaphore.release()
-
-        D = D_dict['hausdorff']
-        condensed = squareform(D, checks=False)
-        bad_mask = ~np.isfinite(condensed)
-        if bad_mask.any():
-            finite_max = np.nanmax(condensed[np.isfinite(condensed)]) \
-                if np.isfinite(condensed).any() else 1.0
-            condensed[bad_mask] = finite_max * 10
-        Z = linkage(condensed, method=split_linkage_method)
-
-        return cid, dict(indices=idx, linkage=Z, size=size)
-
-    def _compute_cluster_linkages(self, dataframe, partition_membership, renderer,
-                                  max_workers=None, max_concurrent_gpu=1):
-        """
-        Expensive step (done once): pairwise Hausdorff distances per
-        Leiden cluster → linkage matrices.
-
-        Clusters are processed in parallel using threads.  A semaphore
-        limits the number of clusters that can run GPU-intensive IC
-        registration concurrently (preventing CUDA OOM), while still
-        allowing other threads to overlap CPU work (pair generation,
-        canvas placement, numpy/scipy linkage).
-
-        Args:
-            max_workers: Thread-pool size.  ``None`` lets the executor
-                pick a sensible default.  Set to 1 for sequential
-                execution (debugging).
-            max_concurrent_gpu: Maximum number of clusters allowed to
-                run ``compute_distance_matrices_batched`` on the GPU at
-                the same time.  Defaults to 1 (serialised GPU access)
-                to stay within VRAM limits.
-        """
-        metrics_dict = {'hausdorff': compute_hausdorff}
-        if self.split_metrics is not None:
-            metrics_dict.update(self.split_metrics)
-
-        reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
-        membership = np.asarray(partition_membership)
-        cluster_ids = np.unique(membership)
-
-        # ── Build per-cluster index arrays ──────────────────────────────
-        cluster_indices = {
-            cid: np.where(membership == cid)[0] for cid in cluster_ids
-        }
-
-        # ── Sort clusters largest-first so big jobs start early ─────────
-        sorted_cids = sorted(cluster_ids, key=lambda c: len(cluster_indices[c]),
-                             reverse=True)
-
-        cluster_linkages = {}
-        gpu_semaphore = threading.Semaphore(max_concurrent_gpu)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    self._compute_single_cluster_linkage,
-                    cid, cluster_indices[cid], dataframe,
-                    reg_metric, renderer,
-                    self.split_batch_size,
-                    self.split_linkage_method,
-                    self.split_min_cluster_size,
-                    gpu_semaphore,
-                ): cid
-                for cid in sorted_cids
-            }
-
-            with tqdm(total=len(futures),
-                      desc="Computing cluster linkages (Hausdorff)",
-                      colour="yellow") as pbar:
-                for future in as_completed(futures):
-                    cid, result = future.result()
-                    cluster_linkages[cid] = result
-                    pbar.update(1)
-
-        return cluster_linkages
-
-    def _apply_split_threshold(self, cluster_linkages, threshold):
-        """Cheap step: cut every pre-computed linkage at *threshold*."""
-        all_indices = np.concatenate([v['indices'] for v in cluster_linkages.values()])
-        n_total = all_indices.max() + 1
-        new_membership = np.full(n_total, -1, dtype=int)
-        split_log = []
-        next_id = 0
-
-        for cid, info in cluster_linkages.items():
-            idx = info['indices']
-            Z = info['linkage']
-
-            if Z is None:
-                new_membership[idx] = next_id
-                split_log.append(dict(
-                    original_cluster=int(cid), original_size=info['size'],
-                    n_subclusters=1, subcluster_sizes=[info['size']],
-                ))
-                next_id += 1
-                continue
-
-            sub_labels = fcluster(Z, threshold, criterion='distance')
-            n_sub = len(np.unique(sub_labels))
-            sub_sizes = [int((sub_labels == s).sum()) for s in np.unique(sub_labels)]
-
-            for s in np.unique(sub_labels):
-                new_membership[idx[sub_labels == s]] = next_id
-                next_id += 1
-
-            split_log.append(dict(
-                original_cluster=int(cid), original_size=info['size'],
-                n_subclusters=n_sub, subcluster_sizes=sub_sizes,
-            ))
-
-        assert (new_membership >= 0).all(), "Unassigned samples after splitting!"
-        return new_membership, split_log
-
-    def sweep_split_thresholds(self, dataframe, partition_membership, renderer):
-        """Compute linkages once, then sweep over all split_thresholds."""
-        cluster_linkages = self._compute_cluster_linkages(
-            dataframe, partition_membership, renderer
-        )
-
-        sweep_results = []
-        best_score = -np.inf
-        best_threshold = self.split_thresholds[0]
-        best_membership = None
-        best_split_log = None
-
-        for threshold in tqdm(self.split_thresholds,
-                              desc="Split threshold sweep", colour="magenta"):
-            membership, split_log = self._apply_split_threshold(
-                cluster_linkages, threshold
-            )
-            metrics = self._evaluate_membership(
-                target_labels=dataframe[self.target_lbl],
-                membership=membership.tolist()
-            )
-            n_clusters = len(np.unique(membership))
-            n_split = sum(1 for e in split_log if e['n_subclusters'] > 1)
-
-            sweep_results.append({
-                'split_threshold': threshold,
-                'n_clusters_post_split': n_clusters,
-                'n_clusters_actually_split': n_split,
-                **metrics,
-            })
-
-            score = metrics.get('adjusted_rand_index', 0)
-            if score > best_score:
-                best_score = score
-                best_threshold = threshold
-                best_membership = membership
-                best_split_log = split_log
-
-        sweep_results_df = pd.DataFrame(sweep_results)
-        return (best_threshold, best_membership, best_split_log,
-                sweep_results_df, cluster_linkages)
 
     # ================================================================
     #  Purity & representatives (pure computation)
