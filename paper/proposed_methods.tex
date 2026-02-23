@@ -1,284 +1,101 @@
 % ============================================================================
-%  Proposed Methods — Refinement, Registration, and Feature Improvements
-% ============================================================================
-%
-%  This file is designed to be \input{} into main.tex.
+%  Proposed Methods — Clustering, Refinement, Registration, Features
 % ============================================================================
 
 \section{Proposed Methods}
 \label{sec:proposed-methods}
 
-This section presents four categories of improvements over the baseline pipeline: alternative clustering strategies that exploit the continuous NFA signal (Section~\ref{sec:proposed-clustering}), a principled refinement framework (Section~\ref{sec:proposed-refinement}), registration methods for intra-cluster alignment (Section~\ref{sec:proposed-registration}), and deformation-invariant feature descriptors (Section~\ref{sec:proposed-features}).
+We propose four categories of improvements over the baseline: alternative clustering strategies (Sect.~\ref{sec:proposed-clustering}), principled refinement (Sect.~\ref{sec:proposed-refinement}), registration methods (Sect.~\ref{sec:proposed-registration}), and deformation-invariant features (Sect.~\ref{sec:proposed-features}).
 
 
 % ============================================================================
 \subsection{Alternative Clustering Methods}
 \label{sec:proposed-clustering}
 
-The baseline pipeline binarises NLFA values into graph edges and runs community detection, discarding the graded similarity signal.
-We propose three alternatives that operate on the continuous NLFA matrix.
+The baseline binarises NLFA values into edges, discarding the graded similarity signal.
+We propose three alternatives operating on the continuous NLFA matrix.
 
 
-% ---------- HDBSCAN ----------
-\subsubsection{HDBSCAN with NFA-Derived Distance}
+\paragraph{HDBSCAN with NFA-derived distance.}
 \label{sec:hdbscan}
-
-HDBSCAN~\cite{mcinneshdbscan2017} provides hierarchical density-based clustering that (a)~preserves the continuous NLFA signal, (b)~automatically determines the number of clusters, and (c)~identifies noise points---damaged or ambiguous glyphs that should not be forced into any cluster.
-
-\paragraph{Distance definition.}
-Given the NLFA matrix $S$ (where higher values indicate greater similarity), we define the distance:
+HDBSCAN~\cite{mcinneshdbscan2017} provides density-based clustering that preserves the continuous NLFA signal, automatically determines $K$, and identifies noise points.
+We define the distance $d(I_i, I_j) = D_{\max} - \frac{1}{2}[\text{NLFA}(I_i, I_j) + \text{NLFA}(I_j, I_i)]$ with sentinel $D_{\max} = 50$.
+The mutual reachability distance
 \begin{equation}
-    d(I_i, I_j) = D_{\max} - \tfrac{1}{2}\bigl[\text{NLFA}(I_i, I_j) + \text{NLFA}(I_j, I_i)\bigr],
-    \label{eq:nfa-distance}
-\end{equation}
-where $D_{\max} = 50$ is a sentinel value (corresponding to NFA $= 10^{-50}$).
-Uncomputed pairs receive $d = D_{\max}$.
-
-\paragraph{Mutual reachability.}
-For neighbourhood parameter $k = \texttt{min\_samples}$, define the core distance $d_{\text{core}}(I_i) = d(I_i, \mathcal{N}_k(I_i))$ and the mutual reachability distance:
-\begin{equation}
-    d_{\text{mr}}(I_i, I_j) = \max\!\bigl(d_{\text{core}}(I_i),\; d_{\text{core}}(I_j),\; d(I_i, I_j)\bigr).
+    d_{\text{mr}}(I_i, I_j) = \max\!\bigl(d_{\text{core}}(I_i),\; d_{\text{core}}(I_j),\; d(I_i, I_j)\bigr)
     \label{eq:mutual-reachability}
 \end{equation}
-This inflates distances in sparse regions, making the algorithm robust to the highly variable cluster sizes in character data (common characters like `e' have dense neighbourhoods; rare characters like `z' are sparse).
-
-\paragraph{Hierarchy and cluster extraction.}
-A minimum spanning tree on the mutual reachability graph is constructed, then edges are removed in order of increasing $d_{\text{mr}}$.
-The resulting condensed tree is traversed bottom-up: at each node, the node's stability
-\begin{equation}
-    \text{Stab}(C) = \sum_{I_i \in C} \bigl(\lambda_{\text{death}}(I_i, C) - \lambda_{\text{birth}}(C)\bigr), \qquad \lambda = 1/d_{\text{mr}},
-    \label{eq:stability}
-\end{equation}
-is compared to the sum of its children's stabilities.
-Flat clusters are extracted via Excess of Mass (EOM) selection.
-
-\paragraph{Noise handling.}
-Characters assigned label $-1$ (noise) by HDBSCAN can be post-processed: if their distance to the nearest cluster medoid is below a threshold, they are reassigned; otherwise they remain as singletons.
-This is preferable to the baseline where every character is forced into a cluster.
-
-\paragraph{Implementation.}
-We use the \texttt{hdbscan} Python package with \texttt{metric='precomputed'}, \texttt{min\_cluster\_size} $\in \{3, 5\}$, and \texttt{min\_samples} $= 3$.
-For $N = 15\text{k}$ characters, inference takes seconds on a precomputed distance matrix.
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:hdbscan-tree}]} --- HDBSCAN condensed tree for a representative subset (${\sim}500$ characters), with cluster stability values annotated.
-        Selected flat clustering highlighted.
-    \vspace{3cm}}}
-    \caption{HDBSCAN condensed tree showing the hierarchical density-based decomposition of the NFA distance matrix.
-    Cluster stability values (Eq.~\ref{eq:stability}) guide the EOM extraction of the flat clustering (coloured branches).
-    Grey branches are classified as noise.}
-    \label{fig:hdbscan-tree}
-\end{figure}
+inflates distances in sparse regions, making the algorithm robust to variable cluster sizes.
+Flat clusters are extracted via Excess of Mass (EOM) selection on the condensed tree, using cluster stability $\text{Stab}(C) = \sum_{I_i \in C} (\lambda_{\text{death}}(I_i, C) - \lambda_{\text{birth}}(C))$ where $\lambda = 1/d_{\text{mr}}$.
 
 
-% ---------- Affinity Propagation ----------
-\subsubsection{Affinity Propagation on NFA Similarities}
+\paragraph{Affinity Propagation.}
 \label{sec:affinity-propagation}
-
-Affinity Propagation (AP)~\cite{frey2007clustering} operates directly on the pairwise NLFA similarity matrix and simultaneously identifies exemplars (cluster centres) and assignments without requiring $K$.
-Exemplars are interpretable as prototypical character instances.
-
-\paragraph{Similarity matrix.}
-For $i \neq j$, set $s(I_i, I_j) = \frac{1}{2}[\text{NLFA}(I_i, I_j) + \text{NLFA}(I_j, I_i)]$.
-The self-similarity (preference) $p = s(I_i, I_i)$ controls the number of clusters: setting $p = \text{median}(s)$ yields a moderate number of clusters.
-
-\paragraph{Message passing.}
-Two types of messages are passed iteratively with damping $\lambda \in [0.5, 0.9]$:
-
-\emph{Responsibility} $r(i,k)$: how well-suited $k$ is as exemplar for $i$, relative to other candidates:
-\begin{equation}
-    r(i,k) \leftarrow s(i,k) - \max_{k' \neq k}\!\bigl\{a(i,k') + s(i,k')\bigr\}.
-\end{equation}
-
-\emph{Availability} $a(i,k)$: how appropriate it is for $i$ to choose $k$:
-\begin{equation}
-    a(i,k) \leftarrow \min\!\Bigl(0,\; r(k,k) + {\textstyle\sum_{i' \notin \{i,k\}}} \max\bigl(0, r(i',k)\bigr)\Bigr).
-\end{equation}
-
-Convergence is declared when exemplar assignments are stable for 15~iterations.
-
-\paragraph{When to prefer AP over HDBSCAN.}
-AP is preferable when interpretable exemplars are desired and cluster sizes are relatively balanced.
-HDBSCAN is preferable when noise handling is critical and cluster sizes are highly variable.
+AP~\cite{frey2007clustering} operates directly on the symmetrised NLFA matrix, simultaneously identifying exemplars (prototypical instances) and assignments without requiring~$K$.
+Responsibility $r(i,k) \leftarrow s(i,k) - \max_{k' \neq k}\{a(i,k') + s(i,k')\}$ and availability messages are passed iteratively with damping $\lambda \in [0.5, 0.9]$ until convergence.
+The self-similarity (preference) $p = \text{median}(s)$ controls the number of clusters.
 
 
-% ---------- MRF ----------
-\subsubsection{MRF with Loopy Belief Propagation}
+\paragraph{MRF with Loopy Belief Propagation.}
 \label{sec:mrf}
-
-A Markov Random Field jointly optimises cluster assignments using both visual similarity (NFA pairwise potentials) and linguistic information (OCR unary potentials)~\cite{yedidia2003understanding}.
-
-\paragraph{Model definition.}
-Let $z_i \in \{1, \ldots, K\}$ be the cluster label for character~$I_i$.
-The energy is:
-\begin{equation}
-    E(\mathbf{z}) = \sum_{i=1}^{N} \psi_i(z_i) + \sum_{(i,j) \in \mathcal{E}} \psi_{ij}(z_i, z_j),
-    \label{eq:mrf-energy}
-\end{equation}
-with unary potentials $\psi_i(z_i = c) = -\log P_{\text{OCR}}(I_i = c)$ encoding OCR predictions, and pairwise potentials (generalised Potts):
+A Markov Random Field~\cite{yedidia2003understanding} jointly optimises cluster assignments using both visual and linguistic signals.
+The energy $E(\mathbf{z}) = \sum_i \psi_i(z_i) + \sum_{(i,j)} \psi_{ij}(z_i, z_j)$ combines OCR unary potentials $\psi_i(z_i{=}c) = -\log P_{\text{OCR}}(I_i{=}c)$ with generalised Potts pairwise potentials:
 \begin{equation}
     \psi_{ij}(z_i, z_j) = \begin{cases} -\beta \cdot \text{NLFA}(I_i, I_j) & \text{if } z_i = z_j, \\ 0 & \text{otherwise,} \end{cases}
     \label{eq:potts}
 \end{equation}
-where $\beta > 0$ controls the relative weight of visual vs.\ linguistic signal.
-
-\paragraph{Inference.}
-Max-sum loopy BP on the sparse NFA graph $\mathcal{G}$ with damping $\lambda = 0.5$:
-\begin{equation}
-    m_{i \to j}(z_j) \leftarrow \max_{z_i}\!\left[\psi_i(z_i) + \psi_{ij}(z_i, z_j) + \sum_{k \in \mathcal{N}(i) \setminus j} m_{k \to i}(z_i)\right].
-\end{equation}
-The MAP assignment is $z_i^* = \argmax_{z_i} b_i(z_i)$ where $b_i(z_i) \propto \psi_i(z_i) + \sum_k m_{k \to i}(z_i)$.
-
-\paragraph{Why this subsumes the three refinement stages.}
-The unary potentials directly encode the OCR signal (replacing Stage~2), the pairwise potentials capture visual similarity (replacing Stage~1's splitting), and the global energy minimisation handles singletons (replacing Stage~3's PCA z-score test).
-The coupling parameter $\beta$ is set to $1/\text{median}(\text{NLFA})$ as a scale-invariant default.
+where $\beta = 1/\text{median}(\text{NLFA})$.
+This subsumes the three baseline refinement stages: unary potentials encode the OCR signal (Stage~2), pairwise potentials capture visual similarity (Stage~1), and global energy minimisation handles singletons (Stage~3).
 
 
 % ============================================================================
 \subsection{Principled Refinement: K-Medoids with Split/Merge}
 \label{sec:proposed-refinement}
 
-The three ad hoc refinement stages are replaced by a single principled iterative algorithm.
+The three ad hoc refinement stages are replaced by a single iterative algorithm.
+Starting from the baseline partition, medoids are computed as $m_C = \argmin_{I_i \in C} \sum_{I_j \in C} d(I_i, I_j)$.
 
-\paragraph{Initialisation.}
-Start from the baseline pipeline's output (connected components or Leiden clusters).
-Compute medoids: $m_C = \argmin_{I_i \in C} \sum_{I_j \in C} d(I_i, I_j)$.
-
-\paragraph{Reassignment step.}
-For each character $I_i$ in cluster $C$, compare its distance to the own medoid $d(I_i, m_C)$ against the $k$-nearest alternative medoids.
-If a better match exists, reassign~$I_i$.
-
-\paragraph{Split step.}
-For each cluster $C$ with $|C| > \tau_{\text{split}}$, compute the average intra-cluster distance $\bar{d}_C$.
-If $\bar{d}_C > \mu_0 + 2\sigma_0$ (where $\mu_0, \sigma_0$ are estimated from the background model), the cluster is likely impure.
-Apply spectral bisection: compute the Fiedler vector (second eigenvector of the normalised graph Laplacian of the NLFA subgraph restricted to $C$) and split at the zero crossing.
-
-\paragraph{Merge step.}
-For each pair of clusters $(C_a, C_b)$: if $\text{NLFA}(m_{C_a}, m_{C_b}) > \varepsilon_{\text{merge}}$ (medoids are similar) and the fraction of cross-cluster NFA-validated edges exceeds $30\%$, merge $C_a$ and~$C_b$.
-
-\paragraph{Convergence.}
-Iterate Reassign $\to$ Split $\to$ Merge $\to$ Recompute medoids until no changes occur.
-Reassignment strictly decreases the intra-cluster distance objective $\mathcal{L} = \sum_C \sum_{I_i \in C} d(I_i, m_C)$.
-In practice, 3--5 iterations suffice.
+\emph{Reassignment:} Each character is compared to the $k$-nearest alternative medoids; if a better match exists, it is reassigned.
+\emph{Split:} Clusters with high average intra-cluster distance ($\bar{d}_C > \mu_0 + 2\sigma_0$) are bisected via the Fiedler vector of the normalised graph Laplacian.
+\emph{Merge:} Cluster pairs whose medoids are NFA-similar and share $>30\%$ cross-cluster edges are merged.
+Iteration (Reassign $\to$ Split $\to$ Merge $\to$ Recompute medoids) converges in 3--5 rounds.
 
 
 % ============================================================================
 \subsection{Registration Methods}
 \label{sec:proposed-registration}
 
-Given a cluster $C = \{I_1, \ldots, I_m\}$, we require a common coordinate frame for template computation and visual comparison.
+Given a cluster $C = \{I_1, \ldots, I_m\}$, we require a common coordinate frame for template computation.
 
-% ---------- MST ----------
-\subsubsection{MST-Based Hierarchical Alignment}
+\paragraph{MST-based hierarchical alignment.}
 \label{sec:mst-alignment}
+A $k$-NN alignment graph ($k{=}5$) is built from pairwise registration residuals $w(I_i, I_j) = \min_T \mathcal{L}_\text{Lorentz}(I_i \circ T, I_j)$.
+The minimum spanning tree, rooted at the cluster medoid, propagates transformations root-to-leaves: $T_\text{child}^\text{global} = T_\text{parent}^\text{global} \circ T_{\text{child} \to \text{parent}}$.
+The template is the pixel-wise median of aligned images.
+Error at depth $L$ is bounded by $L \cdot \delta + O(L^2 \delta^2)$; 1--2 refinement rounds against the current template mitigate drift.
 
-\paragraph{Algorithm.}
-\begin{enumerate}[nosep]
-    \item Build an alignment graph using $k$-nearest neighbours from the NLFA matrix ($k = 5$).
-    \item Compute pairwise alignment residuals $w(I_i, I_j) = \min_{T \in \mathcal{T}} \mathcal{L}_{\text{Lorentz}}(I_i \circ T, I_j)$ as edge weights.
-    \item Build the MST (Kruskal's algorithm).
-    \item Root at the cluster medoid $r = \argmin_{I_i \in C} \sum_{I_j \in C} d(I_i, I_j)$ to minimise average path length.
-    \item Propagate transformations root-to-leaves (BFS): $T_{\text{child}}^{\text{global}} = T_{\text{parent}}^{\text{global}} \circ T_{\text{child} \to \text{parent}}$.
-    \item Compute the canonical template as the pixel-wise \emph{median} of aligned images.
-\end{enumerate}
-
-\paragraph{Error analysis.}
-If each pairwise alignment has residual $\leq \delta$, the accumulated error at depth $L$ is bounded by $\|T_i^{\text{global}} - T_i^{\text{true}}\| \leq L \cdot \delta + O(L^2 \delta^2)$.
-For the MST rooted at the medoid, the maximum depth is $O(\log m)$ on average for well-clustered sets.
-
-\paragraph{Drift mitigation.}
-After tree propagation, 1--2 rounds of refinement are applied: each character is re-aligned to the current median template (not to its parent), then the template is recomputed.
-
-\paragraph{Complexity.}
-$O(mk \cdot HW)$ per cluster (dominated by pairwise alignments), where $k$ is the neighbourhood size and $HW$ is the image resolution.
-
-
-% ---------- Congealing ----------
-\subsubsection{Congealing with Robust Latent Template}
+\paragraph{Congealing.}
 \label{sec:congealing}
-
-Instead of aligning pairwise, jointly optimise all transformations and a latent template~$\bar{I}$~\cite{learned2004data}:
+Joint optimisation of all transformations and a latent template $\bar{I}$~\cite{learned2004data}:
 \begin{equation}
     \min_{\bar{I},\, \{T_i\}} \sum_{i=1}^{m} \mathcal{L}\!\bigl(I_i \circ T_i,\; \bar{I}\bigr) + \lambda \sum_{i=1}^{m} \|T_i - \text{Id}\|_F^2.
     \label{eq:congealing}
 \end{equation}
-
-\paragraph{Alternating optimisation.}
-\begin{enumerate}[nosep]
-    \item \textbf{Fix $\{T_i\}$, update $\bar{I}$:}  $\bar{I}(x) = \text{median}_{i=1}^m (I_i \circ T_i)(x)$.
-    The pixel-wise median is the ML estimator under Laplacian noise and is robust to outliers.
-    \item \textbf{Fix $\bar{I}$, update each $T_i$:}  Standard IC registration of $I_i$ to $\bar{I}$.
-\end{enumerate}
-Initialise $\bar{I}^{(0)}$ as the medoid character and all $T_i^{(0)} = \text{Id}$.
-Convergence typically in 5--10 alternations.
-
-\paragraph{Advantage over Fr\'echet mean.}
-The Fr\'echet mean computes the \emph{mean} image, which is blurred by residual misalignment.
-Congealing computes the \emph{median} after iterative alignment, producing sharper templates.
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:registration-compare}]} --- Registration comparison for a cluster of 20 characters:
-        (a)~unaligned overlay, (b)~Fr\'echet mean (blurry), (c)~MST alignment (sharper), (d)~congealing result.
-    \vspace{3cm}}}
-    \caption{Comparison of registration methods on a single cluster.
-    The MST-based alignment~(c) avoids the blurring of the Fr\'echet mean~(b) by propagating transformations along minimal-residual paths.
-    Congealing~(d) further sharpens the template through iterative joint optimisation.}
-    \label{fig:registration-compare}
-\end{figure}
+Alternating: fix $\{T_i\}$, update $\bar{I}$ via pixel-wise median (robust to outliers); fix $\bar{I}$, update each $T_i$ via IC registration.
+Congealing produces sharper templates than the Fr\'echet mean, which blurs from residual misalignment.
 
 
 % ============================================================================
 \subsection{Deformation-Invariant Features}
 \label{sec:proposed-features}
 
-% ---------- Shape Context ----------
-\subsubsection{Shape Context Descriptors}
+\paragraph{Shape Context descriptors.}
 \label{sec:shape-context}
+For each character, $N_s = 100$ contour points are sampled uniformly~\cite{belongie2002shape}.
+At each point, the distribution of relative vectors in log-polar coordinates is computed (12~angular $\times$ 5~radial bins).
+Character distance is the minimum-cost Hungarian matching of per-point histograms using chi-squared distance.
 
-For each character, $N_s = 100$ points are sampled uniformly from the contour.
-For each sample point~$p_i$, the distribution of relative vectors to all other points in log-polar coordinates $(r, \theta)$ is computed~\cite{belongie2002shape}:
-\begin{equation}
-    h_i(k, l) = \#\{p_j \neq p_i : (r_{ij}, \theta_{ij}) \in \text{bin}(k, l)\},
-\end{equation}
-with 12 angular bins and 5 radial bins (log-spaced), yielding a 60-dimensional histogram per sample point.
-The distance between two characters is the minimum-cost matching via the Hungarian algorithm:
-\begin{equation}
-    d_{\text{SC}}(I_a, I_b) = \min_{\pi} \frac{1}{N_s}\sum_{i=1}^{N_s} C\!\bigl(h_i^a, h_{\pi(i)}^b\bigr),
-\end{equation}
-where $C$ is the chi-squared distance.
-Shape Context is inherently invariant to translation and optionally to scale (by normalising radial distances).
-
-% ---------- Persistent Homology ----------
-\subsubsection{Persistent Homology}
+\paragraph{Persistent homology.}
 \label{sec:persistent-homology}
-
-The sublevel set filtration of the distance transform $d_I(x) = \min_{y \in \text{ink}} \|x - y\|$ tracks topological features across scales~\cite{edelsbrunner2008persistent}:
-\begin{itemize}[nosep]
-    \item $H_0$ (connected components): birth/death of connected ink regions.
-    \item $H_1$ (loops): birth/death of enclosed holes (e.g., interior of `o', `b', `8').
-\end{itemize}
-The output is a persistence diagram $\text{Dgm}(I) = \{(b_j, d_j)\}$.
-The Wasserstein distance between diagrams provides a stable metric:
-\begin{equation}
-    W_q\!\bigl(\text{Dgm}(I_a), \text{Dgm}(I_b)\bigr) = \left(\inf_{\gamma} \sum_j \|(b_j, d_j) - \gamma(b_j, d_j)\|_\infty^q\right)^{1/q}\!.
-\end{equation}
-
-\paragraph{Topological pre-filter.}
-Persistent homology is used as a \emph{fast rejection} step: topologically incompatible pairs (different number of significant loops, e.g., `o' vs.\ `c') are rejected before the expensive NFA comparison.
-This reduces the number of pairwise comparisons without loss of recall for topologically compatible characters.
-The topological signature (number of significant $H_0$ and $H_1$ features) is computed in $O(HW)$ per character via a single distance transform.
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:noise-gallery}]} --- Gallery of characters classified as noise by HDBSCAN: damaged glyphs, ambiguous strokes, detection artefacts.
-    \vspace{3cm}}}
-    \caption{Noise points identified by HDBSCAN.
-    These characters have low density in the NFA distance space and are correctly excluded from clustering.
-    They correspond to damaged glyphs, detection artefacts, and ambiguous stroke fragments that would degrade cluster purity if forced into a cluster.}
-    \label{fig:noise-gallery}
-\end{figure}
+The sublevel set filtration of the distance transform tracks topological features ($H_0$: components, $H_1$: loops) across scales~\cite{edelsbrunner2008persistent}.
+Persistent homology serves as a fast rejection step: topologically incompatible pairs (different number of significant loops) are rejected before the expensive NFA comparison, computed in $O(HW)$ per character via a single distance transform.

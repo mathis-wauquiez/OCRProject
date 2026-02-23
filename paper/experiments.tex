@@ -1,73 +1,53 @@
 % ============================================================================
 %  Experiments — Ablation Studies, Comparisons, and Evaluation Protocol
 % ============================================================================
-%
-%  This file is designed to be \input{} into main.tex.
-% ============================================================================
 
 \section{Experiments}
 \label{sec:experiments}
 
-This section describes the evaluation protocol, ablation studies, comparative experiments, and the planned figures for the paper.
+This section describes the evaluation protocol, ablation studies, and comparative experiments.
 
 
 % ============================================================================
 \subsection{Evaluation Protocol}
 \label{sec:eval-protocol}
 
-% ---------- Metrics ----------
-\subsubsection{Metrics}
-\label{sec:eval-metrics}
-
-All metrics are computed against manually annotated reference labels (not OCR-derived labels).
+\paragraph{Metrics.}
+All metrics are computed against manually annotated reference labels (not OCR-derived).
+Table~\ref{tab:metrics} summarises the evaluation metrics.
 
 \begin{table}[t]
     \centering
     \small
     \caption{Evaluation metrics and their interpretation.}
     \label{tab:metrics}
-    \begin{tabular}{@{}lp{8.5cm}@{}}
+    \begin{tabular}{@{}lp{7.5cm}@{}}
         \toprule
         \textbf{Metric} & \textbf{Description} \\
         \midrule
-        ARI~\cite{hubert1985comparing} & Chance-adjusted pairwise agreement; primary metric. Range $[-1, 1]$. \\
-        NMI & Information-theoretic overlap; robust to different cluster counts. Range $[0, 1]$. \\
-        V-measure~\cite{rosenberg2007v} & Harmonic mean of homogeneity (within-cluster purity) and completeness (all instances of a class in one cluster). Decomposes errors into splits and merges. \\
-        Per-class F1 & Precision/recall per character class via Hungarian matching. Identifies problematic character pairs. \\
-        Noise fraction & Fraction of characters classified as noise (HDBSCAN only). Should correlate with detection errors and damage. \\
+        ARI~\cite{hubert1985comparing} & Chance-adjusted pairwise agreement; primary metric. \\
+        NMI & Information-theoretic overlap; robust to different cluster counts. \\
+        V-measure~\cite{rosenberg2007v} & Harmonic mean of homogeneity and completeness. \\
+        Per-class F1 & Precision/recall per character class via Hungarian matching. \\
+        Noise fraction & Fraction classified as noise (HDBSCAN only). \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-% ---------- Ground truth ----------
-\subsubsection{Ground Truth Construction}
-\label{sec:ground-truth}
+\paragraph{Ground truth.}
+At least 500 characters from each corpus are manually annotated by two independent annotators; inter-annotator agreement is reported via Cohen's~$\kappa$.
 
-At least 500 characters (covering all classes, including rare ones) from each corpus are manually annotated by two independent annotators.
-Inter-annotator agreement is reported via Cohen's~$\kappa$.
-Disagreements are resolved by consensus.
-The annotated set is independent of the OCR system: annotators work from character crop images alone, without seeing OCR predictions.
-
-% ---------- Statistical significance ----------
-\subsubsection{Statistical Significance}
-\label{sec:significance}
-
-For all main comparisons (method A vs.\ method B):
-\begin{itemize}[nosep]
-    \item Mean and standard deviation over 5 bootstrap sub-samplings of the evaluation set.
-    \item Paired Wilcoxon signed-rank test for per-character classification agreement.
-    \item Cohen's $d$ effect size for ARI differences.
-\end{itemize}
+\paragraph{Statistical significance.}
+For main comparisons: mean and standard deviation over 5 bootstrap sub-samplings, paired Wilcoxon signed-rank test, and Cohen's $d$ effect size.
 
 
 % ============================================================================
 \subsection{Ablation Studies}
 \label{sec:ablations}
 
-Each ablation isolates one variable while holding all others at their default setting.
+Each ablation isolates one variable while holding others at their default setting.
 We report ARI, NMI, V-measure, and the number of clusters.
 
-% ---------- Feature ablations ----------
 \subsubsection{Feature Representation (A1--A4)}
 
 \begin{table}[t]
@@ -75,19 +55,18 @@ We report ARI, NMI, V-measure, and the number of clusters.
     \small
     \caption{Feature representation ablations.}
     \label{tab:ablation-features}
-    \begin{tabular}{@{}llp{6.5cm}@{}}
+    \begin{tabular}{@{}llp{5.5cm}@{}}
         \toprule
         \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
         \midrule
-        A1 & HOG cell size & $8 \times 8$, $12 \times 12$, $16 \times 16$, $24 \times 24$\,px \\
+        A1 & HOG cell size & $8{\times}8$, $12{\times}12$, $16{\times}16$, $24{\times}24$\,px \\
         A2 & Orientation bins & 4, 8, 12, 16, 24 unsigned bins \\
-        A3 & Feature type & HOG (baseline), Shape Context, Learned (contrastive CNN), HOG + persistent homology pre-filter \\
-        A4 & Dissimilarity & CEMD (baseline) vs.\ Sinkhorn OT on spatial-feature tensor \\
+        A3 & Feature type & HOG, Shape Context, Learned (CNN), HOG + persistent homology \\
+        A4 & Dissimilarity & CEMD vs.\ Sinkhorn OT \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-% ---------- A contrario ablations ----------
 \subsubsection{A Contrario Framework (A5--A7)}
 
 \begin{table}[t]
@@ -95,56 +74,38 @@ We report ARI, NMI, V-measure, and the number of clusters.
     \small
     \caption{A contrario framework ablations.}
     \label{tab:ablation-acontrario}
-    \begin{tabular}{@{}llp{6.5cm}@{}}
+    \begin{tabular}{@{}llp{5.5cm}@{}}
         \toprule
         \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
         \midrule
-        A5 & Background model & Na\"ive $\mathcal{H}_0$ (independent cells) vs.\ Empirical null (bootstrapped) vs.\ Gamma-fitted \\
-        A6 & Gaussianity & Q-Q plots at $K = 4, 16, 36, 64$ cells; KS $p$-values \\
-        A7 & NFA threshold $\varepsilon$ & $\{0.01, 0.1, 1, 10, 100\}$; plot ARI and $K$ vs.~$\varepsilon$ \\
+        A5 & Background model & Independent cells, Empirical (bootstrap), Gamma-fitted \\
+        A6 & Gaussianity & Q-Q plots at $K = 4, 16, 36, 64$ cells \\
+        A7 & NFA threshold & $\varepsilon \in \{0.01, 0.1, 1, 10, 100\}$ \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-% ---------- Clustering ablations ----------
-\subsubsection{Clustering Method (A8--A10)}
+\subsubsection{Clustering and Refinement (A8--A13)}
 
 \begin{table}[t]
     \centering
     \small
-    \caption{Clustering method ablations.}
+    \caption{Clustering and refinement ablations.}
     \label{tab:ablation-clustering}
-    \begin{tabular}{@{}llp{6.5cm}@{}}
+    \begin{tabular}{@{}llp{5.5cm}@{}}
         \toprule
         \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
         \midrule
-        A8 & Algorithm & Connected components, HDBSCAN, AP, Louvain, Leiden \\
-        A9 & HDBSCAN \texttt{min\_cluster\_size} & $\{2, 3, 5, 10, 20\}$; report ARI, $K$, noise fraction \\
-        A10 & HDBSCAN \texttt{min\_samples} & $\{1, 3, 5, 10, 15\}$ \\
+        A8 & Clustering algorithm & Connected comp., HDBSCAN, AP, Louvain, Leiden \\
+        A9 & HDBSCAN min\_cluster\_size & $\{2, 3, 5, 10, 20\}$ \\
+        A10 & HDBSCAN min\_samples & $\{1, 3, 5, 10, 15\}$ \\
+        A11 & Refinement method & None, 3-stage, K-medoids, MRF, HDBSCAN \\
+        A12 & MRF weight $\beta$ & $\{0.1, 0.5, 1, 2, 5\} / \text{med.\ NLFA}$ \\
+        A13 & Stage ablation & Full, $-$S1, $-$S2, $-$S3, none \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-% ---------- Refinement ablations ----------
-\subsubsection{Refinement (A11--A13)}
-
-\begin{table}[t]
-    \centering
-    \small
-    \caption{Refinement ablations.}
-    \label{tab:ablation-refinement}
-    \begin{tabular}{@{}llp{6.5cm}@{}}
-        \toprule
-        \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
-        \midrule
-        A11 & Refinement method & None, Current 3-stage, K-medoids split/merge, MRF (NFA+OCR), HDBSCAN (no refinement needed) \\
-        A12 & MRF weight $\beta$ & $\{0.1, 0.5, 1.0, 2.0, 5.0\} \times (\text{median NLFA})^{-1}$ \\
-        A13 & Stage ablation & Full pipeline, $-$Stage~1, $-$Stage~2, $-$Stage~3, no refinement \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-% ---------- Registration ablations ----------
 \subsubsection{Registration (A14--A15)}
 
 \begin{table}[t]
@@ -152,12 +113,12 @@ We report ARI, NMI, V-measure, and the number of clusters.
     \small
     \caption{Registration ablations.}
     \label{tab:ablation-registration}
-    \begin{tabular}{@{}llp{6.5cm}@{}}
+    \begin{tabular}{@{}llp{5.5cm}@{}}
         \toprule
         \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
         \midrule
-        A14 & Registration method & None, Pairwise affine (baseline), MST hierarchical, Congealing \\
-        A15 & Impact on clustering & Full pipeline $\pm$ registration; measure ARI improvement \\
+        A14 & Registration method & None, Pairwise affine, MST, Congealing \\
+        A15 & Impact on clustering & Full pipeline $\pm$ registration \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -167,7 +128,6 @@ We report ARI, NMI, V-measure, and the number of clusters.
 \subsection{Comparative Experiments}
 \label{sec:comparisons}
 
-% ---------- Baselines ----------
 \subsubsection{Baselines}
 
 \begin{table}[t]
@@ -175,190 +135,23 @@ We report ARI, NMI, V-measure, and the number of clusters.
     \small
     \caption{Baseline methods for comparison.}
     \label{tab:baselines}
-    \begin{tabular}{@{}lp{9cm}@{}}
+    \begin{tabular}{@{}lp{8cm}@{}}
         \toprule
         \textbf{Baseline} & \textbf{Description} \\
         \midrule
-        B1: K-means on HOG & HOG features + $k$-means ($K$ = ground-truth classes). Tests whether the \textit{a contrario} framework adds value beyond simple feature clustering. \\
-        B2: Learned + $k$-means & Contrastive ResNet-18 embeddings + $k$-means. Tests the feature representation contribution. \\
-        B3: OCR-only & Cluster by OCR-predicted label. Upper bound on linguistic signal; lower bound on what visual clustering should beat for rare/damaged characters. \\
-        B4: End-to-end & Fine-tuned segmentation + classification model (if available). \\
+        B1: K-means on HOG & HOG + $k$-means ($K$ = ground-truth classes). Tests the \textit{a contrario} contribution. \\
+        B2: Learned + K-means & Contrastive ResNet-18 embeddings + $k$-means. Tests feature representation. \\
+        B3: OCR-only & Cluster by OCR-predicted label. Upper bound on linguistic signal. \\
+        B4: End-to-end & Fine-tuned segmentation + classification (if available). \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-% ---------- Cross-corpus ----------
 \subsubsection{Cross-Corpus Generalisation}
 
-Run the pipeline with \emph{identical hyperparameters} on $\ge 3$ corpora from different periods, scripts, and degradation levels:
-\begin{enumerate}[nosep]
-    \item Medieval Latin manuscripts (e.g., ICDAR 2017 cBAD).
-    \item Early modern printed text (e.g., Google 1000 Books or similar).
-    \item Non-Latin script (e.g., Hebrew Dead Sea Scrolls, Arabic papyri).
-\end{enumerate}
-Report performance drop relative to per-corpus tuning to test the claim that the \textit{a contrario} framework adapts to data distribution.
+The pipeline is run with identical hyperparameters on $\ge 3$ corpora: (i)~medieval Latin manuscripts, (ii)~early modern printed text, (iii)~non-Latin script (e.g., Hebrew or Arabic).
+We report the performance drop relative to per-corpus tuning, testing whether the \textit{a contrario} framework adapts to data distribution.
 
-% ---------- Scalability ----------
 \subsubsection{Scalability}
 
-Run the pipeline on subsets of increasing size ($n \in \{500, 1000, 2000, 5000, 10000, 15000\}$) and report wall-clock time and memory per stage.
-Verify empirically that complexity bounds hold:
-\begin{itemize}[nosep]
-    \item NFA computation: $O(N^2)$
-    \item HDBSCAN: $O(N \cdot k + N \log N)$
-    \item MST alignment: $O(mk \cdot HW)$ per cluster
-    \item MRF-BP: $O(|\mathcal{E}| \cdot K \cdot T)$
-\end{itemize}
-
-
-% ============================================================================
-\subsection{Figure Plan}
-\label{sec:figure-plan}
-
-Table~\ref{tab:figure-plan} summarises the figures planned for the final manuscript.
-
-\begin{table}[t]
-    \centering
-    \small
-    \caption{Planned figures and their contents.}
-    \label{tab:figure-plan}
-    \begin{tabular}{@{}clp{7.5cm}@{}}
-        \toprule
-        \textbf{Fig.} & \textbf{Type} & \textbf{Content} \\
-        \midrule
-        1 & Pipeline & Full pipeline flowchart (extraction $\to$ clustering $\to$ refinement) \\
-        2 & Method & \textit{A contrario} matching visualisation: HOG grids, CEMD heatmap, null distribution with NFA threshold \\
-        3 & Method & NFA graph structure: nodes at page coordinates, edges coloured by cluster \\
-        4 & Method & HDBSCAN condensed tree with stability annotations \\
-        5 & Method & Registration comparison: unaligned, Fr\'echet mean, MST, congealing \\
-        6 & Method & Noise point gallery (damaged glyphs, artefacts) \\
-        \midrule
-        7 & Results & Cluster gallery: top-20 character classes + rare classes \\
-        8 & Results & Confusion examples: splits, merges, near-misses with NFA values \\
-        9 & Results & ARI/NMI/V-measure vs.\ hyperparameters (ablation plots) \\
-        10 & Results & Per-class F1 bar chart sorted by frequency \\
-        11 & Results & Scalability: wall-clock time vs.\ $N$ (log-log, per stage) \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:acontrario-viz}]} --- A contrario matching visualisation.
-        For a matching and non-matching character pair: (a)~crops, (b)~HOG grids, (c)~per-cell CEMD heatmap, (d)~total $D$ vs.\ null $\mathcal{N}(\mu_0, \sigma_0^2)$ with NFA threshold marked.
-    \vspace{3cm}}}
-    \caption{Visualisation of the \textit{a contrario} matching process.
-    The per-cell CEMD values~(c) are summed to produce the total dissimilarity~$D$, which is compared against the null distribution~(d).
-    For matching characters (top), $D$ falls far left of the threshold; for non-matching characters (bottom), $D$ exceeds it.}
-    \label{fig:acontrario-viz}
-\end{figure}
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:nfa-graph}]} --- NFA graph for a representative page.
-        Nodes positioned by page coordinates, edges coloured by cluster.
-        Left: full graph.  Right: zoomed region.
-    \vspace{3cm}}}
-    \caption{NFA similarity graph overlaid on a document page.
-    Each node represents a detected character positioned at its page coordinate.
-    Edges connect NFA-validated pairs; colours indicate cluster membership.
-    Dense intra-cluster connections and sparse inter-cluster edges reflect the quality of the \textit{a contrario} thresholding.}
-    \label{fig:nfa-graph}
-\end{figure}
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:cluster-gallery}]} --- Qualitative cluster gallery.
-        For each of the top-20 most frequent character classes: a row of 10 randomly sampled cluster members.
-        Include 2--3 rare character clusters.
-    \vspace{3cm}}}
-    \caption{Cluster gallery for the most frequent and selected rare character classes.
-    Each row shows 10 randomly sampled members of a cluster, demonstrating intra-cluster visual coherence.}
-    \label{fig:cluster-gallery}
-\end{figure}
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:confusion}]} --- Confusion examples.
-        (a)~Splits: same character in two clusters.
-        (b)~Merges: different characters in one cluster.
-        (c)~Near-misses: characters just above/below the NFA threshold.
-        Annotated with NLFA values.
-    \vspace{3cm}}}
-    \caption{Common clustering errors.
-    Splits~(a) arise from within-class variation that exceeds the NFA threshold.
-    Merges~(b) occur between visually similar but distinct characters.
-    Near-misses~(c) illustrate the sensitivity at the decision boundary.}
-    \label{fig:confusion}
-\end{figure}
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:ablation-plots}]} --- Clustering metrics (ARI, NMI, V-measure) vs.\ key hyperparameters.
-        Panels: (a)~NFA threshold $\varepsilon$, (b)~HDBSCAN \texttt{min\_cluster\_size}, (c)~MRF $\beta$, (d)~Leiden $\gamma$.
-    \vspace{3cm}}}
-    \caption{Ablation study results.
-    Each panel varies one hyperparameter while holding others at their defaults.
-    The \textit{a contrario} threshold~(a) shows a plateau of stable performance across two orders of magnitude, confirming the framework's robustness.}
-    \label{fig:ablation-plots}
-\end{figure}
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:per-class-f1}]} --- Per-class F1 score bar chart.
-        Characters sorted by frequency (most frequent left).
-        Colour-coded by difficulty: green (F1 $\ge 0.9$), orange (F1 $\ge 0.5$), red (F1 $< 0.5$).
-    \vspace{3cm}}}
-    \caption{Per-class F1 score sorted by character frequency.
-    Common characters achieve near-perfect clustering, while rare characters and visually ambiguous pairs (e.g., `c'/`e', `l'/`i') are more challenging.}
-    \label{fig:per-class-f1}
-\end{figure}
-
-\begin{figure}[t]
-    \centering
-    \fbox{\parbox{0.92\linewidth}{\centering\vspace{3cm}%
-        \textbf{[PLACEHOLDER --- Figure~\ref{fig:scalability}]} --- Scalability plot.
-        Log-log wall-clock time vs.\ number of characters.
-        Lines for each pipeline stage: detection, feature extraction, NFA computation, clustering, refinement.
-    \vspace{3cm}}}
-    \caption{Pipeline scalability.
-    Wall-clock time (log scale) as a function of the number of characters (log scale), broken down by pipeline stage.
-    NFA computation dominates at large $N$ ($O(N^2)$); all other stages scale sub-quadratically.}
-    \label{fig:scalability}
-\end{figure}
-
-
-% ============================================================================
-\subsection{Implementation Priority}
-\label{sec:priority}
-
-Table~\ref{tab:priority} summarises the implementation priority of each component.
-
-\begin{table}[t]
-    \centering
-    \small
-    \caption{Implementation priority of pipeline components.}
-    \label{tab:priority}
-    \begin{tabular}{@{}clll@{}}
-        \toprule
-        \textbf{Priority} & \textbf{Component} & \textbf{Effort} & \textbf{Expected Impact} \\
-        \midrule
-        P1 & Manual evaluation set & Medium & Unlocks all experiments \\
-        P2 & HDBSCAN clustering & Low & Drop-in; handles noise; auto-$K$ \\
-        P3 & Empirical background model & Low--Med & Tighter null $\to$ better discrimination \\
-        P4 & MST hierarchical registration & Medium & Principled alignment \\
-        P5 & K-medoids split/merge & Medium & Replaces 3 ad hoc stages \\
-        P6 & MRF fusion (NFA + OCR) & Med--High & Unified probabilistic framework \\
-        P7 & Congealing & Medium & Best template quality \\
-        P8 & Persistent homology pre-filter & Low & Fast topological rejection \\
-        P9 & Affinity Propagation & Low & Interpretable exemplars \\
-        P10 & OT on spatial-feature tensor & High & Highest research novelty \\
-        \bottomrule
-    \end{tabular}
-\end{table}
+The pipeline is run on subsets of increasing size ($n \in \{500, 1\text{k}, 2\text{k}, 5\text{k}, 10\text{k}, 15\text{k}\}$) to verify complexity bounds: NFA computation $O(N^2)$, HDBSCAN $O(N k + N \log N)$, MST alignment $O(mk \cdot HW)$ per cluster, MRF-BP $O(|\mathcal{E}| \cdot K \cdot T)$.

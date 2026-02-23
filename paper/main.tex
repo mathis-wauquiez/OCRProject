@@ -1,18 +1,13 @@
 % ============================================================================
 %  Main document — A Contrario Character Clustering from Historical Documents
 %
+%  ICDAR / Springer LNCS format
 %  Compile with: pdflatex main.tex  (twice for references)
-%  Or use:       latexmk -pdf main.tex
 % ============================================================================
-\documentclass[11pt, a4paper]{article}
-
-% ── Geometry ──
-\usepackage[margin=2.5cm]{geometry}
+\documentclass[runningheads]{llncs}
 
 % ── Encoding & Fonts ──
-\usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage{lmodern}
 
 % ── Math ──
 \usepackage{amsmath, amssymb, amsfonts}
@@ -47,22 +42,20 @@
 % ── Hyperlinks ──
 \usepackage[colorlinks=true, linkcolor=blue!60!black, citecolor=green!50!black, urlcolor=blue!70]{hyperref}
 
-% ── CJK support (for character examples) ──
-% Uncomment if CJK fonts are available on your system:
-% \usepackage{CJKutf8}
-
 % ── Misc ──
-\usepackage{microtype}
 \usepackage{enumitem}
 
 
 % ============================================================================
 \title{%
-    Unsupervised Character Clustering in Historical Document Images\\
+    Unsupervised Character Clustering in Historical Document Images
     via A Contrario Feature Matching%
 }
-\author{}
-\date{}
+\titlerunning{A Contrario Character Clustering}
+
+\author{Anonymous Author(s)}
+\authorrunning{Anonymous}
+\institute{Anonymous Institution}
 
 \begin{document}
 \maketitle
@@ -74,9 +67,12 @@
 We present an unsupervised pipeline for clustering individual character glyphs extracted from scanned historical document images.
 The method combines a learned text detector (CRAFT) for character-level extraction, Histogram of Oriented Gradients (HOG) descriptors for visual representation, and an \textit{a contrario} statistical framework for principled pairwise matching.
 The resulting similarity graph is partitioned using community detection (Leiden algorithm), followed by a composable refinement pipeline that fuses visual and linguistic signals.
-We further propose and evaluate four alternative clustering strategies---HDBSCAN with NFA-derived distances, Affinity Propagation on NFA similarities, Markov Random Field inference with loopy belief propagation, and K-medoids with spectral split/merge---as well as two registration methods for intra-cluster alignment (MST-based hierarchical alignment and congealing with robust median templates) and deformation-invariant features (Shape Context descriptors and persistent homology) for registration-free comparison.
+We further propose and evaluate alternative clustering strategies---HDBSCAN with NFA-derived distances, Affinity Propagation, and Markov Random Field inference---as well as registration methods for intra-cluster alignment and deformation-invariant features for registration-free comparison.
 Comprehensive ablation studies and a rigorous evaluation protocol with bootstrap significance testing are provided.
+
+\keywords{Historical document analysis \and Character clustering \and A contrario methods \and HOG features \and Community detection}
 \end{abstract}
+
 
 % ============================================================================
 %  1. Introduction
@@ -95,18 +91,18 @@ We propose a fully unsupervised pipeline that:
     \item clusters characters via graph-based community detection with multi-stage refinement.
 \end{enumerate}
 
-Beyond this baseline pipeline, we develop and compare several methodological improvements at each stage:
+Beyond this baseline pipeline, we develop and compare several methodological improvements:
 \begin{itemize}[nosep]
-    \item \textbf{Clustering:} HDBSCAN on continuous NFA distances (automatic $K$, noise handling), Affinity Propagation (exemplar-based), and Markov Random Field fusion of visual and OCR signals (Section~\ref{sec:proposed-clustering}).
-    \item \textbf{Refinement:} K-medoids with NFA-guided spectral split/merge replacing three ad hoc stages (Section~\ref{sec:proposed-refinement}).
-    \item \textbf{Registration:} MST-based hierarchical alignment and congealing with robust median templates for sharp, drift-bounded intra-cluster alignment (Section~\ref{sec:proposed-registration}).
-    \item \textbf{Features:} Shape Context descriptors and persistent homology for deformation-invariant comparison and topological pre-filtering (Section~\ref{sec:proposed-features}).
+    \item \textbf{Clustering:} HDBSCAN on continuous NFA distances, Affinity Propagation, and Markov Random Field fusion of visual and OCR signals (Sect.~\ref{sec:proposed-clustering}).
+    \item \textbf{Refinement:} K-medoids with NFA-guided spectral split/merge (Sect.~\ref{sec:proposed-refinement}).
+    \item \textbf{Registration:} MST-based hierarchical alignment and congealing with robust median templates (Sect.~\ref{sec:proposed-registration}).
+    \item \textbf{Features:} Shape Context descriptors and persistent homology for deformation-invariant comparison (Sect.~\ref{sec:proposed-features}).
 \end{itemize}
 
 The paper is organised as follows.
 Section~\ref{sec:methodology} describes the baseline pipeline.
 Section~\ref{sec:proposed-methods} presents the proposed improvements.
-Section~\ref{sec:experiments} details the experiment plan, ablation studies, and evaluation protocol.
+Section~\ref{sec:experiments} details the experiment plan and evaluation protocol.
 Section~\ref{sec:conclusion} concludes.
 
 
@@ -136,7 +132,7 @@ Section~\ref{sec:conclusion} concludes.
 
 We have presented a comprehensive unsupervised pipeline for character clustering in historical document images, grounded in the \textit{a contrario} statistical framework.
 The baseline pipeline---CRAFT detection, HOG features, NFA matching, Leiden clustering, and three-stage refinement---provides a strong starting point.
-The proposed improvements (HDBSCAN clustering, MRF fusion, K-medoids split/merge, MST alignment, congealing, and topological features) address specific limitations of the baseline at each stage.
+The proposed improvements (HDBSCAN clustering, MRF fusion, K-medoids split/merge, MST alignment, congealing, and topological features) address specific limitations at each stage.
 The ablation framework and evaluation protocol enable rigorous comparison of all components.
 Future work will focus on cross-corpus generalisation and integration of learned feature representations.
 
@@ -144,91 +140,91 @@ Future work will focus on cross-corpus generalisation and integration of learned
 % ============================================================================
 %  References
 % ============================================================================
-\bibliographystyle{plain}
+\bibliographystyle{splncs04}
 % \bibliography{references}  % uncomment when references.bib is available
 
 % ── Inline references for standalone compilation ──
-\begin{thebibliography}{99}
+\begin{thebibliography}{16}
 
 \bibitem{baek2019character}
-Y.~Baek, B.~Lee, D.~Han, S.~Yun, and H.~Lee.
-\newblock Character region awareness for text detection.
-\newblock In \emph{Proc.\ IEEE/CVF CVPR}, pp.~9365--9374, 2019.
+Baek, Y., Lee, B., Han, D., Yun, S., Lee, H.:
+Character region awareness for text detection.
+In: Proc.\ IEEE/CVF CVPR, pp.~9365--9374 (2019)
 
 \bibitem{dalal2005histograms}
-N.~Dalal and B.~Triggs.
-\newblock Histograms of oriented gradients for human detection.
-\newblock In \emph{Proc.\ IEEE CVPR}, vol.~1, pp.~886--893, 2005.
+Dalal, N., Triggs, B.:
+Histograms of oriented gradients for human detection.
+In: Proc.\ IEEE CVPR, vol.~1, pp.~886--893 (2005)
 
 \bibitem{desolneux2000meaningful}
-A.~Desolneux, L.~Moisan, and J.-M.~Morel.
-\newblock Meaningful alignments.
-\newblock \emph{Int.\ J.\ Comput.\ Vis.}, 40(1):7--23, 2000.
+Desolneux, A., Moisan, L., Morel, J.-M.:
+Meaningful alignments.
+Int.\ J.\ Comput.\ Vis.\ \textbf{40}(1), 7--23 (2000)
 
 \bibitem{briand2018ipol}
-T.~Briand, G.~Facciolo, and J.~S\'anchez.
-\newblock A detailed study of the modified inverse compositional algorithm.
-\newblock \emph{Image Processing On Line (IPOL)}, 8:311--364, 2018.
+Briand, T., Facciolo, G., S\'anchez, J.:
+A detailed study of the modified inverse compositional algorithm.
+Image Processing On Line (IPOL) \textbf{8}, 311--364 (2018)
 
 \bibitem{traag2019louvain}
-V.~A.~Traag, L.~Waltman, and N.~J.~van Eck.
-\newblock From {Louvain} to {Leiden}: guaranteeing well-connected communities.
-\newblock \emph{Scientific Reports}, 9(1):5233, 2019.
+Traag, V.A., Waltman, L., van Eck, N.J.:
+From {Louvain} to {Leiden}: guaranteeing well-connected communities.
+Scientific Reports \textbf{9}(1), 5233 (2019)
 
 \bibitem{von2010lsd}
-R.~Grompone~von Gioi, J.~Jakubowicz, J.-M.~Morel, and G.~Randall.
-\newblock {LSD}: a line segment detector.
-\newblock \emph{Image Processing On Line (IPOL)}, 2:35--55, 2012.
+Grompone~von~Gioi, R., Jakubowicz, J., Morel, J.-M., Randall, G.:
+{LSD}: a line segment detector.
+Image Processing On Line (IPOL) \textbf{2}, 35--55 (2012)
 
 \bibitem{kiessling2019kraken}
-B.~Kiessling.
-\newblock Kraken --- an universal text recognizer for the humanities.
-\newblock In \emph{Proc.\ Digital Humanities}, 2019.
+Kiessling, B.:
+Kraken --- an universal text recognizer for the humanities.
+In: Proc.\ Digital Humanities (2019)
 
 \bibitem{hubert1985comparing}
-L.~Hubert and P.~Arabie.
-\newblock Comparing partitions.
-\newblock \emph{J.\ Classification}, 2(1):193--218, 1985.
+Hubert, L., Arabie, P.:
+Comparing partitions.
+J.\ Classification \textbf{2}(1), 193--218 (1985)
 
 \bibitem{rosenberg2007v}
-A.~Rosenberg and J.~Hirschberg.
-\newblock V-measure: A conditional entropy-based external cluster evaluation measure.
-\newblock In \emph{Proc.\ EMNLP-CoNLL}, pp.~410--420, 2007.
+Rosenberg, A., Hirschberg, J.:
+V-measure: A conditional entropy-based external cluster evaluation measure.
+In: Proc.\ EMNLP-CoNLL, pp.~410--420 (2007)
 
 \bibitem{rony2025hausdorff}
-J.~Rony and H.~Kervadec.
-\newblock Distorch: fast differentiable boundary distances.
-\newblock In \emph{Proc.\ MIDL}, 2025.
+Rony, J., Kervadec, H.:
+Distorch: fast differentiable boundary distances.
+In: Proc.\ MIDL (2025)
 
 \bibitem{frey2007clustering}
-B.~J.~Frey and D.~Dueck.
-\newblock Clustering by passing messages between data points.
-\newblock \emph{Science}, 315(5814):972--976, 2007.
+Frey, B.J., Dueck, D.:
+Clustering by passing messages between data points.
+Science \textbf{315}(5814), 972--976 (2007)
 
 \bibitem{mcinneshdbscan2017}
-L.~McInnes, J.~Healy, and S.~Astels.
-\newblock hdbscan: Hierarchical density based clustering.
-\newblock \emph{J.\ Open Source Software}, 2(11):205, 2017.
+McInnes, L., Healy, J., Astels, S.:
+hdbscan: Hierarchical density based clustering.
+J.\ Open Source Software \textbf{2}(11), 205 (2017)
 
 \bibitem{belongie2002shape}
-S.~Belongie, J.~Malik, and J.~Puzicha.
-\newblock Shape matching and object recognition using shape contexts.
-\newblock \emph{IEEE Trans.\ PAMI}, 24(4):509--522, 2002.
+Belongie, S., Malik, J., Puzicha, J.:
+Shape matching and object recognition using shape contexts.
+IEEE Trans.\ PAMI \textbf{24}(4), 509--522 (2002)
 
 \bibitem{edelsbrunner2008persistent}
-H.~Edelsbrunner and J.~Harer.
-\newblock Persistent homology---a survey.
-\newblock In \emph{Surveys on Discrete and Computational Geometry}, pp.~257--282, AMS, 2008.
+Edelsbrunner, H., Harer, J.:
+Persistent homology---a survey.
+In: Surveys on Discrete and Computational Geometry, pp.~257--282. AMS (2008)
 
 \bibitem{learned2004data}
-E.~Learned-Miller.
-\newblock Data driven image models through continuous joint alignment.
-\newblock \emph{IEEE Trans.\ PAMI}, 28(2):236--250, 2006.
+Learned-Miller, E.:
+Data driven image models through continuous joint alignment.
+IEEE Trans.\ PAMI \textbf{28}(2), 236--250 (2006)
 
 \bibitem{yedidia2003understanding}
-J.~S.~Yedidia, W.~T.~Freeman, and Y.~Weiss.
-\newblock Understanding belief propagation and its generalizations.
-\newblock In \emph{Exploring AI in the New Millennium}, pp.~239--269, 2003.
+Yedidia, J.S., Freeman, W.T., Weiss, Y.:
+Understanding belief propagation and its generalizations.
+In: Exploring AI in the New Millennium, pp.~239--269 (2003)
 
 \end{thebibliography}
 
