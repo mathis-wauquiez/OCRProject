@@ -104,14 +104,14 @@ def main(cfg: DictConfig):
             "file": str(actual.relative_to(output_path)),
             "size_MB": round(size_mb, 2),
         })
-    with sweep.section("Output Files"):
-        sweep.report_table(
+    with sweep.reporter.section("Output Files"):
+        sweep.reporter.report_table(
             pd.DataFrame(output_rows),
             title="Saved Artefacts",
         )
 
     # Generate HTML report (single call, includes all sections)
-    html_path = sweep.generate_html()
+    html_path = sweep.reporter.generate_html()
     logger.info(f"Report: file://{html_path.absolute()}")
 
 

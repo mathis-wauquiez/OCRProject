@@ -179,6 +179,18 @@ class KMedoidsSplitMergeStep(ClusterRefinementStep):
             min_split_size=min_split_size, merge_nlfa_threshold=merge_nlfa_threshold)
         self.d_max = d_max
 
+    @staticmethod
+    def _nlfa_to_distance(nlfa, d_max=50.0):
+        """Convert NLFA similarity matrix to distance matrix.
+
+        NLFA values are higher for more similar pairs, so distance = d_max - NLFA.
+        """
+        nlfa_sym = 0.5 * (nlfa + nlfa.T)
+        D = d_max - nlfa_sym
+        np.clip(D, 0.0, d_max, out=D)
+        np.fill_diagonal(D, 0.0)
+        return D
+
     def run(self, dataframe, membership, renderer, *, target_lbl, **ctx):
         import torch
 
@@ -189,7 +201,7 @@ class KMedoidsSplitMergeStep(ClusterRefinementStep):
 
         nlfa_np = nlfa.cpu().numpy() if isinstance(nlfa, torch.Tensor) else np.asarray(nlfa)
         nlfa_sym = 0.5 * (nlfa_np + nlfa_np.T)
-        D = nlfa_to_distance(nlfa_np, self.d_max)
+        D = self._nlfa_to_distance(nlfa_np, self.d_max)
 
         result = self.kmedoids.fit(np.asarray(membership), nlfa_sym, D)
         return RefinementResult(membership=result['labels'],

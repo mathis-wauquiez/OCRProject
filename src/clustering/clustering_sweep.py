@@ -1,8 +1,8 @@
 """
-graphClusteringSweep — Pure computation: graph building, HOG sweep,
-hierarchical splitting, metrics evaluation.
+graphClusteringSweep — HOG sweep, graph building, metrics evaluation.
 
-Delegates ALL reporting to ClusteringSweepReporter.
+Splitting / refinement lives in ``refinement.py``.
+Reporting is delegated to ``ClusteringSweepReporter``.
 """
 
 # graph-related
@@ -15,11 +15,6 @@ import torch
 import numpy as np
 import pandas as pd
 
-# sci
-from scipy.stats import entropy
-from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import squareform
-
 # path / typing
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -28,37 +23,30 @@ from typing import List, Dict, Optional
 from .feature_matching import featureMatching
 from .params import featureMatchingParameters
 from .clustering_sweep_report import ClusteringSweepReporter, UNKNOWN_LABEL
+from .graph import build_graph
+from .cluster_stats import compute_purity, compute_label_completeness
 
 # Reporting base
-from ..auto_report import AutoReport, ReportConfig, Theme
 import logging
 
 # HOG
 from src.patch_processing.configs import get_hog_cfg
 from src.patch_processing.hog import HOG
 
-# Cluster splitting (legacy — kept for backward compat of direct calls)
-from src.clustering.bin_image_metrics import (
-    compute_hausdorff, registeredMetric, compute_distance_matrices_batched
-)
 
 # Refinement pipeline
 from .refinement import (
-    ClusterRefinementStep, RefinementResult,
+    RefinementResult,
     HausdorffSplitStep, OCRRematchStep, PCAZScoreRematchStep,
-    UNKNOWN_LABEL as _UNKNOWN_LABEL,
 )
 
 # New refinement methods
-from .mrf_refinement import MRFRefinementStep
 from .kmedoids_refinement import KMedoidsSplitMergeStep
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 from tqdm import tqdm
 
 
-class graphClusteringSweep(AutoReport):
+class graphClusteringSweep:
     def __init__(
             self,
             feature: str,
@@ -84,8 +72,6 @@ class graphClusteringSweep(AutoReport):
             split_linkage_method: str = 'average',
             split_min_cluster_size: int = 2,
             split_batch_size: int = 256,
-            split_render_scale: float = 0.3,
-            split_metrics: Optional[Dict[str, callable]] = None,
 
             # ── Post-split rematching parameters ──
             rematch_max_cluster_size: int = 3,
@@ -115,23 +101,6 @@ class graphClusteringSweep(AutoReport):
 
             enable_glossary: bool = False,
     ):
-        config = ReportConfig(
-            dpi=image_dpi,
-            output_format='jpeg' if use_jpeg else 'png',
-            image_quality=jpeg_quality,
-            theme=Theme.DEFAULT,
-            show_progress=False,
-            max_image_size=(1920, 1080),
-            include_toc=True
-        )
-        super().__init__(
-            title="Clustering Sweep",
-            author="Mathis",
-            output_dir=Path(output_dir) / "reports",
-            config=config,
-            log_level=logging.INFO
-        )
-
         featureMatcher = featureMatching(featureMatchingParameters(
             metric=metric, epsilon=epsilons[0], partial_output=False
         ))
@@ -156,8 +125,6 @@ class graphClusteringSweep(AutoReport):
         self.split_linkage_method   = split_linkage_method
         self.split_min_cluster_size = split_min_cluster_size
         self.split_batch_size       = split_batch_size
-        self.split_render_scale     = split_render_scale
-        self.split_metrics          = split_metrics
 
         # ── Post-split rematching config ──
         self.rematch_max_cluster_size   = rematch_max_cluster_size
@@ -180,12 +147,6 @@ class graphClusteringSweep(AutoReport):
         self.hapax_max_dissimilarity     = hapax_max_dissimilarity
 
         self.enable_glossary             = enable_glossary
-
-        self.embed_images   = embed_images
-        self.image_dpi      = image_dpi
-        self.thumbnail_dpi  = thumbnail_dpi
-        self.use_jpeg       = use_jpeg
-        self.jpeg_quality   = jpeg_quality
 
         # ── Build refinement pipeline ──────────────────────────────────────
         # If an explicit list is provided, use it; otherwise build from params.
@@ -214,14 +175,17 @@ class graphClusteringSweep(AutoReport):
             ))
             self.refinement_steps = steps
 
-        self.report_name   = self.metadata.report_id
-        self.image_counter = 0
-        if not self.embed_images:
-            self.assets_dir = self.output_dir / f"assets_{self.report_name}"
-            self.assets_dir.mkdir(parents=True, exist_ok=True)
-
-        # ── Create the reporter ──
-        self.reporter = ClusteringSweepReporter(self)
+        # ── Create the reporter (owns the AutoReport) ──
+        self.reporter = ClusteringSweepReporter(
+            target_lbl=self.target_lbl,
+            split_linkage_method=self.split_linkage_method,
+            split_thresholds=self.split_thresholds,
+            embed_images=embed_images,
+            image_dpi=image_dpi,
+            use_jpeg=use_jpeg,
+            jpeg_quality=jpeg_quality,
+            output_dir=str(Path(output_dir) / "reports"),
+        )
 
     # ================================================================
     #  Evaluation
@@ -240,328 +204,22 @@ class graphClusteringSweep(AutoReport):
         )
 
     # ================================================================
-    #  Graph construction
+    #  Graph construction (delegates to clustering.graph)
     # ================================================================
 
     def get_graph(self, nlfa, dissimilarities, epsilon):
-        if self.edges_type == 'nlfa':
-            weight_matrix = nlfa
-        elif self.edges_type in ['dissim', 'dissimilarities']:
-            weight_matrix = dissimilarities
-        elif self.edges_type in ['link', 'constant']:
-            weight_matrix = torch.ones_like(nlfa)
-
-        return self._get_matrix_graph(
-            linkage_matrix=nlfa, threshold=epsilon,
-            weight_matrix=weight_matrix
-        )
-
-    def _get_matrix_graph(self, linkage_matrix, threshold, weight_matrix):
-        N = len(linkage_matrix)
-        if self.edges_type == 'nlfa':
-            threshold = -(np.log(threshold) - 2 * np.log(N))
-
-        connected = linkage_matrix >= threshold
-        if self.keep_reciprocal:
-            connected &= linkage_matrix.T >= threshold
-            weight_matrix = .5 * (weight_matrix + weight_matrix.T)
-
-        edges = torch.nonzero(connected, as_tuple=False)
-        edges = edges[edges[:, 0] != edges[:, 1]]
-        edges_list = [
-            (int(i.item()), int(j.item()), weight_matrix[i, j].item())
-            for i, j in edges
-        ]
-
-        G = nx.Graph()
-        G.add_nodes_from(range(N))
-        G.add_weighted_edges_from(edges_list)
-        return G, edges
+        return build_graph(nlfa, dissimilarities, epsilon,
+                           self.edges_type, self.keep_reciprocal)
 
     # ================================================================
-    #  CLUSTER SPLITTING
-    # ================================================================
-
-    @staticmethod
-    def _compute_single_cluster_linkage(
-        cid, idx, dataframe, reg_metric, renderer,
-        batch_size, split_linkage_method, min_cluster_size,
-        gpu_semaphore=None,
-    ):
-        """Compute Hausdorff distance matrix and linkage for one cluster.
-
-        Args:
-            gpu_semaphore: Optional ``threading.Semaphore`` that gates
-                access to the GPU-intensive distance-matrix computation.
-                Threads that don't hold the semaphore can still do CPU
-                work (pair building, numpy/scipy linkage).
-        """
-        size = len(idx)
-
-        if size < min_cluster_size:
-            return cid, dict(indices=idx, linkage=None, size=size)
-
-        subdf = dataframe.iloc[idx]
-
-        # Gate GPU work so only a bounded number of clusters hit the GPU
-        # concurrently, preventing OOM from stacked VRAM allocations.
-        if gpu_semaphore is not None:
-            gpu_semaphore.acquire()
-        try:
-            D_dict = compute_distance_matrices_batched(
-                reg_metric, renderer, subdf,
-                batch_size=batch_size,
-                sym_registration=False,
-            )
-        finally:
-            if gpu_semaphore is not None:
-                gpu_semaphore.release()
-
-        D = D_dict['hausdorff']
-        condensed = squareform(D, checks=False)
-        bad_mask = ~np.isfinite(condensed)
-        if bad_mask.any():
-            finite_max = np.nanmax(condensed[np.isfinite(condensed)]) \
-                if np.isfinite(condensed).any() else 1.0
-            condensed[bad_mask] = finite_max * 10
-        Z = linkage(condensed, method=split_linkage_method)
-
-        return cid, dict(indices=idx, linkage=Z, size=size)
-
-    def _compute_cluster_linkages(self, dataframe, partition_membership, renderer,
-                                  max_workers=None, max_concurrent_gpu=1):
-        """
-        Expensive step (done once): pairwise Hausdorff distances per
-        Leiden cluster → linkage matrices.
-
-        Clusters are processed in parallel using threads.  A semaphore
-        limits the number of clusters that can run GPU-intensive IC
-        registration concurrently (preventing CUDA OOM), while still
-        allowing other threads to overlap CPU work (pair generation,
-        canvas placement, numpy/scipy linkage).
-
-        Args:
-            max_workers: Thread-pool size.  ``None`` lets the executor
-                pick a sensible default.  Set to 1 for sequential
-                execution (debugging).
-            max_concurrent_gpu: Maximum number of clusters allowed to
-                run ``compute_distance_matrices_batched`` on the GPU at
-                the same time.  Defaults to 1 (serialised GPU access)
-                to stay within VRAM limits.
-        """
-        metrics_dict = {'hausdorff': compute_hausdorff}
-        if self.split_metrics is not None:
-            metrics_dict.update(self.split_metrics)
-
-        reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
-        membership = np.asarray(partition_membership)
-        cluster_ids = np.unique(membership)
-
-        # ── Build per-cluster index arrays ──────────────────────────────
-        cluster_indices = {
-            cid: np.where(membership == cid)[0] for cid in cluster_ids
-        }
-
-        # ── Sort clusters largest-first so big jobs start early ─────────
-        sorted_cids = sorted(cluster_ids, key=lambda c: len(cluster_indices[c]),
-                             reverse=True)
-
-        cluster_linkages = {}
-        gpu_semaphore = threading.Semaphore(max_concurrent_gpu)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    self._compute_single_cluster_linkage,
-                    cid, cluster_indices[cid], dataframe,
-                    reg_metric, renderer,
-                    self.split_batch_size,
-                    self.split_linkage_method,
-                    self.split_min_cluster_size,
-                    gpu_semaphore,
-                ): cid
-                for cid in sorted_cids
-            }
-
-            with tqdm(total=len(futures),
-                      desc="Computing cluster linkages (Hausdorff)",
-                      colour="yellow") as pbar:
-                for future in as_completed(futures):
-                    cid, result = future.result()
-                    cluster_linkages[cid] = result
-                    pbar.update(1)
-
-        return cluster_linkages
-
-    def _apply_split_threshold(self, cluster_linkages, threshold):
-        """Cheap step: cut every pre-computed linkage at *threshold*."""
-        all_indices = np.concatenate([v['indices'] for v in cluster_linkages.values()])
-        n_total = all_indices.max() + 1
-        new_membership = np.full(n_total, -1, dtype=int)
-        split_log = []
-        next_id = 0
-
-        for cid, info in cluster_linkages.items():
-            idx = info['indices']
-            Z = info['linkage']
-
-            if Z is None:
-                new_membership[idx] = next_id
-                split_log.append(dict(
-                    original_cluster=int(cid), original_size=info['size'],
-                    n_subclusters=1, subcluster_sizes=[info['size']],
-                ))
-                next_id += 1
-                continue
-
-            sub_labels = fcluster(Z, threshold, criterion='distance')
-            n_sub = len(np.unique(sub_labels))
-            sub_sizes = [int((sub_labels == s).sum()) for s in np.unique(sub_labels)]
-
-            for s in np.unique(sub_labels):
-                new_membership[idx[sub_labels == s]] = next_id
-                next_id += 1
-
-            split_log.append(dict(
-                original_cluster=int(cid), original_size=info['size'],
-                n_subclusters=n_sub, subcluster_sizes=sub_sizes,
-            ))
-
-        assert (new_membership >= 0).all(), "Unassigned samples after splitting!"
-        return new_membership, split_log
-
-    def sweep_split_thresholds(self, dataframe, partition_membership, renderer):
-        """Compute linkages once, then sweep over all split_thresholds."""
-        cluster_linkages = self._compute_cluster_linkages(
-            dataframe, partition_membership, renderer
-        )
-
-        sweep_results = []
-        best_score = -np.inf
-        best_threshold = self.split_thresholds[0]
-        best_membership = None
-        best_split_log = None
-
-        for threshold in tqdm(self.split_thresholds,
-                              desc="Split threshold sweep", colour="magenta"):
-            membership, split_log = self._apply_split_threshold(
-                cluster_linkages, threshold
-            )
-            metrics = self._evaluate_membership(
-                target_labels=dataframe[self.target_lbl],
-                membership=membership.tolist()
-            )
-            n_clusters = len(np.unique(membership))
-            n_split = sum(1 for e in split_log if e['n_subclusters'] > 1)
-
-            sweep_results.append({
-                'split_threshold': threshold,
-                'n_clusters_post_split': n_clusters,
-                'n_clusters_actually_split': n_split,
-                **metrics,
-            })
-
-            score = metrics.get('adjusted_rand_index', 0)
-            if score > best_score:
-                best_score = score
-                best_threshold = threshold
-                best_membership = membership
-                best_split_log = split_log
-
-        sweep_results_df = pd.DataFrame(sweep_results)
-        return (best_threshold, best_membership, best_split_log,
-                sweep_results_df, cluster_linkages)
-
-    # ================================================================
-    #  Purity & representatives (pure computation)
+    #  Purity & completeness (delegates to clustering.cluster_stats)
     # ================================================================
 
     def _compute_purity_and_representatives(self, dataframe, membership_col):
-        purity_data = []
-        representatives = {}
-
-        for cluster, cluster_data in dataframe.groupby(membership_col):
-            cluster_size = len(cluster_data)
-            known_mask = cluster_data[self.target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
-            known_data = cluster_data[known_mask]
-            unknown_count = (~known_mask).sum()
-
-            label_counts = (
-                known_data[self.target_lbl].value_counts()
-                if len(known_data) > 0
-                else pd.Series(dtype=int)
-            )
-            if len(label_counts) > 0:
-                known_size = len(known_data)
-                label_probs = label_counts / known_size
-                cluster_entropy = entropy(label_probs, base=2)
-                cluster_ne = (cluster_entropy / np.log2(len(label_counts))
-                              if len(label_counts) > 1 else 0)
-                purity = label_counts.iloc[0] / known_size
-                dominant_label = label_counts.index[0]
-                unique_labels = len(label_counts)
-            else:
-                cluster_entropy = np.nan
-                cluster_ne = np.nan
-                purity = np.nan
-                dominant_label = UNKNOWN_LABEL
-                unique_labels = 0
-                label_counts = pd.Series(dtype=int)
-
-            label_representatives = {}
-            for label in label_counts.index:
-                if label == UNKNOWN_LABEL:
-                    continue
-                label_nodes = cluster_data[cluster_data[self.target_lbl] == label]
-                most_central_idx = label_nodes['degree_centrality'].idxmax()
-                label_representatives[label] = most_central_idx
-            representatives[cluster] = label_representatives
-
-            purity_data.append({
-                'Cluster': cluster,
-                'Size': cluster_size,
-                'Known_Size': len(known_data),
-                'Unknown_Count': unknown_count,
-                'Purity': purity,
-                'Entropy': cluster_entropy,
-                'Normalized entropy': cluster_ne,
-                'Dominant_Label': dominant_label,
-                'Unique_Labels': unique_labels,
-            })
-
-        purity_df = pd.DataFrame(purity_data)
-        purity_df.set_index('Cluster', inplace=True)
-        return purity_df, representatives
-
-    # ================================================================
-    #  Completeness (label-level stats)
-    # ================================================================
+        return compute_purity(dataframe, membership_col, self.target_lbl)
 
     def _compute_label_dataframe(self, dataframe):
-        label_data = []
-        known_df = dataframe[
-            dataframe[self.target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
-        ]
-        for label, label_rows in tqdm(known_df.groupby(self.target_lbl),
-                                      desc="Computing completeness", colour='blue'):
-            label_size = len(label_rows)
-            cluster_counts = label_rows['membership'].value_counts()
-            cluster_probs = cluster_counts / label_size
-            label_entropy = entropy(cluster_probs, base=2)
-            label_ne = (label_entropy / np.log2(len(cluster_counts))
-                        if len(cluster_counts) > 1 else 0)
-            best_share = cluster_counts.iloc[0] / label_size
-
-            label_data.append({
-                'Label': label,
-                'Size': label_size,
-                'Best share': best_share,
-                'Entropy': label_entropy,
-                'Normalized entropy': label_ne,
-                'Dominant_Cluster': cluster_counts.index[0],
-                'Unique_Clusters': len(cluster_counts)
-            })
-        return pd.DataFrame(label_data)
+        return compute_label_completeness(dataframe, self.target_lbl)
 
     # ================================================================
     #  report_graph: ALL computation, then ONE reporting call
@@ -692,11 +350,22 @@ class graphClusteringSweep(AutoReport):
             representatives = pre_representatives
 
         # ── 6. Post-split metrics & label completeness ──
+        _to_list = lambda m: m if isinstance(m, list) else m.tolist()
         best_metrics = self._evaluate_membership(
             target_labels=dataframe[self.target_lbl],
             membership=dataframe['membership'].tolist()
         )
         label_dataframe = self._compute_label_dataframe(dataframe)
+
+        # Pre/post split metrics for the split comparison report
+        pre_split_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl],
+            membership=_to_list(pre_split_membership),
+        )
+        post_split_metrics = self._evaluate_membership(
+            target_labels=dataframe[self.target_lbl],
+            membership=_to_list(post_split_membership),
+        )
 
         # ── 7. Delegate ALL reporting in one call ──
         self.reporter.report_graph_results(
@@ -719,6 +388,9 @@ class graphClusteringSweep(AutoReport):
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
+            feature_matcher=self.featureMatcher,
+            pre_split_metrics=pre_split_metrics,
+            post_split_metrics=post_split_metrics,
             refinement_results=refinement_results,
             refinement_step_names=refinement_step_names,
             chat_split_log=chat_split_log,
