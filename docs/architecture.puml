@@ -1,0 +1,732 @@
+@startuml OCRProject Architecture
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam defaultFontSize 11
+skinparam classFontSize 13
+skinparam packageFontSize 14
+skinparam titleFontSize 18
+skinparam shadowing false
+skinparam class {
+  BackgroundColor #FEFEFE
+  BorderColor #444444
+  ArrowColor #555555
+}
+
+title A Contrario Character Clustering — Complete Architecture
+footer Generated from codebase | OCRProject
+
+' ╔══════════════════════════════════════════════════════════════════╗
+' ║  LEGEND                                                         ║
+' ╚══════════════════════════════════════════════════════════════════╝
+
+legend top left
+  |= Color |= Package |
+  |<back:#E8F5E9>    </back>| Detection (OCR / CRAFT) |
+  |<back:#E3F2FD>    </back>| Patch Processing |
+  |<back:#FFF3E0>    </back>| Clustering & A Contrario |
+  |<back:#F3E5F5>    </back>| Registration |
+  |<back:#FFEBEE>    </back>| Refinement |
+  |<back:#E0F7FA>    </back>| Evaluation & Metrics |
+  |<back:#FFF9C4>    </back>| Utilities & Reporting |
+endlegend
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 0: SHARED UTILITIES
+' ══════════════════════════════════════════════════════════════════
+
+package "src.utils" as utils_pkg #FFF9C4 {
+
+  class connectedComponent <<dataclass>> {
+    _labels : ndarray
+    _regions : List[RegionProperties]
+    _deleted_labels : set
+    _merge_mapping : dict
+    --
+    +from_image(image, connectivity) : CC
+    +from_labels(labels, stats, intensity_image) : CC
+    +from_image_watershed(image, ...) : CC
+    +delete(label, reason)
+    +merge(link_matrix, labels_list)
+    +save(filepath) / load(filepath)
+    +labels : ndarray  «property»
+    +regions : List  «property»
+    +segm_img : ndarray  «property»
+  }
+
+  class Timer {
+    +__call__(string)
+  }
+
+  note right of connectedComponent
+    Central data structure carrying
+    segmented character components
+    across the entire pipeline.
+  end note
+}
+
+package "src.auto_report" as report_pkg #FFF9C4 {
+  class AutoReport {
+    +title, author, output_dir
+    +section(name) «context manager»
+    +report_figure(fig, title)
+    +save()
+  }
+  class ReportConfig <<dataclass>> {
+    dpi, output_format, image_quality
+    theme, show_progress
+  }
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 1: CRAFT DETECTION
+' ══════════════════════════════════════════════════════════════════
+
+package "src.ocr — Character Detection" as ocr_pkg #E8F5E9 {
+
+  class GlobalPipeline <<orchestrator>> {
+    craftDetector : craftWrapper
+    imageComponentsPipeline : imageComponentsPipeline
+    --
+    +forward(img_pil, verbose) : PipelineOutput
+    ..substeps..
+    1. CRAFT detection (score maps)
+    2. Watershed segmentation
+    3. Component filtering & merging
+    4. Binarization
+    5. Image component extraction
+    6. CRAFT↔image component matching
+    7. Character filtering
+  }
+
+  class craftWrapper <<nn.Module>> {
+    model : CRAFT
+    params : craftParams
+    --
+    +forward(img_tensor) : (preprocessed, score_text, score_link)
+    +map_original_to_preprocessed(points, original_shape)
+  }
+
+  class imageComponentsPipeline {
+    params : imageComponentsParams
+    craftDetector : craftWrapper
+    --
+    +forward(im_pil, craftComponents) : compsResult
+    -binarize(im_pil) : ndarray
+    -filter_image_components(cc) : cc
+    -compute_similarities(imgCC, craftCC) : ndarray
+    -merge_from_similarities(imgCC, craftCC, sim) : cc
+    -filter_bad_characters(cc) : cc
+    -filter_centroids_by_contour_proximity(...)
+  }
+
+  class PipelineOutput <<NamedTuple>> {
+    img_pil, preprocessed, binary_img
+    score_text, score_link
+    craft_components, image_components
+    filtered_image_components, characters
+    similarity_matrix
+  }
+
+  class compsResult <<NamedTuple>> {
+    binary_img, img_components
+    filtered_img_components, characters
+    similarity_matrix
+  }
+
+  GlobalPipeline --> craftWrapper : owns
+  GlobalPipeline --> imageComponentsPipeline : owns
+  GlobalPipeline ..> PipelineOutput : produces
+  imageComponentsPipeline ..> compsResult : produces
+  imageComponentsPipeline --> connectedComponent : uses
+  craftWrapper ..> connectedComponent : produces
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 2: PATCH PREPROCESSING
+' ══════════════════════════════════════════════════════════════════
+
+package "src.patch_processing — Feature Extraction" as patch_pkg #E3F2FD {
+
+  class PatchPreprocessing <<orchestrator>> {
+    ink_filter : InkFilter
+    vectorizer : BinaryShapeVectorizer
+    chat_model : ModelWrapper
+    hog_renderer : Renderer
+    hog : HOG
+    reading_order : ReadingOrder
+    --
+    +__call__(image_folder, comps_folder) : DataFrame
+    ..substeps..
+    CPU: extract → ink_filter → vectorize → deskew
+    GPU: OCR (CHAT/Kraken) → HOG features
+  }
+
+  class Renderer <<Dataset>> {
+    scale, dpi, bin_thresh
+    canvas_dims : CanvasDimensions
+    cached_renders : List[ndarray]
+    --
+    +__call__(svg_imgs) : self
+    +__getitem__(idx) : Tensor
+    -_precompute_canvas()
+    -_place_on_canvas(binary_svg, barycenter) : ndarray
+  }
+
+  class HOG {
+    _params : HOGParameters
+    dx_conv, dy_conv : nn.Sequential
+    --
+    +__call__(batch) : fullHOGOutput
+    ..
+    Computes gradient orientation histograms
+    with trilinear binning on rendered SVGs.
+  }
+
+  class InkFilter {
+    +__call__(patches) : List
+  }
+
+  class SVG {
+    +render(dpi, output_format, scale) : ndarray
+    +apply_homography(H)
+  }
+
+  PatchPreprocessing --> Renderer : uses
+  PatchPreprocessing --> HOG : uses
+  PatchPreprocessing --> InkFilter : uses
+  Renderer --> SVG : renders
+}
+
+package "src.vectorization" as vec_pkg #E3F2FD {
+  class BinaryShapeVectorizer {
+    config : VectorizerConfig
+    --
+    +__call__(patches) : Iterator[(idx, SVG)]
+    .. calls external C++ executable ..
+    .. binary patch → SVG contour ..
+  }
+  BinaryShapeVectorizer ..> SVG : produces
+  PatchPreprocessing --> BinaryShapeVectorizer : uses
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 3: A CONTRARIO MATCHING
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering — A Contrario Framework" as ac_pkg #FFF3E0 {
+
+  class featureMatching {
+    _params : featureMatchingParameters
+    --
+    +match(query, key) : (matches, nlfa, dissim, mu, var)
+    +compute_delta(dissim) : (nlfa, mu, var)
+    +compute_dissimilarities(queries, keys) : Tensor
+    +match_subset(query, key, match_indices, deltas)
+    ..
+    Metrics: CEMD (Circular Earth Mover's)
+             L2 (Euclidean)
+    NLFA = −log Φ(standardized)
+  }
+
+  class featureMatchingParameters <<dataclass>> {
+    metric : str = "CEMD"
+    epsilon : float
+    distribution : str = "normal"
+    partial_output : bool
+    reciprocal_only : bool
+  }
+
+  class featureMatchingOutputs <<dataclass>> {
+    match_indices : Tensor
+    nlfa : Tensor
+    dissimilarities : Tensor
+    nlfa_threshold : float
+    nlfa2 : Tensor
+  }
+
+  featureMatching --> featureMatchingParameters : configured by
+  featureMatching ..> featureMatchingOutputs : produces
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 4: GRAPH CONSTRUCTION & COMMUNITY DETECTION
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering — Graph Clustering" as graph_pkg #FFF3E0 {
+
+  abstract class communityDetectionBase {
+    +{abstract} __call__(G: Graph) : Membership
+  }
+
+  class leidenCommunityDetection {
+    gamma : float
+    +__call__(G) : Membership
+  }
+  class louvainCommunityDetection {
+    +__call__(G) : Membership
+  }
+  class greedyModularityCommunityDetection
+  class labelPropagationCommunityDetection
+
+  class graphClustering {
+    featureMatcher : featureMatching
+    communityDetection : communityDetectionBase
+    edges_type : str
+    --
+    +__call__(dataframe) : Membership
+    .. builds NX graph from NLFA ..
+    .. runs community detection ..
+  }
+
+  communityDetectionBase <|-- leidenCommunityDetection
+  communityDetectionBase <|-- louvainCommunityDetection
+  communityDetectionBase <|-- greedyModularityCommunityDetection
+  communityDetectionBase <|-- labelPropagationCommunityDetection
+  graphClustering --> communityDetectionBase : uses
+  graphClustering --> featureMatching : uses
+
+  note right of communityDetectionBase
+    Wrapped distance-based alternatives:
+    hdbscan(), dbscan(), optics(),
+    affinity_propagation(), mean_shift()
+    All use @sklearn_wrap decorator.
+    nlfa_to_distance() converts
+    NLFA similarity to metric space.
+  end note
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 5: HYPERPARAMETER SWEEP (ORCHESTRATOR)
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering — Sweep Orchestrator" as sweep_pkg #FFF3E0 {
+
+  class graphClusteringSweep <<main orchestrator>> {
+    featureMatcher : featureMatching
+    reporter : ClusteringSweepReporter
+    refinement_steps : List[ClusterRefinementStep]
+    --
+    +__call__(dataframe) : (df, filtered_df, reps_df, G, partition)
+    +report_graph(df, nlfa, dissim, eps, gamma, renderer)
+    +get_graph(nlfa, dissim, epsilon) : (Graph, edges)
+    ..
+    **__call__ substeps:**
+    1. Sweep HOG configs (cell_size × bins × sigma × norm)
+    2. Compute HOG features via Renderer + HOG
+    3. A contrario matching → NLFA matrix
+    4. Sweep ε × γ → Leiden partitions → best ARI
+    5. report_graph() with best config
+    ..
+    **report_graph substeps:**
+    1. Build NX graph + Leiden partition
+    2. Run refinement pipeline (steps)
+    3. Post-clustering (CHAT split, hapax, glossary)
+    4. Compute purity & completeness
+    5. Delegate reporting
+  }
+
+  class ClusteringSweepReporter {
+    +report_hog_sweep(results_df, hog_configs)
+    +report_graph_results(...)
+  }
+
+  graphClusteringSweep --|> AutoReport
+  graphClusteringSweep --> featureMatching : uses
+  graphClusteringSweep --> ClusteringSweepReporter : delegates to
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 6: REFINEMENT PIPELINE
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering — Refinement Steps" as refine_pkg #FFEBEE {
+
+  class RefinementResult <<dataclass>> {
+    membership : ndarray
+    log : List[Dict]
+    metadata : Dict
+  }
+
+  abstract class ClusterRefinementStep {
+    name : str
+    +{abstract} run(df, membership, renderer, *, target_lbl, **ctx) : RefinementResult
+  }
+
+  class HausdorffSplitStep {
+    name = "hausdorff_split"
+    thresholds, linkage_method
+    --
+    Pairwise IC registration → Hausdorff
+    distance → hierarchical linkage → fcluster
+    Unknown-label patches reassigned to
+    largest sub-cluster.
+  }
+
+  class OCRRematchStep {
+    name = "ocr_rematch"
+    max_cluster_size : int
+    --
+    Merge small clusters into largest
+    cluster with same dominant OCR label.
+  }
+
+  class PCAZScoreRematchStep {
+    name = "pca_zscore_rematch"
+    pca_k, z_max, n_candidates
+    --
+    Register query onto anchor → PCA of
+    target → z-score test → merge if
+    max|z| < z_max.
+  }
+
+  class MRFRefinementStep {
+    name = "mrf_bp"
+    mrf : MRFBeliefPropagation
+    --
+    Unary: OCR probabilities
+    Pairwise: generalized Potts (NLFA)
+    Inference: max-sum loopy BP
+    Requires nlfa in ctx.
+  }
+
+  class KMedoidsSplitMergeStep {
+    name = "kmedoids_split_merge"
+    kmedoids : KMedoidsSplitMerge
+    --
+    reassign → spectral split (Fiedler)
+    → NFA-validated merge
+    Requires nlfa in ctx.
+  }
+
+  ClusterRefinementStep <|-- HausdorffSplitStep
+  ClusterRefinementStep <|-- OCRRematchStep
+  ClusterRefinementStep <|-- PCAZScoreRematchStep
+  ClusterRefinementStep <|-- MRFRefinementStep
+  ClusterRefinementStep <|-- KMedoidsSplitMergeStep
+  ClusterRefinementStep ..> RefinementResult : produces
+
+  graphClusteringSweep --> "0..*" ClusterRefinementStep : chains
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 6b: REFINEMENT INTERNALS
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering — Refinement Engines" as refine_eng #FFEBEE {
+
+  class MRFBeliefPropagation {
+    beta, max_iter, damping
+    --
+    +fit(nlfa, edges, ocr_probs, init_labels) : dict
+    .. max-sum loopy BP ..
+    .. damped message passing ..
+    .. converges on stable assignment ..
+  }
+
+  class KMedoidsSplitMerge {
+    max_iter, split_threshold_sigma
+    min_split_size, merge_nlfa_threshold
+    --
+    +fit(init_labels, nlfa, D) : dict
+    -_medoids(labels, D) : dict
+    -_reassign(labels, D, medoids) : int
+    -_split(labels, D, nlfa, threshold) : int
+    -_merge(labels, nlfa, medoids) : int
+    .. Fiedler vector spectral bisection ..
+    .. NFA-validated cross-edge merging ..
+  }
+
+  MRFRefinementStep --> MRFBeliefPropagation : wraps
+  KMedoidsSplitMergeStep --> KMedoidsSplitMerge : wraps
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  STEP 7: POST-CLUSTERING
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering.post_clustering" as post_pkg #FFF3E0 {
+  class "<<module>>" as post_mod {
+    +chat_split_clusters(df, dissim, ...) : (df, log)
+    +associate_hapax(df, dissim, ...) : (df, log)
+    +build_glossary(df, target_lbl) : DataFrame
+    ..
+    CHAT-based split: impure clusters → subclusters
+    Hapax association: singletons → nearest cluster
+    Glossary: character inventory sorted by count
+  }
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  REGISTRATION MODULE
+' ══════════════════════════════════════════════════════════════════
+
+package "src.registration — Image Alignment" as reg_pkg #F3E5F5 {
+
+  abstract class Transformation {
+    +{abstract} jacobian(xx, yy)
+    +{abstract} warp(img_batch, mode, padding_mode)
+    +{abstract} inv : Transformation
+    +{abstract} compose(other) : Transformation
+    +visibility_mask(H, W, delta)
+    +__matmul__(other)
+  }
+
+  class PlanarTransform {
+    transform_type : str  «translation|euclidean|affinity|homography»
+    matrix : Tensor (B, 3, 3)
+    --
+    +warp(img_batch) : Tensor
+    +inv : PlanarTransform
+    +compose(other) : PlanarTransform
+    +scale(factor) : PlanarTransform
+    +jacobian(xx, yy) : Tensor
+    +visibility_mask(H, W, delta) : Tensor
+  }
+
+  class InverseCompositional {
+    transform_type : str
+    gradient_method : Gradients
+    error_function : str «lorentzian|geman_mcclure|quadratic»
+    max_iter, epsilon
+    --
+    +run(I1, I2, p_init) : PlanarTransform
+    .. Gauss-Newton on Hessian ..
+    .. robust error functions ..
+    .. fully batched (B pairs) ..
+  }
+
+  class GaussianPyramid {
+    eta, sigma_0, N_scales, min_size
+    --
+    +__call__(img) : List[Tensor]
+    .. coarse-to-fine image stack ..
+  }
+
+  class MultiscaleIC {
+    ic : InverseCompositional
+    pyramid : GaussianPyramid
+    first_scale : int
+    --
+    +run(I1, I2, p_init) : PlanarTransform
+    .. coarse → fine IC alignment ..
+  }
+
+  class Gradients {
+    method : str
+    C : int
+    --
+    +__call__(image) : (Ix, Iy)
+    .. separable convolution ..
+    .. supports: central, farid3, farid5 ..
+  }
+
+  Transformation <|-- PlanarTransform
+  MultiscaleIC --> InverseCompositional : uses
+  MultiscaleIC --> GaussianPyramid : uses
+  InverseCompositional --> PlanarTransform : produces
+  InverseCompositional --> Gradients : uses
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  NEW REGISTRATION METHODS
+' ══════════════════════════════════════════════════════════════════
+
+package "src.registration — Cluster Alignment" as align_pkg #F3E5F5 {
+
+  class "<<module>> alignment_utils" as align_utils {
+    +create_default_aligner(device) : MultiscaleIC
+    +pairwise_align(aligner, I1, I2) : (PlanarTransform, float)
+    +warp_image(image, transform) : Tensor
+    +median_template(aligned) : Tensor
+  }
+
+  class MSTAlignment {
+    k_neighbors, n_refinement_rounds
+    aligner : MultiscaleIC
+    --
+    +align_cluster(images, nlfa_sub, distance_sub) : dict
+    ..
+    1. Select medoid (min total distance)
+    2. k-NN edge set from NLFA
+    3. Pairwise IC residuals
+    4. Scipy MST construction
+    5. BFS transform propagation from root
+    6. Median template + refinement rounds
+  }
+
+  class Congealing {
+    n_alternations : int
+    aligner : MultiscaleIC
+    --
+    +congeal(images, medoid_idx) : dict
+    ..
+    Alternating optimization:
+    1. Fix transforms → median template
+    2. Fix template → IC registration per image
+    Repeat n_alternations times.
+  }
+
+  MSTAlignment --> align_utils : uses
+  Congealing --> align_utils : uses
+  align_utils --> MultiscaleIC : creates
+  align_utils --> PlanarTransform : uses
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  DEFORMATION-INVARIANT FEATURES
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering — Deformation Features" as deform_pkg #FFF3E0 {
+
+  class ShapeContextDescriptor {
+    n_sample_points, n_angular_bins, n_radial_bins
+    --
+    +describe(binary) : ndarray (N_s, n_bins)
+    +distance(desc_a, desc_b) : float
+    .. contour sampling ..
+    .. log-polar histograms ..
+    .. chi-squared + Hungarian matching ..
+  }
+
+  class PersistentHomologyDescriptor {
+    +compute_persistence(binary) : dict {H0, H1}
+    +wasserstein_distance(dgm_a, dgm_b, q) : float
+    +topological_distance(img_a, img_b) : float
+    .. gudhi cubical complex ..
+    .. distance transform filtration ..
+    .. H0 = components, H1 = loops ..
+  }
+
+  class TopologicalPreFilter {
+    _ph : PersistentHomologyDescriptor
+    _thresh : float
+    --
+    +signature(binary) : (n_comp, n_loops)
+    +compatibility_mask(signatures) : ndarray (N,N)
+  }
+
+  TopologicalPreFilter --> PersistentHomologyDescriptor : uses
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  EVALUATION & METRICS
+' ══════════════════════════════════════════════════════════════════
+
+package "src.clustering — Evaluation" as eval_pkg #E0F7FA {
+
+  class "<<module>> metrics" as metrics_mod {
+    +compute_metrics(ref, pred) : dict
+    +compute_purity(ref, pred) : float
+    +compute_clustering_f1(ref, pred) : float
+    +compute_accuracy_hungarian(ref, pred) : float
+    +compute_per_class_f1(ref, pred) : DataFrame
+    +compute_noise_fraction(labels) : float
+    ..
+    ARI, NMI, AMI, FMI, V-measure,
+    homogeneity, completeness, purity,
+    inverse purity, pairwise F1,
+    Hungarian-matched accuracy
+  }
+
+  class AblationRunner {
+    ablations : List[AblationConfig]
+    +add_ablation(config)
+    +run(pipeline_fn, data, default_params, ref) : DataFrame
+  }
+  class AblationConfig <<dataclass>> {
+    name, description
+    parameter_name, parameter_values
+    default_value
+  }
+
+  class "<<module>> evaluation" as eval_mod {
+    +bootstrap_metrics(ref, pred, n_bootstrap) : dict
+    +paired_significance_test(ref, a, b) : dict
+    +get_feature_ablations() : List[AblationConfig]
+    +get_acontrario_ablations()
+    +get_clustering_ablations()
+    +get_refinement_ablations()
+    +run_scalability_benchmark(stages, subsets) : DataFrame
+  }
+
+  AblationRunner --> AblationConfig : has many
+  AblationRunner --> metrics_mod : uses
+  eval_mod --> metrics_mod : uses
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  LAYOUT ANALYSIS
+' ══════════════════════════════════════════════════════════════════
+
+package "src.layout_analysis" as layout_pkg #E3F2FD {
+  class ReadingOrder {
+    min_col_area : int
+    --
+    +__call__(labels, page_df, ...) : fig
+    .. assigns reading_order column ..
+  }
+
+  class "<<module>> parsing" as parsing_mod {
+    +split_to_rectangles(labels, min_col_area) : DataFrame
+    +break_into_subcols(col_rects) : list
+  }
+
+  class "<<module>> skew" as skew_mod {
+    +get_document_orientation(image) : float
+  }
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  OCR (CHAT model)
+' ══════════════════════════════════════════════════════════════════
+
+package "src.ocr.chat" as chat_pkg #E8F5E9 {
+  class ModelWrapper {
+    net : kraken model
+    pad : int
+    --
+    +predict(image) : (chars, confs)
+  }
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  ENTRY POINTS (SCRIPTS)
+' ══════════════════════════════════════════════════════════════════
+
+package "scripts" as scripts_pkg {
+  class "run_extraction.py" as run_extraction <<script>> {
+    Runs GlobalPipeline on document images.
+    Saves connectedComponent .npz files.
+  }
+  class "run_preprocessing.py" as run_preprocessing <<script>> {
+    Runs PatchPreprocessing.
+    Produces DataFrame with SVGs + HOG + OCR.
+  }
+  class "sweep_clustering.py" as sweep_clustering <<script>> {
+    Runs graphClusteringSweep.
+    Produces clustering reports.
+  }
+}
+
+' ══════════════════════════════════════════════════════════════════
+'  CROSS-PACKAGE RELATIONSHIPS (PIPELINE FLOW)
+' ══════════════════════════════════════════════════════════════════
+
+run_extraction --> GlobalPipeline
+run_preprocessing --> PatchPreprocessing
+sweep_clustering --> graphClusteringSweep
+
+GlobalPipeline ..> connectedComponent : produces characters
+
+PatchPreprocessing ..> connectedComponent : loads from .npz
+PatchPreprocessing --> ModelWrapper : OCR predictions
+
+graphClusteringSweep --> Renderer : creates per config
+graphClusteringSweep --> HOG : computes features
+graphClusteringSweep ..> featureMatching : NLFA matrix
+graphClusteringSweep ..> post_mod : post-clustering
+
+HausdorffSplitStep --> MultiscaleIC : IC registration
+PCAZScoreRematchStep --> MultiscaleIC : IC registration
+
+@enduml

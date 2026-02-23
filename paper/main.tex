@@ -1,5 +1,5 @@
 % ============================================================================
-%  Main document — wrapper for compiling the methodology section standalone
+%  Main document — A Contrario Character Clustering from Historical Documents
 %
 %  Compile with: pdflatex main.tex  (twice for references)
 %  Or use:       latexmk -pdf main.tex
@@ -16,6 +16,8 @@
 
 % ── Math ──
 \usepackage{amsmath, amssymb, amsfonts}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
 
 % ── Graphics ──
 \usepackage{graphicx}
@@ -51,17 +53,93 @@
 
 % ── Misc ──
 \usepackage{microtype}
+\usepackage{enumitem}
 
 
 % ============================================================================
-\title{Character Clustering from Historical Document Images:\\Methodology}
+\title{%
+    Unsupervised Character Clustering in Historical Document Images\\
+    via A Contrario Feature Matching%
+}
 \author{}
 \date{}
 
 \begin{document}
 \maketitle
 
+% ============================================================================
+%  Abstract
+% ============================================================================
+\begin{abstract}
+We present an unsupervised pipeline for clustering individual character glyphs extracted from scanned historical document images.
+The method combines a learned text detector (CRAFT) for character-level extraction, Histogram of Oriented Gradients (HOG) descriptors for visual representation, and an \textit{a contrario} statistical framework for principled pairwise matching.
+The resulting similarity graph is partitioned using community detection (Leiden algorithm), followed by a composable refinement pipeline that fuses visual and linguistic signals.
+We further propose and evaluate four alternative clustering strategies---HDBSCAN with NFA-derived distances, Affinity Propagation on NFA similarities, Markov Random Field inference with loopy belief propagation, and K-medoids with spectral split/merge---as well as two registration methods for intra-cluster alignment (MST-based hierarchical alignment and congealing with robust median templates) and deformation-invariant features (Shape Context descriptors and persistent homology) for registration-free comparison.
+Comprehensive ablation studies and a rigorous evaluation protocol with bootstrap significance testing are provided.
+\end{abstract}
+
+% ============================================================================
+%  1. Introduction
+% ============================================================================
+\section{Introduction}
+\label{sec:introduction}
+
+Historical document analysis requires identifying and grouping recurrent character forms---a task complicated by varying handwriting styles, ink degradation, and the absence of labelled training data.
+Unlike modern OCR systems trained on millions of annotated examples, historical scripts often lack sufficient ground truth for supervised approaches.
+
+We propose a fully unsupervised pipeline that:
+\begin{enumerate}[nosep]
+    \item detects individual characters using a pre-trained text detector without fine-tuning;
+    \item describes each character via HOG features computed on vectorised representations;
+    \item determines similarity through an \textit{a contrario} statistical test that provides a principled, adaptive threshold without manual tuning;
+    \item clusters characters via graph-based community detection with multi-stage refinement.
+\end{enumerate}
+
+Beyond this baseline pipeline, we develop and compare several methodological improvements at each stage:
+\begin{itemize}[nosep]
+    \item \textbf{Clustering:} HDBSCAN on continuous NFA distances (automatic $K$, noise handling), Affinity Propagation (exemplar-based), and Markov Random Field fusion of visual and OCR signals (Section~\ref{sec:proposed-clustering}).
+    \item \textbf{Refinement:} K-medoids with NFA-guided spectral split/merge replacing three ad hoc stages (Section~\ref{sec:proposed-refinement}).
+    \item \textbf{Registration:} MST-based hierarchical alignment and congealing with robust median templates for sharp, drift-bounded intra-cluster alignment (Section~\ref{sec:proposed-registration}).
+    \item \textbf{Features:} Shape Context descriptors and persistent homology for deformation-invariant comparison and topological pre-filtering (Section~\ref{sec:proposed-features}).
+\end{itemize}
+
+The paper is organised as follows.
+Section~\ref{sec:methodology} describes the baseline pipeline.
+Section~\ref{sec:proposed-methods} presents the proposed improvements.
+Section~\ref{sec:experiments} details the experiment plan, ablation studies, and evaluation protocol.
+Section~\ref{sec:conclusion} concludes.
+
+
+% ============================================================================
+%  2. Methodology (baseline pipeline)
+% ============================================================================
 \input{methodology}
+
+
+% ============================================================================
+%  3. Proposed Methods
+% ============================================================================
+\input{proposed_methods}
+
+
+% ============================================================================
+%  4. Experiments
+% ============================================================================
+\input{experiments}
+
+
+% ============================================================================
+%  5. Conclusion
+% ============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We have presented a comprehensive unsupervised pipeline for character clustering in historical document images, grounded in the \textit{a contrario} statistical framework.
+The baseline pipeline---CRAFT detection, HOG features, NFA matching, Leiden clustering, and three-stage refinement---provides a strong starting point.
+The proposed improvements (HDBSCAN clustering, MRF fusion, K-medoids split/merge, MST alignment, congealing, and topological features) address specific limitations of the baseline at each stage.
+The ablation framework and evaluation protocol enable rigorous comparison of all components.
+Future work will focus on cross-corpus generalisation and integration of learned feature representations.
+
 
 % ============================================================================
 %  References
@@ -121,6 +199,36 @@ A.~Rosenberg and J.~Hirschberg.
 J.~Rony and H.~Kervadec.
 \newblock Distorch: fast differentiable boundary distances.
 \newblock In \emph{Proc.\ MIDL}, 2025.
+
+\bibitem{frey2007clustering}
+B.~J.~Frey and D.~Dueck.
+\newblock Clustering by passing messages between data points.
+\newblock \emph{Science}, 315(5814):972--976, 2007.
+
+\bibitem{mcinneshdbscan2017}
+L.~McInnes, J.~Healy, and S.~Astels.
+\newblock hdbscan: Hierarchical density based clustering.
+\newblock \emph{J.\ Open Source Software}, 2(11):205, 2017.
+
+\bibitem{belongie2002shape}
+S.~Belongie, J.~Malik, and J.~Puzicha.
+\newblock Shape matching and object recognition using shape contexts.
+\newblock \emph{IEEE Trans.\ PAMI}, 24(4):509--522, 2002.
+
+\bibitem{edelsbrunner2008persistent}
+H.~Edelsbrunner and J.~Harer.
+\newblock Persistent homology---a survey.
+\newblock In \emph{Surveys on Discrete and Computational Geometry}, pp.~257--282, AMS, 2008.
+
+\bibitem{learned2004data}
+E.~Learned-Miller.
+\newblock Data driven image models through continuous joint alignment.
+\newblock \emph{IEEE Trans.\ PAMI}, 28(2):236--250, 2006.
+
+\bibitem{yedidia2003understanding}
+J.~S.~Yedidia, W.~T.~Freeman, and Y.~Weiss.
+\newblock Understanding belief propagation and its generalizations.
+\newblock In \emph{Exploring AI in the New Millennium}, pp.~239--269, 2003.
 
 \end{thebibliography}
 

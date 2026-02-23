@@ -9,4 +9,8 @@ from .algorithms import (
     greedyModularityCommunityDetection,
     labelPropagationCommunityDetection,
     graphClustering,
+    nlfa_to_distance,
 )
+
+from .mrf_refinement import MRFRefinementStep
+from .kmedoids_refinement import KMedoidsSplitMergeStep

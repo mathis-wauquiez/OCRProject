@@ -50,6 +50,10 @@ from .refinement import (
     UNKNOWN_LABEL as _UNKNOWN_LABEL,
 )
 
+# New refinement methods
+from .mrf_refinement import MRFRefinementStep
+from .kmedoids_refinement import KMedoidsSplitMergeStep
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from tqdm import tqdm

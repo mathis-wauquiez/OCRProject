@@ -171,6 +171,44 @@ def compute_accuracy_hungarian(labels_true, labels_pred):
     return accuracy
 
 
+def compute_per_class_f1(reference_labels, predicted_labels, exclude_label=None):
+    """Per-class precision, recall, F1 via Hungarian matching.
+
+    Returns a DataFrame with columns: class, count, precision, recall, f1.
+    """
+    ref = np.array(reference_labels)
+    pred = np.array(predicted_labels)
+    if exclude_label is not None:
+        mask = ref != exclude_label
+        ref, pred = ref[mask], pred[mask]
+
+    C = contingency_matrix(ref, pred)
+    true_classes = np.unique(ref)
+    row_idx, col_idx = linear_sum_assignment(-C)
+
+    rows = []
+    for i, tc in enumerate(true_classes):
+        matched_col = col_idx[np.where(row_idx == i)[0]] if i < len(row_idx) else np.array([])
+        if len(matched_col):
+            j = matched_col[0]
+            tp = int(C[i, j])
+            fp, fn = int(C[:, j].sum() - tp), int(C[i, :].sum() - tp)
+            prec = tp / (tp + fp) if (tp + fp) else 0.0
+            rec = tp / (tp + fn) if (tp + fn) else 0.0
+            f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
+        else:
+            prec = rec = f1 = 0.0
+        rows.append({'class': tc, 'count': int((ref == tc).sum()),
+                     'precision': prec, 'recall': rec, 'f1': f1})
+    return pd.DataFrame(rows).sort_values('count', ascending=False).reset_index(drop=True)
+
+
+def compute_noise_fraction(labels):
+    """Fraction of points classified as noise (label = -1)."""
+    labels = np.asarray(labels)
+    return float((labels == -1).sum()) / len(labels) if len(labels) else 0.0
+
+
 # Optional: Add this for better error handling
 def compute_metrics_safe(reference_labels, predicted_labels):
     """

@@ -1,0 +1,189 @@
+@startuml Pipeline Activity Diagram
+skinparam defaultFontSize 11
+skinparam activityFontSize 12
+skinparam titleFontSize 16
+skinparam shadowing false
+
+title A Contrario Character Clustering — Pipeline Activity Diagram
+
+|#E8F5E9| Step 1: Detection (run_extraction.py → GlobalPipeline) |
+start
+:Load document image (PIL);
+:CRAFT neural network inference
+(score_text, score_link);
+:Watershed segmentation on score map
+(dual-threshold: seed + basin);
+:Filter CRAFT components
+(area, aspect ratio);
+:Merge nearby CRAFT components
+(link score proximity);
+:Binarize page image
+(Otsu / Li / triangle);
+:Extract image connected components;
+:Filter by aspect ratio & major axis;
+:Compute Mahalanobis similarity
+(CRAFT centroids ↔ image centroids);
+:Hungarian matching: assign image
+components to CRAFT detections;
+:Filter by contour proximity,
+aspect ratio, filled area, min area;
+:Save connectedComponent .npz files;
+
+|#E3F2FD| Step 2: Preprocessing (run_preprocessing.py → PatchPreprocessing) |
+:Load connectedComponent from .npz;
+
+fork
+  :CPU Stage;
+  :Extract binary & grayscale patches;
+  :Apply ink filter (background removal);
+  :Vectorize binary patches → SVG
+  (external C++ → BinaryShapeVectorizer);
+  :Deskew SVGs (page orientation → rotation);
+fork again
+  :GPU Stage;
+  :CHAT OCR per subcolumn
+  (Kraken rpred → spatial Hungarian matching
+   → char_chat / conf_chat);
+  :Compute HOG descriptors
+  (Renderer → DataLoader → HOG convolutions
+   → trilinear binning → histograms);
+end fork
+
+:Produce DataFrame:
+  page, file, label, centroid,
+  svg, histogram, char_chat, conf_chat;
+
+|#FFF3E0| Step 3: Clustering Sweep (sweep_clustering.py → graphClusteringSweep) |
+
+partition "3a. HOG Config Sweep" {
+  :Generate HOG configs:
+  cell_sizes × grdt_sigmas × num_bins × normalizations;
+
+  while (for each HOG config) is (next config)
+    :Instantiate Renderer(svg_imgs)
+    → DataLoader → HOG(batch)
+    → histogram features;
+
+    :featureMatching.match(features, features)
+    → NLFA matrix, dissimilarities, μ, σ²;
+
+    partition "3b. ε × γ Grid Search" {
+      while (for each ε) is (next ε)
+        :Build NX graph from NLFA
+        (threshold + reciprocal edges);
+        while (for each γ) is (next γ)
+          :Leiden partition
+          (RBConfigurationVertexPartition);
+          :Evaluate ARI against ground truth;
+        endwhile
+      endwhile
+    }
+
+    :Track best (config, ε, γ, ARI);
+  endwhile
+}
+
+:Select best overall HOG config;
+
+partition "3c. report_graph (best config)" {
+  :Build final graph + Leiden partition
+  with best (ε, γ);
+
+  :Compute degree centrality;
+
+  |#FFEBEE| Step 4: Refinement Pipeline |
+
+  partition "4a. Composable Refinement Steps" {
+    note
+      Each step: run(df, membership, renderer,
+                     target_lbl=..., **ctx)
+      → RefinementResult(membership, log, metadata)
+      Output feeds next step.
+    end note
+
+    :① HausdorffSplitStep
+    ── Per-cluster IC registration ──
+    ── Pairwise Hausdorff distances ──
+    ── Hierarchical linkage + fcluster ──
+    ── Sweep split thresholds → best ARI ──
+    ── Unknown patches → largest subcluster;
+
+    :② OCRRematchStep
+    ── Small clusters (≤ max_size) ──
+    ── Match dominant OCR label ──
+    ── Merge into largest same-label cluster;
+
+    :③ PCAZScoreRematchStep
+    ── Remaining small clusters ──
+    ── k-NN candidates by mean HOG ──
+    ── Register query → target anchor ──
+    ── PCA projection + z-score test ──
+    ── Merge if max|z| < z_max;
+  }
+
+  partition "4b. New Refinement Methods" {
+    :④ MRFRefinementStep (optional)
+    ── Unary: OCR probability matrix ──
+    ── Pairwise: β · NLFA (Potts) ──
+    ── Max-sum loopy BP ──
+    ── Damped convergence;
+
+    :⑤ KMedoidsSplitMergeStep (optional)
+    ── Reassign to nearest medoid ──
+    ── Spectral split (Fiedler vector) ──
+    ── NFA-validated merge ──
+    ── Iterate until stable;
+  }
+
+  |#FFF3E0| Step 5: Post-Clustering |
+  if (enable_chat_split?) then (yes)
+    :chat_split_clusters
+    Split impure clusters by CHAT label;
+  endif
+
+  if (enable_hapax_association?) then (yes)
+    :associate_hapax
+    Merge singletons by dissimilarity;
+  endif
+
+  if (enable_glossary?) then (yes)
+    :build_glossary
+    Character inventory by frequency;
+  endif
+
+  :Compute purity, completeness,
+  cluster entropy, label entropy;
+
+  :Compute final metrics:
+  ARI, NMI, AMI, FMI, V-measure,
+  homogeneity, completeness,
+  pairwise F1, Hungarian accuracy;
+}
+
+|#FFF9C4| Output |
+:Generate HTML report
+(ClusteringSweepReporter → AutoReport);
+
+:Return: (dataframe, filtered_df,
+          representatives_df, graph, partition);
+
+stop
+
+' ══════════════════════════════════════════════════════════════════
+'  REGISTRATION & FEATURE SUB-PIPELINES (referenced above)
+' ══════════════════════════════════════════════════════════════════
+
+legend bottom
+  **Registration Sub-Pipeline (used by HausdorffSplit, PCAZScore, MST, Congealing):**
+  ""InverseCompositional"" → single-scale Gauss-Newton with robust error function
+  ""GaussianPyramid"" → coarse-to-fine image stack
+  ""MultiscaleIC"" → coarse→fine IC alignment  → ""PlanarTransform""
+  ""PlanarTransform.warp()"" → bicubic grid sampling with visibility mask
+
+  **Deformation-Invariant Features (alternative to registration):**
+  ""ShapeContextDescriptor"" → contour sampling → log-polar histograms → chi² + Hungarian
+  ""PersistentHomologyDescriptor"" → distance transform → cubical complex (gudhi) → H0/H1 → Wasserstein
+  ""TopologicalPreFilter"" → (n_components, n_loops) fast rejection
+endlegend
+
+@enduml
