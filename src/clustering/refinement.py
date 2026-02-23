@@ -104,13 +104,11 @@ class HausdorffSplitStep(ClusterRefinementStep):
         linkage_method: str = 'average',
         min_cluster_size: int = 5,
         batch_size: int = 256,
-        evaluate_fn=None,
     ):
         self.thresholds = thresholds
         self.linkage_method = linkage_method
         self.min_cluster_size = min_cluster_size
         self.batch_size = batch_size
-        self._evaluate_fn = evaluate_fn
 
     # ── per-cluster worker (static for thread-pool) ─────────────────
 
@@ -269,6 +267,8 @@ class HausdorffSplitStep(ClusterRefinementStep):
     def run(self, dataframe, membership, renderer, *,
             target_lbl, **ctx) -> RefinementResult:
 
+        evaluate_fn = ctx.get('evaluate_fn')
+
         linkages = self._compute_linkages(
             dataframe, membership, renderer, target_lbl,
         )
@@ -283,8 +283,8 @@ class HausdorffSplitStep(ClusterRefinementStep):
                            desc="Split threshold sweep", colour="magenta"):
             mem, log = self._apply_threshold(linkages, thresh)
 
-            if self._evaluate_fn is not None:
-                metrics = self._evaluate_fn(
+            if evaluate_fn is not None:
+                metrics = evaluate_fn(
                     target_labels=dataframe[target_lbl],
                     membership=mem.tolist(),
                 )

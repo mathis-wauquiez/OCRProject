@@ -12,7 +12,7 @@ data:
   input_path: "outputs/preprocessing/book1"
   output_path: "outputs/clustering/book1"
 
-  
+
 # Clustering method
 method:
   feature: "histogram"
@@ -20,7 +20,7 @@ method:
   metric: "CEMD"
   keep_reciprocal: true
   device: "cuda"
-  
+
   # Parameter sweep ranges
 
   # cell_sizes: [16, 24, 32]  # Cell size for HOG computation
@@ -31,20 +31,12 @@ method:
   epsilons: [0.0005]
   # gammas: [1.0, 1.25]
   gammas: [1.0]
-  
+
   cell_sizes: [22]  # Cell size for HOG computation
   # cell_sizes: [48]  # Cell size for HOG computation
   normalization_methods : ['patch'] # patch >> all
   grdt_sigmas: [5]       # Gradient sigma for smoothing
   nums_bins: [16]        # Number of orientation bins
-
-
-  # ── Cluster splitting (hierarchical sub-clustering) ──
-  split_thresholds: [21.5] # Hausdorff distance threshold for cutting the dendrogram
-  split_linkage_method: "average" # scipy linkage method: average, complete, single, ward, ...
-  split_min_cluster_size: 5       # clusters smaller than this are not split
-  split_batch_size: 256           # batch size for Hausdorff distance computation
-  split_render_scale: 1         # SVG render scale for binary image distance
 
   # ── Post-clustering refinement (all optional) ──
   enable_chat_split: true           # split clusters with mixed CHAT labels
@@ -58,8 +50,35 @@ method:
 
   enable_glossary: true              # generate character glossary
 
-  # ── Reporting options ──
-  embed_images: true       # true: base64-embedded images; false: external files
-  image_dpi: 75            # DPI for saved figures
-  use_jpeg: false          # use JPEG instead of PNG (smaller files, lossy)
-  jpeg_quality: 70         # JPEG quality (1–100)
+
+# ── Reporter (instantiated independently) ──
+reporter:
+  _target_: src.clustering.clustering_sweep_report.ClusteringSweepReporter
+  target_lbl: ${data.target_lbl}
+  split_linkage_method: "average"
+  split_thresholds: [21.5]
+  embed_images: true
+  image_dpi: 75
+  use_jpeg: false
+  jpeg_quality: 70
+  output_dir: "${data.output_path}/reports"
+
+
+# ── Refinement pipeline (list of steps, instantiated independently) ──
+refinement_steps:
+  - _target_: src.clustering.refinement.HausdorffSplitStep
+    thresholds: [21.5]
+    linkage_method: "average"
+    min_cluster_size: 5
+    batch_size: 256
+
+  - _target_: src.clustering.refinement.OCRRematchStep
+    max_cluster_size: 3
+
+  - _target_: src.clustering.refinement.PCAZScoreRematchStep
+    max_cluster_size: 3
+    pca_k: 5
+    z_max: 3.0
+    n_candidates: 5
+    min_target_size: 10
+    device: ${method.device}

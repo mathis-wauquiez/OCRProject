@@ -10,8 +10,9 @@ import io
 import base64
 import logging
 import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,37 @@ from .graph_visu import (
 from .tsne_plot import plot_community_tsne
 
 UNKNOWN_LABEL = '\u25af'  # ▯
+
+
+# ════════════════════════════════════════════════════════════════════
+#  Data-transfer objects for report_graph_results
+# ════════════════════════════════════════════════════════════════════
+
+@dataclass
+class RefinementReport:
+    """Bundle of refinement pipeline outputs for reporting."""
+    pre_split_membership: np.ndarray
+    post_split_membership: np.ndarray
+    did_split: bool
+    results: list = field(default_factory=list)
+    step_names: list = field(default_factory=list)
+    # Hausdorff-split specifics (None when no split step ran)
+    best_threshold: Optional[float] = None
+    best_split_log: Optional[list] = None
+    sweep_results_df: Optional[pd.DataFrame] = None
+    pre_split_metrics: Optional[Dict[str, Any]] = None
+    post_split_metrics: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class ClusterQuality:
+    """Purity, representatives, and evaluation metrics."""
+    purity_dataframe: pd.DataFrame
+    representatives: dict
+    pre_purity_df: pd.DataFrame
+    pre_representatives: dict
+    best_metrics: Dict[str, Any]
+    label_dataframe: pd.DataFrame
 
 
 def _get_b64(fig, dpi=75):
@@ -908,31 +940,19 @@ class ClusteringSweepReporter(AutoReport):
 
     def report_graph_results(self, *, dataframe, graph, partition, nlfa,
                              dissimilarities, best_epsilon, best_gamma,
-                             pre_split_membership, post_split_membership,
-                             best_threshold, best_split_log,
-                             sweep_results_df, did_split,
-                             purity_dataframe, representatives,
-                             pre_purity_df, pre_representatives,
-                             best_metrics, label_dataframe,
+                             refinement: RefinementReport,
+                             quality: ClusterQuality,
                              feature_matcher,
-                             pre_split_metrics=None, post_split_metrics=None,
-                             refinement_results=None, refinement_step_names=None,
                              chat_split_log=None, hapax_log=None,
                              glossary_df=None):
         """
         Single entry-point producing every report section for a given
         graph + partition.  Called once ALL computation is done.
         """
-        if refinement_results is None:
-            refinement_results = []
-        if refinement_step_names is None:
-            refinement_step_names = []
-
         # Section 1: Graph topology + best-config summary
         with self.section("Graph Topology"):
             self.report_graph_topology(graph, best_epsilon, best_gamma)
 
-            # Best-config parameter summary for quick reference
             config_html = f"""
             <div style="background: #f8f9fa; border-left: 4px solid #667eea;
                         padding: 15px; border-radius: 4px; margin: 15px 0;">
@@ -943,9 +963,9 @@ class ClusteringSweepReporter(AutoReport):
                     <tr><td style="padding: 4px 12px; font-weight:bold;">Gamma (&gamma;)</td>
                         <td style="padding: 4px 12px;">{best_gamma:.4f}</td></tr>
                     <tr><td style="padding: 4px 12px; font-weight:bold;">Split Threshold</td>
-                        <td style="padding: 4px 12px;">{best_threshold}</td></tr>
+                        <td style="padding: 4px 12px;">{refinement.best_threshold}</td></tr>
                     <tr><td style="padding: 4px 12px; font-weight:bold;">Best ARI</td>
-                        <td style="padding: 4px 12px;">{best_metrics.get('adjusted_rand_index', 'N/A')}</td></tr>
+                        <td style="padding: 4px 12px;">{quality.best_metrics.get('adjusted_rand_index', 'N/A')}</td></tr>
                 </table>
             </div>
             """
@@ -954,64 +974,64 @@ class ClusteringSweepReporter(AutoReport):
         # Section 2: Pre-split clusters
         with self.section("Clusters (Pre-Split)"):
             self.report_clusters_section(
-                dataframe, 'membership_pre_split', pre_purity_df,
-                pre_representatives, graph,
+                dataframe, 'membership_pre_split', quality.pre_purity_df,
+                quality.pre_representatives, graph,
                 title_prefix="All Clusters Analysis (Before Splitting)"
             )
 
         # Section 3: Cluster splitting (Hausdorff-specific)
-        if did_split and best_split_log is not None:
+        if refinement.did_split and refinement.best_split_log is not None:
             with self.section("Cluster Splitting"):
-                if sweep_results_df is not None and len(self.split_thresholds) > 1:
-                    self.report_split_sweep(sweep_results_df, best_threshold)
+                if refinement.sweep_results_df is not None and len(self.split_thresholds) > 1:
+                    self.report_split_sweep(refinement.sweep_results_df, refinement.best_threshold)
                 self.report_split_comparison(
-                    dataframe, pre_split_membership, post_split_membership,
-                    best_split_log, best_threshold,
-                    pre_metrics=pre_split_metrics, post_metrics=post_split_metrics,
+                    dataframe, refinement.pre_split_membership, refinement.post_split_membership,
+                    refinement.best_split_log, refinement.best_threshold,
+                    pre_metrics=refinement.pre_split_metrics, post_metrics=refinement.post_split_metrics,
                 )
-                self.report_split_visualization(dataframe, best_split_log, best_threshold)
+                self.report_split_visualization(dataframe, refinement.best_split_log, refinement.best_threshold)
 
         # Section 4: Per-refinement-step reports (rematch steps)
-        if refinement_results:
+        if refinement.results:
             with self.section("Refinement Steps"):
-                for name, result in zip(refinement_step_names, refinement_results):
+                for name, result in zip(refinement.step_names, refinement.results):
                     self.report_refinement_step(name, result, dataframe)
 
         # Section 5: Post-refinement clusters
-        if did_split:
+        if refinement.did_split:
             with self.section("Clusters (Post-Refinement)"):
                 self.report_clusters_section(
-                    dataframe, 'membership', purity_dataframe,
-                    representatives, graph,
+                    dataframe, 'membership', quality.purity_dataframe,
+                    quality.representatives, graph,
                     title_prefix="All Clusters Analysis (After Refinement)"
                 )
 
         # Section 6: Label fragmentation
         with self.section("Label Fragmentation"):
-            self.report_fragmentation(dataframe, label_dataframe)
+            self.report_fragmentation(dataframe, quality.label_dataframe)
 
         # Section 7: Summary & metrics
         hapax_df = self.report_summary_and_metrics(
-            dataframe, purity_dataframe, label_dataframe,
-            best_metrics, nlfa, best_epsilon, best_gamma, best_threshold
+            dataframe, quality.purity_dataframe, quality.label_dataframe,
+            quality.best_metrics, nlfa, best_epsilon, best_gamma, refinement.best_threshold
         )
 
         # Section 8: Examples
         self.report_examples(dataframe, dissimilarities, graph, best_epsilon,
                              feature_matcher=feature_matcher)
 
-        # Section 5: Hapax
+        # Section 9: Hapax
         self.report_hapax(dataframe, hapax_df, dissimilarities, graph)
 
-        # Section 6: CHAT-based cluster splitting (optional)
+        # Optional: CHAT-based cluster splitting
         if chat_split_log is not None:
             self.report_chat_split(dataframe, chat_split_log)
 
-        # Section 7: Hapax association (optional)
+        # Optional: Hapax association
         if hapax_log is not None:
             self.report_hapax_association(dataframe, hapax_log)
 
-        # Section 8: Glossary (optional)
+        # Optional: Glossary
         if glossary_df is not None:
             self.report_glossary(glossary_df, dataframe)
 
