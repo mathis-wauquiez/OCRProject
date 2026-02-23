@@ -362,20 +362,13 @@ package "src.clustering — Refinement Steps" as refine_pkg #FFEBEE {
     largest sub-cluster.
   }
 
-  class OCRRematchStep {
-    name = "ocr_rematch"
-    max_cluster_size : int
+  class OCRGuidedPCARematchStep {
+    name = "ocr_guided_pca_rematch"
+    max_cluster_size, pca_k, z_max
     --
-    Merge small clusters into largest
-    cluster with same dominant OCR label.
-  }
-
-  class PCAZScoreRematchStep {
-    name = "pca_zscore_rematch"
-    pca_k, z_max, n_candidates
-    --
-    Register query onto anchor → PCA of
-    target → z-score test → merge if
+    OCR label selects candidate clusters →
+    IC register query onto anchor → PCA
+    projection → z-score test → merge if
     max|z| < z_max.
   }
 
@@ -399,8 +392,7 @@ package "src.clustering — Refinement Steps" as refine_pkg #FFEBEE {
   }
 
   ClusterRefinementStep <|-- HausdorffSplitStep
-  ClusterRefinementStep <|-- OCRRematchStep
-  ClusterRefinementStep <|-- PCAZScoreRematchStep
+  ClusterRefinementStep <|-- OCRGuidedPCARematchStep
   ClusterRefinementStep <|-- MRFRefinementStep
   ClusterRefinementStep <|-- KMedoidsSplitMergeStep
   ClusterRefinementStep ..> RefinementResult : produces
@@ -727,6 +719,6 @@ graphClusteringSweep ..> featureMatching : NLFA matrix
 graphClusteringSweep ..> post_mod : post-clustering
 
 HausdorffSplitStep --> MultiscaleIC : IC registration
-PCAZScoreRematchStep --> MultiscaleIC : IC registration
+OCRGuidedPCARematchStep --> MultiscaleIC : IC registration
 
 @enduml

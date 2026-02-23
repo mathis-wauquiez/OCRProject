@@ -108,15 +108,10 @@ partition "3c. report_graph (best config)" {
     ── Sweep split thresholds → best ARI ──
     ── Unknown patches → largest subcluster;
 
-    :② OCRRematchStep
+    :② OCRGuidedPCARematchStep
     ── Small clusters (≤ max_size) ──
-    ── Match dominant OCR label ──
-    ── Merge into largest same-label cluster;
-
-    :③ PCAZScoreRematchStep
-    ── Remaining small clusters ──
-    ── k-NN candidates by mean HOG ──
-    ── Register query → target anchor ──
+    ── Dominant OCR label → candidate clusters ──
+    ── Register query → candidate anchor ──
     ── PCA projection + z-score test ──
     ── Merge if max|z| < z_max;
   }
@@ -174,7 +169,7 @@ stop
 ' ══════════════════════════════════════════════════════════════════
 
 legend bottom
-  **Registration Sub-Pipeline (used by HausdorffSplit, PCAZScore, MST, Congealing):**
+  **Registration Sub-Pipeline (used by HausdorffSplit, OCRGuidedPCA, MST, Congealing):**
   ""InverseCompositional"" → single-scale Gauss-Newton with robust error function
   ""GaussianPyramid"" → coarse-to-fine image stack
   ""MultiscaleIC"" → coarse→fine IC alignment  → ""PlanarTransform""

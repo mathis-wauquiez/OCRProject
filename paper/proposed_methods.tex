@@ -47,14 +47,14 @@ The energy $E(\mathbf{z}) = \sum_i \psi_i(z_i) + \sum_{(i,j)} \psi_{ij}(z_i, z_j
     \label{eq:potts}
 \end{equation}
 where $\beta = 1/\text{median}(\text{NLFA})$.
-This subsumes the three baseline refinement stages: unary potentials encode the OCR signal (Stage~2), pairwise potentials capture visual similarity (Stage~1), and global energy minimisation handles singletons (Stage~3).
+This subsumes the two baseline refinement stages: pairwise potentials capture visual similarity (Stage~1), unary potentials encode the OCR-guided PCA compatibility test (Stage~2), and global energy minimisation jointly optimises assignment.
 
 
 % ============================================================================
 \subsection{Principled Refinement: K-Medoids with Split/Merge}
 \label{sec:proposed-refinement}
 
-An alternative to the three sequential refinement stages is a single iterative algorithm.
+An alternative to the two sequential refinement stages is a single iterative algorithm.
 Starting from the baseline partition, medoids are computed as $m_C = \argmin_{I_i \in C} \sum_{I_j \in C} d(I_i, I_j)$.
 
 \emph{Reassignment:} Each character is compared to the $k$-nearest alternative medoids; if a better match exists, it is reassigned.

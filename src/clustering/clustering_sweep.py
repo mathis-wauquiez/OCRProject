@@ -46,7 +46,7 @@ from src.clustering.bin_image_metrics import (
 # Refinement pipeline
 from .refinement import (
     ClusterRefinementStep, RefinementResult,
-    HausdorffSplitStep, OCRRematchStep, PCAZScoreRematchStep,
+    HausdorffSplitStep, OCRGuidedPCARematchStep,
     UNKNOWN_LABEL as _UNKNOWN_LABEL,
 )
 
@@ -574,7 +574,7 @@ class graphClusteringSweep(AutoReport):
 
         has_renderer = renderer is not None
         for step in self.refinement_steps:
-            if not has_renderer and isinstance(step, (HausdorffSplitStep, PCAZScoreRematchStep)):
+            if not has_renderer and isinstance(step, (HausdorffSplitStep, OCRGuidedPCARematchStep)):
                 continue  # skip GPU steps when no renderer available
             result = step.run(
                 dataframe, current_membership, renderer,

@@ -71,9 +71,7 @@
     \node[substage, below=0.1cm of refine.south west, anchor=north west, xshift=0.2cm]
         (hausdorff) {Hausdorff splitting};
     \node[substage, below=0.06cm of hausdorff]
-        (ocrrematch) {OCR rematching};
-    \node[substage, below=0.06cm of ocrrematch]
-        (pcarematch) {PCA z-score rematching};
+        (pcarematch) {OCR-guided PCA rematching};
 
     % ── Output ──
     \node[io, below=0.5cm of pcarematch] (output) {Vectorised character glossary};

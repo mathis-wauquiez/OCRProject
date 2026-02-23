@@ -125,20 +125,20 @@ where $e_c$ is the total edge weight within community $c$, $n_c$ its size, and $
 \label{sec:refinement}
 
 The Leiden partition may contain impure or over-fragmented clusters.
-A sequential three-stage refinement addresses these issues (Fig.~\ref{fig:refinement-pipeline}).
+A sequential two-stage refinement addresses these issues (Fig.~\ref{fig:refinement-pipeline}).
 
 \paragraph{Stage~1: Hausdorff-based splitting.}
 Large clusters ($\ge 5$ members) are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} on registered binary images.
 Registration uses multiscale inverse compositional (IC) alignment~\cite{briand2018ipol} with a Lorentzian robust error.
 The Hausdorff distance matrix is used to build an average-linkage dendrogram, cut at $\tau_\text{split} = 21.5$.
 
-\paragraph{Stage~2: OCR-based rematching.}
-Small clusters ($\le 3$ members) are merged into the largest cluster sharing the same dominant OCR label.
-This fast, label-driven step handles fragmented Leiden partitions.
-
-\paragraph{Stage~3: PCA z-score rematching.}
-Remaining small clusters are tested against $k=5$ nearest large clusters ($\ge 10$ members) via image-space PCA compatibility.
-The query is registered against each candidate's most central member, projected into the candidate's PCA space ($d=5$ components), and merged if $\max_j |z_j| < 3.0$.
+\paragraph{Stage~2: OCR-guided PCA rematching.}
+Small clusters ($\le 3$ members) are candidates for merging.
+For each, the dominant OCR label selects target clusters: all large clusters ($\ge 10$ members) whose own dominant label matches.
+This OCR-guided shortlist replaces blind nearest-neighbour search in feature space, focusing the expensive registration step on semantically plausible candidates.
+Each candidate is then validated via image-space PCA compatibility: the query patch is registered against the candidate's most central member using IC alignment, projected into the candidate's PCA space ($d=5$ components), and accepted only if $\max_j |z_j| < 3.0$.
+Among compatible candidates, the one with the lowest aggregate z-score receives the merge.
+Clusters without a known OCR label are left untouched.
 
 \input{figures/fig_refinement_pipeline}
 

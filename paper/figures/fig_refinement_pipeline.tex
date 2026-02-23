@@ -1,5 +1,5 @@
 % ============================================================================
-%  Refinement Pipeline Figure — three-stage post-partition refinement
+%  Refinement Pipeline Figure — two-stage post-partition refinement
 % ============================================================================
 \begin{figure}[t]
     \centering
@@ -37,39 +37,30 @@
 
     \node[note, right=0.8cm of split] {Impure clusters\\$\to$ visually coherent\\sub-clusters};
 
-    % ── Stage 2: OCR rematch ──
-    \node[stage=blue, below=0.7cm of split3] (ocr) {OCR Rematching};
-    \node[detail, below=0.1cm of ocr] (ocr1) {Small clusters ($\le 3$): find dominant label};
-    \node[detail, below=0.05cm of ocr1] (ocr2) {Merge into largest cluster with same label};
+    % ── Stage 2: OCR-guided PCA rematch ──
+    \node[stage=blue, below=0.7cm of split3] (pca) {OCR-Guided PCA Rematching};
+    \node[detail, below=0.1cm of pca] (pca1) {Small clusters ($\le 3$): find dominant OCR label};
+    \node[detail, below=0.05cm of pca1] (pca2) {Candidates: large clusters with same label};
+    \node[detail, below=0.05cm of pca2] (pca3) {IC register query $\to$ candidate anchor};
+    \node[detail, below=0.05cm of pca3] (pca4) {PCA projection + z-score compatibility test};
 
-    \node[note, right=0.8cm of ocr] {Fast, label-driven\\(no GPU)};
-
-    % ── Stage 3: PCA rematch ──
-    \node[stage=green!70!black, below=0.7cm of ocr2] (pca) {PCA Z-Score Rematching};
-    \node[detail, below=0.1cm of pca] (pca1) {$k$-NN candidate clusters (HOG distance)};
-    \node[detail, below=0.05cm of pca1] (pca2) {IC register query $\to$ anchor};
-    \node[detail, below=0.05cm of pca2] (pca3) {PCA projection + z-score test};
-
-    \node[note, right=0.8cm of pca] {Image-space\\compatibility test\\for remaining singletons};
+    \node[note, right=0.8cm of pca] {OCR narrows candidates,\\PCA validates merge\\in image space};
 
     % ── Output ──
-    \node[io, below=0.7cm of pca3] (output) {Refined clusters};
+    \node[io, below=0.7cm of pca4] (output) {Refined clusters};
 
     % ── Arrows ──
     \draw[arrow] (input) -- (split);
-    \draw[arrow] (split3.south) -- ++(0,-0.2) -| ([xshift=0cm]ocr.north);
-    \draw[arrow] (ocr2.south) -- ++(0,-0.2) -| ([xshift=0cm]pca.north);
-    \draw[arrow] (pca3.south) -- ++(0,-0.2) -| ([xshift=0cm]output.north);
+    \draw[arrow] (split3.south) -- ++(0,-0.2) -| ([xshift=0cm]pca.north);
+    \draw[arrow] (pca4.south) -- ++(0,-0.2) -| ([xshift=0cm]output.north);
 
     % ── Stage labels ──
     \node[left=0.6cm of split, font=\footnotesize\bfseries, text=red!70] {Stage 1};
-    \node[left=0.6cm of ocr, font=\footnotesize\bfseries, text=blue!70] {Stage 2};
-    \node[left=0.6cm of pca, font=\footnotesize\bfseries, text=green!50!black] {Stage 3};
+    \node[left=0.6cm of pca, font=\footnotesize\bfseries, text=blue!70] {Stage 2};
 
     \end{tikzpicture}%
     }
-    \caption{Three-stage cluster refinement pipeline.
-    After the initial Leiden partition, clusters are sequentially split by visual dissimilarity (Stage~1), merged by OCR label (Stage~2), and merged by image-space PCA compatibility (Stage~3).
-    Each stage is composable and produces structured diagnostics for reporting.}
+    \caption{Two-stage cluster refinement pipeline.
+    After the initial Leiden partition, clusters are split by visual dissimilarity (Stage~1), then small fragments are merged back using OCR-guided candidate selection validated by PCA z-score compatibility (Stage~2).}
     \label{fig:refinement-pipeline}
 \end{figure}

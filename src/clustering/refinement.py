@@ -321,129 +321,39 @@ class HausdorffSplitStep(ClusterRefinementStep):
 
 
 # ════════════════════════════════════════════════════════════════════
-#  2. OCR-based rematching (label-driven, no GPU)
+#  2. OCR-guided PCA z-score rematching
 # ════════════════════════════════════════════════════════════════════
 
-class OCRRematchStep(ClusterRefinementStep):
+class OCRGuidedPCARematchStep(ClusterRefinementStep):
     """
-    Stage-1 rematch: merge small / singleton clusters into larger
-    clusters when their dominant recognised-character label matches.
-
-    For each cluster of size <= ``max_cluster_size``:
-      1. Find the dominant known label in that cluster.
-      2. Find the largest cluster whose dominant label is the same.
-      3. Reassign all patches in the small cluster to that target.
-
-    Unknowns and clusters without any known label are left untouched.
-    """
-
-    name = "ocr_rematch"
-
-    def __init__(self, max_cluster_size: int = 3):
-        self.max_cluster_size = max_cluster_size
-
-    def run(self, dataframe, membership, renderer, *,
-            target_lbl, **ctx) -> RefinementResult:
-
-        mem = membership.copy()
-        labels = dataframe[target_lbl].fillna(UNKNOWN_LABEL).values
-        log = []
-
-        # ── Pre-compute per-cluster dominant label & size ───────────
-        cluster_ids = np.unique(mem)
-        cluster_dom = {}   # cid → dominant known label (or None)
-        cluster_size = {}  # cid → total size
-
-        for cid in cluster_ids:
-            mask = mem == cid
-            cluster_size[cid] = int(mask.sum())
-            known = labels[mask]
-            known = known[known != UNKNOWN_LABEL]
-            if len(known) == 0:
-                cluster_dom[cid] = None
-            else:
-                vals, counts = np.unique(known, return_counts=True)
-                cluster_dom[cid] = vals[counts.argmax()]
-
-        # ── Build label → largest cluster mapping ───────────────────
-        label_to_largest = {}  # label → (cid, size)
-        for cid in cluster_ids:
-            dom = cluster_dom[cid]
-            if dom is None:
-                continue
-            sz = cluster_size[cid]
-            if dom not in label_to_largest or sz > label_to_largest[dom][1]:
-                label_to_largest[dom] = (cid, sz)
-
-        # ── Rematch small clusters ──────────────────────────────────
-        for cid in cluster_ids:
-            if cluster_size[cid] > self.max_cluster_size:
-                continue
-            dom = cluster_dom[cid]
-            if dom is None:
-                continue
-            target_cid, target_size = label_to_largest.get(dom, (None, 0))
-            if target_cid is None or target_cid == cid:
-                continue
-
-            mask = mem == cid
-            mem[mask] = target_cid
-            log.append(dict(
-                action='merge',
-                source_cluster=int(cid),
-                source_size=cluster_size[cid],
-                target_cluster=int(target_cid),
-                target_size=target_size,
-                label=dom,
-            ))
-
-        # ── Re-number contiguously ──────────────────────────────────
-        unique_ids = np.unique(mem)
-        remap = {old: new for new, old in enumerate(unique_ids)}
-        mem = np.array([remap[v] for v in mem])
-
-        return RefinementResult(
-            membership=mem,
-            log=log,
-            metadata=dict(
-                n_merged=len(log),
-                max_cluster_size=self.max_cluster_size,
-            ),
-        )
-
-
-# ════════════════════════════════════════════════════════════════════
-#  3. PCA z-score rematching
-# ════════════════════════════════════════════════════════════════════
-
-class PCAZScoreRematchStep(ClusterRefinementStep):
-    """
-    Stage-2 rematch: for each remaining small cluster or singleton,
-    test compatibility with candidate clusters via PCA z-score.
+    Unified rematch: for each small cluster, use OCR labels to select
+    candidate target clusters, then validate compatibility via PCA
+    z-score in registered image space.
 
     Algorithm for each query cluster Q (size <= ``max_cluster_size``):
-      1. Compute Q's mean HOG feature vector.
-      2. Find the ``n_candidates`` nearest large clusters by L2
-         distance between mean feature vectors.
+      1. Find Q's dominant OCR label.
+      2. Collect all large clusters (>= ``min_target_size``) that share
+         the same dominant label as candidates.
       3. For each candidate cluster C:
          a. Register the query patch against C's most-central patch
             (the "anchor") using IC registration.
          b. Run PCA on C's registered patch images (first ``pca_k``
             components).
          c. Project the registered query into C's PCA space.
-         d. Compute z-score on each of the first ``pca_k`` components.
+         d. Compute z-score on each component.
          e. If max |z| < ``z_max``, Q is compatible with C.
       4. Merge Q into the compatible C with the lowest max |z|.
+
+    Clusters without a known OCR label are left untouched.
     """
 
-    name = "pca_zscore_rematch"
+    name = "ocr_guided_pca_rematch"
 
     def __init__(
         self,
         max_cluster_size: int = 3,
         pca_k: int = 5,
         z_max: float = 3.0,
-        n_candidates: int = 5,
         min_target_size: int = 10,
         batch_size: int = 64,
         device: str = 'cuda',
@@ -451,7 +361,6 @@ class PCAZScoreRematchStep(ClusterRefinementStep):
         self.max_cluster_size = max_cluster_size
         self.pca_k = pca_k
         self.z_max = z_max
-        self.n_candidates = n_candidates
         self.min_target_size = min_target_size
         self.batch_size = batch_size
         self.device = device
@@ -507,12 +416,26 @@ class PCAZScoreRematchStep(ClusterRefinementStep):
         cluster_members = {cid: np.where(mem == cid)[0] for cid in cluster_ids}
         cluster_size = {cid: len(v) for cid, v in cluster_members.items()}
 
-        # Mean HOG features per cluster (for candidate selection)
-        histograms = dataframe['histogram'].values
-        cluster_mean_feat = {}
+        # ── Per-cluster dominant OCR label ──────────────────────────
+        cluster_dom = {}
         for cid in cluster_ids:
-            feats = np.stack([histograms[i] for i in cluster_members[cid]])
-            cluster_mean_feat[cid] = feats.mean(axis=0).flatten()
+            known = labels[cluster_members[cid]]
+            known = known[known != UNKNOWN_LABEL]
+            if len(known) == 0:
+                cluster_dom[cid] = None
+            else:
+                vals, counts = np.unique(known, return_counts=True)
+                cluster_dom[cid] = vals[counts.argmax()]
+
+        # ── Build label → list of large clusters ────────────────────
+        label_to_large = {}  # label → [cid, ...]
+        for cid in cluster_ids:
+            if cluster_size[cid] < self.min_target_size:
+                continue
+            dom = cluster_dom[cid]
+            if dom is None:
+                continue
+            label_to_large.setdefault(dom, []).append(cid)
 
         # Find most-central member per cluster (anchor for registration)
         dc = dataframe['degree_centrality'].values
@@ -524,27 +447,24 @@ class PCAZScoreRematchStep(ClusterRefinementStep):
         # ── Identify small clusters to rematch ──────────────────────
         small_cids = [cid for cid in cluster_ids
                       if cluster_size[cid] <= self.max_cluster_size]
-        large_cids = [cid for cid in cluster_ids
-                      if cluster_size[cid] >= self.min_target_size]
-
-        if not large_cids:
-            return RefinementResult(membership=mem, log=log,
-                                   metadata=dict(n_merged=0))
-
-        large_feats = np.stack([cluster_mean_feat[c] for c in large_cids])
 
         # Cache PCA models for target clusters (computed lazily)
         pca_cache = {}
 
-        for qcid in tqdm(small_cids, desc="PCA z-score rematch",
+        for qcid in tqdm(small_cids, desc="OCR-guided PCA rematch",
                          colour="cyan"):
-            q_feat = cluster_mean_feat[qcid].reshape(1, -1)
-            dists = np.linalg.norm(large_feats - q_feat, axis=1)
-            top_k = np.argsort(dists)[:self.n_candidates]
-            candidates = [large_cids[i] for i in top_k]
+            dom = cluster_dom[qcid]
+            if dom is None:
+                continue
+
+            # OCR-guided candidate selection: all large clusters with
+            # the same dominant label
+            candidates = [c for c in label_to_large.get(dom, [])
+                          if c != qcid]
+            if not candidates:
+                continue
 
             q_members = cluster_members[qcid]
-            # Use the first member as the query representative
             q_idx = cluster_anchor.get(qcid, q_members[0])
 
             best_z = np.inf
@@ -581,11 +501,12 @@ class PCAZScoreRematchStep(ClusterRefinementStep):
             if best_target is not None:
                 mem[q_members] = best_target
                 log.append(dict(
-                    action='pca_merge',
+                    action='ocr_pca_merge',
                     source_cluster=int(qcid),
                     source_size=len(q_members),
                     target_cluster=int(best_target),
                     target_size=cluster_size[best_target],
+                    label=dom,
                     max_z_score=float(best_z),
                 ))
 
@@ -601,6 +522,10 @@ class PCAZScoreRematchStep(ClusterRefinementStep):
                 n_merged=len(log),
                 pca_k=self.pca_k,
                 z_max=self.z_max,
-                n_candidates=self.n_candidates,
             ),
         )
+
+
+# Backward-compatibility aliases
+OCRRematchStep = OCRGuidedPCARematchStep
+PCAZScoreRematchStep = OCRGuidedPCARematchStep
