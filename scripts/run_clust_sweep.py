@@ -62,6 +62,7 @@ def main(cfg: DictConfig):
         device=cfg.method.device,
         reporter=reporter,
         refinement_steps=refinement_steps,
+        enable_glossary=cfg.method.enable_glossary,
     )
     
     # Run sweep
