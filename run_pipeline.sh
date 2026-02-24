@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --extraction-config NAME Hydra config for extraction (default: extraction_pipeline)"
             echo "  --preprocessing-config N Hydra config for preprocessing (default: preprocessing)"
             echo ""
-            echo "Stages: build, extraction, preprocessing, clustering"
+            echo "Stages: build, extraction, preprocessing, alignment, clustering"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -63,7 +63,7 @@ should_run() {
         return
     fi
     if [[ -n "$FROM" ]]; then
-        local stages=(build extraction preprocessing clustering)
+        local stages=(build extraction preprocessing alignment clustering)
         local from_idx=-1 stage_idx=-1
         for i in "${!stages[@]}"; do
             [[ "${stages[$i]}" == "$FROM" ]] && from_idx=$i
@@ -117,9 +117,20 @@ if should_run "preprocessing"; then
     echo ""
 fi
 
-# ── Stage 3: Clustering ──
+# ── Stage 3: Transcription alignment ──
+if should_run "alignment"; then
+    echo ">> Stage 3: Transcription alignment..."
+    python scripts/align_transcription.py \
+        --dataframe "outputs/preprocessing/${BOOK}" \
+        --transcriptions "data/datasets/transcript/" \
+        --output "outputs/preprocessing/${BOOK}" \
+        --images "data/datasets/${BOOK}"
+    echo ""
+fi
+
+# ── Stage 4: Clustering ──
 if should_run "clustering"; then
-    echo ">> Stage 3: Clustering + post-clustering refinement..."
+    echo ">> Stage 4: Clustering + post-clustering refinement..."
     python scripts/sweep_clustering.py
     echo ""
 fi
@@ -131,5 +142,6 @@ echo ""
 echo "Outputs:"
 echo "  Extraction:     outputs/extraction/${BOOK}/"
 echo "  Preprocessing:  outputs/preprocessing/${BOOK}/"
+echo "  Alignment viz:  outputs/preprocessing/alignment_viz/"
 echo "  Clustering:     outputs/clustering/${BOOK}/"
 echo ""

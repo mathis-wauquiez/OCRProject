@@ -328,12 +328,39 @@ def visualize_page_alignment(
 # ------------------------------------------------------------------
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="Align transcription files to the patch dataframe."
+    )
+    parser.add_argument(
+        '--dataframe', required=True, type=Path,
+        help="Path to the saved dataframe (column-wise directory)."
+    )
+    parser.add_argument(
+        '--transcriptions', required=True, type=Path,
+        help="Folder containing transcription files (p1, p2, ...)."
+    )
+    parser.add_argument(
+        '--output', type=Path, default=None,
+        help="Where to save the updated dataframe. Defaults to --dataframe (in-place)."
+    )
+    parser.add_argument(
+        '--images', type=Path, default=None,
+        help="Folder containing page images for visualization. "
+             "If omitted, visualization is skipped."
+    )
+    parser.add_argument(
+        '--viz-output', type=Path, default=None,
+        help="Folder to save alignment PNGs. Defaults to <output>/alignment_viz/."
+    )
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-    transcriptions_folder = Path('data/datasets/transcript/')
-    transcriptions = load_transcriptions(transcriptions_folder)
+    output_path = args.output or args.dataframe
 
-    dataframe = load_columns('outputs/preprocessing/book1',
+    transcriptions = load_transcriptions(args.transcriptions)
+
+    dataframe = load_columns(args.dataframe,
                              ['reading_order', 'char_chat', 'file',
                               'left', 'top', 'width', 'height'])
 
@@ -345,9 +372,11 @@ if __name__ == '__main__':
 
     print(dataframe)
 
-    images_folder = Path('data/datasets/book1/')
-    viz_output = Path('outputs/preprocessing/alignment_viz/')
-    viz_output.mkdir(parents=True, exist_ok=True)
+    # Visualization setup
+    images_folder = args.images
+    viz_output = args.viz_output or (output_path / 'alignment_viz')
+    if images_folder is not None:
+        viz_output.mkdir(parents=True, exist_ok=True)
 
     for page, text in transcriptions.items():
         filtered_text = filter_chinese(text)
@@ -369,26 +398,26 @@ if __name__ == '__main__':
         print('---')
 
         # --- Visualization ---
-        # Find the image file for this page
-        page_files = page_df['file'].unique()
-        if len(page_files) == 0:
-            continue
-        img_path = images_folder / page_files[0]
-        if not img_path.exists():
-            log.warning("Image not found: %s — skipping viz", img_path)
-            continue
-        page_image = np.array(Image.open(img_path))
+        if images_folder is not None:
+            page_files = page_df['file'].unique()
+            if len(page_files) == 0:
+                continue
+            img_path = images_folder / page_files[0]
+            if not img_path.exists():
+                log.warning("Image not found: %s — skipping viz", img_path)
+                continue
+            page_image = np.array(Image.open(img_path))
 
-        visualize_page_alignment(
-            page_image=page_image,
-            page_df=page_df,
-            ocr_chars=ocr_chars,
-            aligned_chars=aligned_chars,
-            page_id=page,
-            output_path=viz_output / f'page_{page:03d}.png',
-        )
+            visualize_page_alignment(
+                page_image=page_image,
+                page_df=page_df,
+                ocr_chars=ocr_chars,
+                aligned_chars=aligned_chars,
+                page_id=page,
+                output_path=viz_output / f'page_{page:03d}.png',
+            )
 
     from notebook_utils.parquet_utils import load_dataframe
-    full_df = load_dataframe('outputs/preprocessing/book1')
+    full_df = load_dataframe(args.dataframe)
     full_df['char_transcription'] = dataframe['char_transcription']
-    save_dataframe(full_df, 'outputs/preprocessing/book1')
+    save_dataframe(full_df, output_path)
