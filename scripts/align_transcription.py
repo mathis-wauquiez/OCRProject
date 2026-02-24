@@ -280,8 +280,11 @@ def visualize_page_alignment(
 
     canvas = np.array(pil_img)
 
-    # Build matplotlib figure
-    fig, ax = plt.subplots(1, 1, figsize=(20, 28))
+    # Build matplotlib figure — match image aspect ratio
+    img_h, img_w = canvas.shape[:2]
+    fig_w = 20
+    fig_h = fig_w * img_h / img_w
+    fig, ax = plt.subplots(1, 1, figsize=(fig_w, fig_h))
     ax.imshow(canvas, interpolation='none', aspect='auto')
     ax.set_axis_off()
 
