@@ -73,3 +73,6 @@ refinement_steps:
 
   - _target_: src.clustering.refinement.OCRRematchStep
     max_cluster_size: 3
+
+  - _target_: src.clustering.refinement.LabelSplitStep
+    min_label_size: 2
