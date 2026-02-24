@@ -155,10 +155,24 @@ class graphClusteringSweep:
     # ================================================================
 
     def _run_refinement(self, dataframe, pre_split_membership, renderer, graph):
-        """Run the refinement pipeline and return post-split membership + logs."""
+        """Run the refinement pipeline and return post-split membership + logs.
+
+        Also computes clustering metrics after each step so the reporter can
+        show cumulative progress through the pipeline.
+        """
         current_membership = pre_split_membership.copy()
         results: list[RefinementResult] = []
         step_names: list[str] = []
+
+        # Track metrics through the pipeline (baseline + after each step)
+        _to_list = lambda m: m if isinstance(m, list) else m.tolist()
+        target_labels = dataframe[self.target_lbl]
+
+        pipeline_metrics: list[dict] = [{
+            'step': 'leiden (baseline)',
+            'n_clusters': len(np.unique(pre_split_membership)),
+            **self._evaluate_membership(target_labels, _to_list(pre_split_membership)),
+        }]
 
         has_renderer = renderer is not None
         for step in self.refinement_steps:
@@ -174,7 +188,13 @@ class graphClusteringSweep:
             results.append(result)
             step_names.append(step.name)
 
-        return current_membership, results, step_names
+            pipeline_metrics.append({
+                'step': step.name,
+                'n_clusters': len(np.unique(current_membership)),
+                **self._evaluate_membership(target_labels, _to_list(current_membership)),
+            })
+
+        return current_membership, results, step_names, pipeline_metrics
 
     def _reorder_by_membership(self, dataframe, graph, nlfa, dissimilarities,
                                pre_split_membership, post_split_membership):
@@ -297,7 +317,8 @@ class graphClusteringSweep:
         )
 
         # ── 4. Refinement pipeline ──
-        post_split_membership, refinement_results, refinement_step_names = \
+        post_split_membership, refinement_results, refinement_step_names, \
+            pipeline_metrics = \
             self._run_refinement(dataframe, pre_split_membership, renderer, graph)
 
         dataframe.loc[:, 'membership'] = pd.Series(
@@ -342,6 +363,7 @@ class graphClusteringSweep:
                               if split_result else None),
             pre_split_metrics=pre_split_metrics,
             post_split_metrics=post_split_metrics,
+            pipeline_metrics=pipeline_metrics,
         )
 
         # ── 9. Delegate ALL reporting in one call ──
@@ -356,6 +378,16 @@ class graphClusteringSweep:
             refinement=refinement,
             quality=quality,
             feature_matcher=self.featureMatcher,
+            sweep_cfg={
+                'feature': self.feature,
+                'edges_type': self.edges_type,
+                'metric': self.featureMatcher.params.metric,
+                'keep_reciprocal': self.keep_reciprocal,
+                'device': self.device,
+                'best_epsilon': best_epsilon,
+                'best_gamma': best_gamma,
+            },
+            refinement_steps=self.refinement_steps,
             chat_split_log=chat_split_log,
             hapax_log=hapax_log,
             glossary_df=glossary_df,

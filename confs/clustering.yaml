@@ -73,10 +73,3 @@ refinement_steps:
 
   - _target_: src.clustering.refinement.OCRRematchStep
     max_cluster_size: 3
-
-  - _target_: src.clustering.refinement.PCAZScoreRematchStep
-    max_cluster_size: 3
-    pca_k: 5
-    z_max: 3.0
-    n_candidates: 5
-    min_target_size: 10

@@ -47,6 +47,8 @@ class RefinementReport:
     sweep_results_df: Optional[pd.DataFrame] = None
     pre_split_metrics: Optional[Dict[str, Any]] = None
     post_split_metrics: Optional[Dict[str, Any]] = None
+    # Cumulative metrics after each refinement step (baseline + per-step)
+    pipeline_metrics: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclass
@@ -58,18 +60,6 @@ class ClusterQuality:
     pre_representatives: dict
     best_metrics: Dict[str, Any]
     label_dataframe: pd.DataFrame
-
-
-def _get_b64(fig, dpi=75):
-    """Convert a matplotlib figure to a base64-encoded PNG string."""
-    buf = io.BytesIO()
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', message='Glyph.*missing from font')
-        fig.savefig(buf, format='png', bbox_inches='tight', dpi=dpi)
-    buf.seek(0)
-    img_str = base64.b64encode(buf.read()).decode()
-    plt.close(fig)
-    return img_str
 
 
 class ClusteringSweepReporter(AutoReport):
@@ -128,6 +118,39 @@ class ClusteringSweepReporter(AutoReport):
         if not self.embed_images:
             self.assets_dir = self.output_dir / f"assets_{self.report_name}"
             self.assets_dir.mkdir(parents=True, exist_ok=True)
+
+    # ================================================================
+    #  Reusable HTML helpers
+    # ================================================================
+
+    @staticmethod
+    def _summary_card(title, gradient, items, subtitle=None):
+        """Build a gradient summary card with stat boxes.
+
+        Args:
+            title: card heading
+            gradient: CSS gradient string, e.g. ``"#667eea 0%, #764ba2 100%"``
+            items: list of ``(heading, value, sub_text)`` tuples
+            subtitle: optional line below the title
+        """
+        cols = len(items)
+        boxes = ''.join(
+            f'<div style="background:rgba(255,255,255,0.15);padding:12px;'
+            f'border-radius:5px;text-align:center;">'
+            f'<h4 style="margin:0;">{h}</h4>'
+            f'<p style="font-size:1.8em;margin:5px 0;">{v}</p>'
+            f'{"<small>" + s + "</small>" if s else ""}'
+            f'</div>'
+            for h, v, s in items
+        )
+        sub = (f'<p>{subtitle}</p>' if subtitle else '')
+        return (
+            f'<div style="background:linear-gradient(135deg,{gradient});'
+            f'color:white;padding:25px;border-radius:10px;margin:20px 0;">'
+            f'<h2 style="margin:0 0 10px 0;">{title}</h2>{sub}'
+            f'<div style="display:grid;grid-template-columns:repeat({cols},1fr);'
+            f'gap:15px;margin-top:15px;">{boxes}</div></div>'
+        )
 
     # ================================================================
     #  Figure saving (external file or embedded base64)
@@ -313,33 +336,19 @@ class ClusteringSweepReporter(AutoReport):
         degrees = [d for _, d in graph.degree()]
         avg_degree = np.mean(degrees) if degrees else 0.0
 
-        topo_html = f"""
-        <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-                    color: white; padding: 30px; border-radius: 10px; margin: 20px 0;">
-            <h2 style="margin: 0 0 15px 0;">Graph Topology</h2>
-            <p>Best parameters: &epsilon;={best_epsilon:.4f}, &gamma;={best_gamma:.4f}</p>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px;">
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Nodes</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{n_nodes:,}</p></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Edges</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{n_edges:,}</p></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Density</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{density:.4f}</p></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Components</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{n_components:,}</p></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Isolated</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{isolated:,}</p></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Avg Degree</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{avg_degree:.1f}</p></div>
-            </div>
-        </div>
-        """
+        topo_html = self._summary_card(
+            "Graph Topology",
+            "#11998e 0%, #38ef7d 100%",
+            [
+                ("Nodes", f"{n_nodes:,}", None),
+                ("Edges", f"{n_edges:,}", None),
+                ("Density", f"{density:.4f}", None),
+                ("Components", f"{n_components:,}", None),
+                ("Isolated", f"{isolated:,}", None),
+                ("Avg Degree", f"{avg_degree:.1f}", None),
+            ],
+            subtitle=f"Best parameters: &epsilon;={best_epsilon:.4f}, &gamma;={best_gamma:.4f}",
+        )
         self.report_raw_html(topo_html, title="Graph Topology Summary")
 
         # Degree distribution histogram
@@ -381,38 +390,30 @@ class ClusteringSweepReporter(AutoReport):
         worst_cluster   = purity_dataframe['Purity'].idxmin()
         largest_cluster = purity_dataframe['Size'].idxmax()
 
-        summary_html = f"""
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white; padding: 30px; border-radius: 10px; margin: 20px 0;">
-            <h1 style="margin: 0 0 20px 0;">📊 Executive Summary</h1>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px;">
-                <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 5px;">
-                    <h3 style="margin: 0;">Clusters</h3>
-                    <p style="font-size: 2em; margin: 10px 0;">{n_clusters}</p>
-                    <small>{n_hapax} singletons ({n_hapax/n_clusters*100:.1f}%)</small>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 5px;">
-                    <h3 style="margin: 0;">Avg Purity</h3>
-                    <p style="font-size: 2em; margin: 10px 0;">{avg_purity:.2%}</p>
-                    <small>Range: {purity_dataframe['Purity'].min():.1%} – {purity_dataframe['Purity'].max():.1%}</small>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 5px;">
-                    <h3 style="margin: 0;">Avg Size</h3>
-                    <p style="font-size: 2em; margin: 10px 0;">{avg_size:.1f}</p>
-                    <small>Largest: {purity_dataframe['Size'].max()} patches</small>
-                </div>
-            </div>
-            <div style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 5px;">
-                <h3>Key Findings</h3>
-                <ul style="margin: 10px 0;">
-                    <li>Best Parameters: ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_threshold={best_split_threshold}</li>
-                    <li>Purest Cluster: #{best_cluster} ({purity_dataframe.loc[best_cluster, 'Purity']:.1%} purity)</li>
-                    <li>Most Scattered: #{worst_cluster} ({purity_dataframe.loc[worst_cluster, 'Purity']:.1%} purity)</li>
-                    <li>Largest Cluster: #{largest_cluster} ({purity_dataframe.loc[largest_cluster, 'Size']} patches)</li>
-                </ul>
-            </div>
-        </div>
-        """
+        card_html = self._summary_card(
+            "Executive Summary",
+            "#667eea 0%, #764ba2 100%",
+            [
+                ("Clusters", str(n_clusters),
+                 f"{n_hapax} singletons ({n_hapax/n_clusters*100:.1f}%)"),
+                ("Avg Purity", f"{avg_purity:.2%}",
+                 f"Range: {purity_dataframe['Purity'].min():.1%} – {purity_dataframe['Purity'].max():.1%}"),
+                ("Avg Size", f"{avg_size:.1f}",
+                 f"Largest: {purity_dataframe['Size'].max()} patches"),
+            ],
+        )
+        findings_html = (
+            '<div style="margin-top:20px;padding:15px;background:rgba(255,255,255,0.1);'
+            'border-radius:5px;color:white;">'
+            '<h3>Key Findings</h3><ul style="margin:10px 0;">'
+            f'<li>Best Parameters: &epsilon;={best_epsilon:.4f}, &gamma;={best_gamma:.4f}, split_threshold={best_split_threshold}</li>'
+            f'<li>Purest Cluster: #{best_cluster} ({purity_dataframe.loc[best_cluster, "Purity"]:.1%} purity)</li>'
+            f'<li>Most Scattered: #{worst_cluster} ({purity_dataframe.loc[worst_cluster, "Purity"]:.1%} purity)</li>'
+            f'<li>Largest Cluster: #{largest_cluster} ({purity_dataframe.loc[largest_cluster, "Size"]} patches)</li>'
+            '</ul></div>'
+        )
+        # Inject findings into the card (before closing </div>)
+        summary_html = card_html[:-len('</div>')] + findings_html + '</div>'
         self.report_raw_html(summary_html, title="Executive Summary")
 
     # ================================================================
@@ -472,25 +473,21 @@ class ClusteringSweepReporter(AutoReport):
         n_split = int((split_log_df['n_subclusters'] > 1).sum())
         max_sub = int(split_log_df['n_subclusters'].max())
 
-        summary_html = f"""
-        <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                    color: white; padding: 30px; border-radius: 10px; margin: 20px 0;">
-            <h2 style="margin: 0 0 15px 0;">🔪 Cluster Splitting Summary</h2>
-            <p>Best threshold: <strong>{best_threshold}</strong> |
-               Linkage: <strong>{self.split_linkage_method}</strong> |
-               Swept {len(self.split_thresholds)} threshold(s)</p>
-            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-top: 15px;">
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Before</h4><p style="font-size:1.8em; margin:5px 0;">{n_pre}</p><small>clusters</small></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">After</h4><p style="font-size:1.8em; margin:5px 0;">{n_post}</p><small>clusters</small></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Split</h4><p style="font-size:1.8em; margin:5px 0;">{n_split}</p><small>clusters split</small></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Max Split</h4><p style="font-size:1.8em; margin:5px 0;">{max_sub}</p><small>sub-clusters</small></div>
-            </div>
-        </div>
-        """
+        summary_html = self._summary_card(
+            "Cluster Splitting Summary",
+            "#f093fb 0%, #f5576c 100%",
+            [
+                ("Before", str(n_pre), "clusters"),
+                ("After", str(n_post), "clusters"),
+                ("Split", str(n_split), "clusters split"),
+                ("Max Split", str(max_sub), "sub-clusters"),
+            ],
+            subtitle=(
+                f"Best threshold: <strong>{best_threshold}</strong> | "
+                f"Linkage: <strong>{self.split_linkage_method}</strong> | "
+                f"Swept {len(self.split_thresholds)} threshold(s)"
+            ),
+        )
         self.report_raw_html(summary_html, title="Cluster Splitting Summary")
 
         actually_split = split_log_df[split_log_df['n_subclusters'] > 1].sort_values(
@@ -743,9 +740,9 @@ class ClusteringSweepReporter(AutoReport):
                     <h3 style="color: #667eea; margin-top: 0;">Example {i+1}: Sample {idx}</h3>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
                         <div><h4>Distribution</h4>
-                            <img src="data:image/png;base64,{_get_b64(fig1)}" style="max-width: 100%; height: auto;"></div>
+                            {self._save_figure(fig1, prefix="match_dist")}</div>
                         <div><h4>Matches</h4>
-                            <img src="data:image/png;base64,{_get_b64(fig2)}" style="max-width: 100%; height: auto;"></div>
+                            {self._save_figure(fig2, prefix="match_fig")}</div>
                     </div>
                 </div>'''
             match_html += '</div>'
@@ -769,7 +766,7 @@ class ClusteringSweepReporter(AutoReport):
                 hapax_nn_html += f'''
                 <div style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                     <h3 style="color: #667eea; margin-top: 0;">Hapax Example – Sample {idx}</h3>
-                    <img src="data:image/png;base64,{_get_b64(fig)}" style="max-width: 100%; height: auto;">
+                    {self._save_figure(fig, prefix="hapax_nn")}
                 </div>'''
             hapax_nn_html += '</div>'
             self.report_raw_html(hapax_nn_html,
@@ -791,8 +788,108 @@ class ClusteringSweepReporter(AutoReport):
             self.report_raw_html(''.join(parts), title=f"All Hapax ({len(hapax_df)} items)")
 
     # ================================================================
-    #  Master orchestrator
+    #  Cumulative refinement pipeline metrics
     # ================================================================
+
+    def report_refinement_pipeline(self, pipeline_metrics):
+        """Show how clustering quality evolves through the refinement pipeline.
+
+        ``pipeline_metrics`` is a list of dicts, one per step (including a
+        baseline entry), each containing ``step``, ``n_clusters``, and the
+        full set of metric keys returned by ``compute_metrics()``.
+        Works with an arbitrary number / ordering of steps.
+        """
+        if not pipeline_metrics or len(pipeline_metrics) < 2:
+            return  # nothing to compare
+
+        df = pd.DataFrame(pipeline_metrics)
+
+        # ── Summary table ──
+        display_cols = ['step', 'n_clusters']
+        _preferred = [
+            'adjusted_rand_index', 'normalized_mutual_info',
+            'homogeneity', 'completeness', 'v_measure', 'purity',
+        ]
+        metric_cols = [c for c in _preferred if c in df.columns]
+        # include any extra metric columns we didn't anticipate
+        metric_cols += [
+            c for c in df.columns
+            if c not in display_cols and c not in metric_cols
+        ]
+        display_df = df[display_cols + metric_cols].copy()
+        display_df = display_df.set_index('step')
+
+        # Round floats for readability
+        for col in display_df.columns:
+            if display_df[col].dtype == float:
+                display_df[col] = display_df[col].round(4)
+
+        self.report_table(display_df, title="Metrics Through the Refinement Pipeline")
+
+        # ── Sparkline chart ──
+        fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+        x = range(len(df))
+        labels = df['step'].tolist()
+
+        # Left: selected quality metrics
+        ax = axes[0]
+        for col in metric_cols[:6]:
+            ax.plot(x, df[col], marker='o', markersize=5, label=col)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=30, ha='right', fontsize=9)
+        ax.set_ylabel('Score')
+        ax.set_title('Clustering Quality per Pipeline Stage')
+        ax.legend(fontsize=7, loc='best')
+        ax.grid(alpha=0.3)
+
+        # Right: cluster count
+        ax = axes[1]
+        ax.plot(x, df['n_clusters'], marker='s', color='#667eea', linewidth=2)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=30, ha='right', fontsize=9)
+        ax.set_ylabel('Number of Clusters')
+        ax.set_title('Cluster Count per Pipeline Stage')
+        ax.grid(alpha=0.3)
+
+        plt.tight_layout()
+        self.report_figure(fig, title="Refinement Pipeline Progression")
+
+    # ================================================================
+    #  Pipeline configuration section
+    # ================================================================
+
+    def report_pipeline_config(self, *, sweep_cfg, refinement_steps):
+        """Record which parameters produced this report.
+
+        Args:
+            sweep_cfg: dict of sweep-level parameters
+                (epsilon, gamma, HOG config, edges_type, …)
+            refinement_steps: list of refinement step objects (each has
+                ``.name`` and instance attributes for params)
+        """
+        # Sweep parameters table
+        cfg_rows = [{'Parameter': k, 'Value': str(v)} for k, v in sweep_cfg.items()]
+        self.report_table(
+            pd.DataFrame(cfg_rows).set_index('Parameter'),
+            title="Sweep Configuration",
+        )
+
+        # Refinement steps table
+        step_rows = []
+        for i, step in enumerate(refinement_steps, 1):
+            params = {
+                k: v for k, v in vars(step).items()
+                if not k.startswith('_')
+            }
+            step_rows.append({
+                'Order': i,
+                'Step': step.name,
+                'Parameters': ', '.join(f'{k}={v}' for k, v in params.items()),
+            })
+        self.report_table(
+            pd.DataFrame(step_rows).set_index('Order'),
+            title="Refinement Pipeline Steps",
+        )
 
     # ================================================================
     #  Refinement step reporting
@@ -827,23 +924,16 @@ class ClusteringSweepReporter(AutoReport):
             color_start, color_end = '#888', '#aaa'
             icon = step_name
 
-        summary_html = f"""
-        <div style="background: linear-gradient(135deg, {color_start} 0%, {color_end} 100%);
-                    color: white; padding: 25px; border-radius: 10px; margin: 20px 0;">
-            <h2 style="margin: 0 0 10px 0;">{icon} Rematching — {step_name}</h2>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 10px;">
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Clusters merged</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{n_actions}</p></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Patches moved</h4>
-                    <p style="font-size:1.8em; margin:5px 0;">{log_df['source_size'].sum()}</p></div>
-                <div style="background: rgba(255,255,255,0.15); padding: 12px; border-radius: 5px; text-align:center;">
-                    <h4 style="margin:0;">Config</h4>
-                    <p style="font-size:0.9em; margin:5px 0;">{', '.join(f'{k}={v}' for k, v in meta.items() if k != 'n_merged')}</p></div>
-            </div>
-        </div>
-        """
+        config_str = ', '.join(f'{k}={v}' for k, v in meta.items() if k != 'n_merged')
+        summary_html = self._summary_card(
+            f"{icon} Rematching — {step_name}",
+            f"{color_start} 0%, {color_end} 100%",
+            [
+                ("Clusters merged", str(n_actions), None),
+                ("Patches moved", str(log_df['source_size'].sum()), None),
+                ("Config", config_str, None),
+            ],
+        )
         self.report_raw_html(summary_html, title=f"Refinement: {step_name}")
         self.report_table(log_df, title=f"{step_name} — merge log")
 
@@ -934,6 +1024,74 @@ class ClusteringSweepReporter(AutoReport):
         self.report_raw_html(vis_html, title="Top Fragmented Labels (visual)")
 
     # ================================================================
+    #  Label → Cluster inspection (per-label representatives)
+    # ================================================================
+
+    def report_label_cluster_inspection(self, dataframe, purity_dataframe,
+                                        representatives):
+        """Per-label view: most-central representative in every hosting cluster."""
+        target_lbl = self.target_lbl
+        # Invert {cluster: {label: idx}} → {label: [(cluster, idx), ...]}
+        label_reps = {}
+        for cid, lbl_map in representatives.items():
+            for lbl, idx in lbl_map.items():
+                label_reps.setdefault(lbl, []).append((cid, idx))
+
+        # Pre-compute label count per (cluster, label)
+        counts = dataframe.groupby(['membership', target_lbl]).size()
+        known = dataframe[dataframe[target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL]
+        label_freq = known[target_lbl].value_counts()
+
+        parts = ['<div style="display:grid;gap:14px;">']
+        for label, total in label_freq.items():
+            if label not in label_reps:
+                continue
+            clusters = sorted(label_reps[label],
+                              key=lambda c: counts.get((c[0], label), 0),
+                              reverse=True)
+            n_cl = len(clusters)
+
+            cards = ''
+            for cid, idx in clusters:
+                row = dataframe.loc[idx]
+                cs = purity_dataframe.loc[cid]
+                n_lbl = int(counts.get((cid, label), 0))
+                is_dom = cs['Dominant_Label'] == label
+                border = '#27ae60' if is_dom else '#e74c3c'
+                pur = cs['Purity']
+                pur_s = f'{pur:.0%}' if pd.notna(pur) else '?'
+                svg = (row['svg'].to_string()
+                       if hasattr(row.get('svg', None), 'to_string') else '')
+                cards += (
+                    f'<div style="display:inline-block;text-align:center;margin:3px;'
+                    f'border:3px solid {border};border-radius:6px;padding:5px;'
+                    f'background:white;min-width:70px;">'
+                    f'<div style="width:36px;height:36px;margin:0 auto;display:flex;'
+                    f'align-items:center;justify-content:center;">{svg}</div>'
+                    f'<div style="font-size:9px;margin-top:3px;">'
+                    f'<b>C{cid}</b> {n_lbl}/{int(cs["Size"])}'
+                    f'<br>P={pur_s}</div></div>'
+                )
+
+            color = '#27ae60' if n_cl == 1 else '#e67e22' if n_cl <= 3 else '#e74c3c'
+            parts.append(
+                f'<div style="background:white;padding:10px;border-radius:8px;'
+                f'box-shadow:0 1px 3px rgba(0,0,0,.1);border-left:4px solid {color};">'
+                f'<h4 style="margin:0 0 5px;color:{color};">"{label}" '
+                f'<span style="font-weight:normal;font-size:.8em;color:#888;">'
+                f'— {total} inst, {n_cl} cluster{"s" if n_cl != 1 else ""}'
+                f'</span></h4>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{cards}</div>'
+                f'</div>'
+            )
+
+        parts.append('</div>')
+        self.report_raw_html(
+            '\n'.join(parts),
+            title=f"Label → Cluster Inspection ({len(label_freq)} labels)"
+        )
+
+    # ================================================================
     #  Master orchestrator
     # ================================================================
 
@@ -942,12 +1100,22 @@ class ClusteringSweepReporter(AutoReport):
                              refinement: RefinementReport,
                              quality: ClusterQuality,
                              feature_matcher,
+                             sweep_cfg=None,
+                             refinement_steps=None,
                              chat_split_log=None, hapax_log=None,
                              glossary_df=None):
         """
         Single entry-point producing every report section for a given
         graph + partition.  Called once ALL computation is done.
         """
+        # Section 0 (optional): Pipeline configuration
+        if sweep_cfg is not None or refinement_steps is not None:
+            with self.section("Pipeline Configuration"):
+                self.report_pipeline_config(
+                    sweep_cfg=sweep_cfg or {},
+                    refinement_steps=refinement_steps or [],
+                )
+
         # Section 1: Graph topology + best-config summary
         with self.section("Graph Topology"):
             self.report_graph_topology(graph, best_epsilon, best_gamma)
@@ -996,6 +1164,11 @@ class ClusteringSweepReporter(AutoReport):
                 for name, result in zip(refinement.step_names, refinement.results):
                     self.report_refinement_step(name, result, dataframe)
 
+        # Section 4b: Cumulative pipeline metrics
+        if refinement.pipeline_metrics and len(refinement.pipeline_metrics) >= 2:
+            with self.section("Refinement Pipeline Summary"):
+                self.report_refinement_pipeline(refinement.pipeline_metrics)
+
         # Section 5: Post-refinement clusters
         if refinement.did_split:
             with self.section("Clusters (Post-Refinement)"):
@@ -1008,6 +1181,12 @@ class ClusteringSweepReporter(AutoReport):
         # Section 6: Label fragmentation
         with self.section("Label Fragmentation"):
             self.report_fragmentation(dataframe, quality.label_dataframe)
+
+        # Section 6b: Label → Cluster inspection (per-label representatives)
+        with self.section("Label → Cluster Inspection"):
+            self.report_label_cluster_inspection(
+                dataframe, quality.purity_dataframe,
+                quality.representatives)
 
         # Section 7: Summary & metrics
         hapax_df = self.report_summary_and_metrics(
