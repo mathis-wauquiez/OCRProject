@@ -345,7 +345,7 @@ class graphClusteringSweep:
             sweep_cfg={
                 'feature': self.feature,
                 'edges_type': self.edges_type,
-                'metric': self.featureMatcher.params.metric,
+                'metric': self.featureMatcher._params.metric,
                 'keep_reciprocal': self.keep_reciprocal,
                 'device': self.device,
                 'best_epsilon': best_epsilon,
