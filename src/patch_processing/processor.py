@@ -239,8 +239,8 @@ class PatchPreprocessing:
             int(row['label']): i for i, row in page_df.iterrows()
         }
 
-        page_df['char_chat'] = None
-        page_df['conf_chat'] = None
+        page_df['char_chat'] = UNKNOWN_CHAR
+        page_df['conf_chat'] = 0.0
 
         # Collect viz data per column for deferred, structured report rendering
         page_viz: dict[int, list[_SubcolVizData]] = {}

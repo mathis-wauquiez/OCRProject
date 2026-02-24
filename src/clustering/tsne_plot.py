@@ -218,7 +218,9 @@ def plot_community_tsne(
             node_color = color_map[color_value] if not disable_color else (0., 0.5, 0.5, 1.0)
             
             # For label display (still uses target_lbl)
-            label = dataframe[target_lbl].loc[node] if not use_membership_coloring else None
+            # fillna so that NaN char_chat values become UNKNOWN_LABEL ('▯')
+            # instead of leaking through as literal "nan" text in the figure.
+            label = dataframe[target_lbl].fillna(UNKNOWN_LABEL).loc[node] if not use_membership_coloring else None
 
             if not disable_svg:
                 svg_img = dataframe['svg'].loc[node].render(scale=2)
