@@ -39,16 +39,6 @@ method:
   nums_bins: [16]        # Number of orientation bins
 
 
-  # == __ Post-clustering refinement __ ==
-  enable_chat_split: true           # split clusters with mixed CHAT labels
-  chat_split_purity_threshold: 1 # skip if dominant label >= this fraction
-  chat_split_min_size: 3            # clusters smaller than this are never split
-  chat_split_min_label_count: 2     # CHAT label needs >= this many patches
-
-  enable_hapax_association: true     # merge singletons into matching clusters
-  hapax_min_confidence: 0.5          # ignore hapax with CHAT conf below this
-  hapax_max_dissimilarity: null      # null = adaptive (per-cluster median)
-
   enable_glossary: true              # generate character glossary
 
 
@@ -76,3 +66,7 @@ refinement_steps:
 
   - _target_: src.clustering.refinement.LabelSplitStep
     min_label_size: 2
+
+  - _target_: src.clustering.refinement.HapaxAssociationStep
+    min_confidence: 0.5
+    max_dissimilarity: null

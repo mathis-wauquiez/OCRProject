@@ -65,16 +65,7 @@ class graphClusteringSweep:
             reporter: Optional[ClusteringSweepReporter] = None,
             refinement_steps: Optional[list] = None,
 
-            # ── Post-clustering refinement (optional) ──
-            enable_chat_split: bool = False,
-            chat_split_purity_threshold: float = 0.90,
-            chat_split_min_size: int = 3,
-            chat_split_min_label_count: int = 2,
-
-            enable_hapax_association: bool = False,
-            hapax_min_confidence: float = 0.3,
-            hapax_max_dissimilarity: Optional[float] = None,
-
+            # ── Post-clustering (reporting only) ──
             enable_glossary: bool = False,
     ):
         if reporter is None:
@@ -105,16 +96,7 @@ class graphClusteringSweep:
         self.reporter           = reporter
         self.refinement_steps   = refinement_steps
 
-        # ── Post-clustering refinement (optional) ──
-        self.enable_chat_split          = enable_chat_split
-        self.chat_split_purity_threshold = chat_split_purity_threshold
-        self.chat_split_min_size        = chat_split_min_size
-        self.chat_split_min_label_count = chat_split_min_label_count
-
-        self.enable_hapax_association    = enable_hapax_association
-        self.hapax_min_confidence        = hapax_min_confidence
-        self.hapax_max_dissimilarity     = hapax_max_dissimilarity
-
+        # ── Post-clustering (reporting only) ──
         self.enable_glossary             = enable_glossary
 
     # ================================================================
@@ -154,7 +136,8 @@ class graphClusteringSweep:
     #  report_graph sub-steps
     # ================================================================
 
-    def _run_refinement(self, dataframe, pre_split_membership, renderer, graph):
+    def _run_refinement(self, dataframe, pre_split_membership, renderer, graph,
+                        dissimilarities=None):
         """Run the refinement pipeline and return post-split membership + logs.
 
         Also computes clustering metrics after each step so the reporter can
@@ -182,6 +165,7 @@ class graphClusteringSweep:
                 dataframe, current_membership, renderer,
                 target_lbl=self.target_lbl,
                 graph=graph,
+                dissimilarities=dissimilarities,
                 evaluate_fn=self._evaluate_membership,
             )
             current_membership = result.membership
@@ -219,35 +203,15 @@ class graphClusteringSweep:
         return (dataframe, graph, nlfa, dissimilarities,
                 pre_split_membership, post_split_membership)
 
-    def _run_post_clustering(self, dataframe, dissimilarities):
-        """Run optional post-clustering steps (CHAT split, hapax, glossary)."""
-        from .post_clustering import chat_split_clusters, associate_hapax, build_glossary
-
-        chat_split_log = None
-        hapax_log = None
+    def _run_post_clustering(self, dataframe):
+        """Run optional post-clustering reporting (glossary)."""
         glossary_df = None
 
-        if self.enable_chat_split and self.target_lbl in dataframe.columns:
-            dataframe, chat_split_log = chat_split_clusters(
-                dataframe, dissimilarities,
-                purity_threshold=self.chat_split_purity_threshold,
-                min_split_size=self.chat_split_min_size,
-                min_label_count=self.chat_split_min_label_count,
-                target_lbl=self.target_lbl,
-            )
-
-        if self.enable_hapax_association and self.target_lbl in dataframe.columns:
-            dataframe, hapax_log = associate_hapax(
-                dataframe, dissimilarities,
-                target_lbl=self.target_lbl,
-                min_confidence=self.hapax_min_confidence,
-                max_dissimilarity=self.hapax_max_dissimilarity,
-            )
-
         if self.enable_glossary and self.target_lbl in dataframe.columns:
+            from .post_clustering import build_glossary
             glossary_df = build_glossary(dataframe, target_lbl=self.target_lbl)
 
-        return dataframe, chat_split_log, hapax_log, glossary_df
+        return dataframe, glossary_df
 
     def _compute_quality(self, dataframe, pre_split_membership,
                          post_split_membership, did_split):
@@ -319,7 +283,8 @@ class graphClusteringSweep:
         # ── 4. Refinement pipeline ──
         post_split_membership, refinement_results, refinement_step_names, \
             pipeline_metrics = \
-            self._run_refinement(dataframe, pre_split_membership, renderer, graph)
+            self._run_refinement(dataframe, pre_split_membership, renderer, graph,
+                                dissimilarities=dissimilarities)
 
         dataframe.loc[:, 'membership'] = pd.Series(
             post_split_membership, index=dataframe.index
@@ -334,9 +299,8 @@ class graphClusteringSweep:
                 pre_split_membership, post_split_membership,
             )
 
-        # ── 6. Post-clustering refinement (optional) ──
-        dataframe, chat_split_log, hapax_log, glossary_df = \
-            self._run_post_clustering(dataframe, dissimilarities)
+        # ── 6. Post-clustering reporting (optional) ──
+        dataframe, glossary_df = self._run_post_clustering(dataframe)
 
         # ── 7. Compute quality metrics ──
         quality, pre_split_metrics, post_split_metrics = \
@@ -388,8 +352,6 @@ class graphClusteringSweep:
                 'best_gamma': best_gamma,
             },
             refinement_steps=self.refinement_steps,
-            chat_split_log=chat_split_log,
-            hapax_log=hapax_log,
             glossary_df=glossary_df,
         )
 
