@@ -1024,6 +1024,74 @@ class ClusteringSweepReporter(AutoReport):
         self.report_raw_html(vis_html, title="Top Fragmented Labels (visual)")
 
     # ================================================================
+    #  Label → Cluster inspection (per-label representatives)
+    # ================================================================
+
+    def report_label_cluster_inspection(self, dataframe, purity_dataframe,
+                                        representatives):
+        """Per-label view: most-central representative in every hosting cluster."""
+        target_lbl = self.target_lbl
+        # Invert {cluster: {label: idx}} → {label: [(cluster, idx), ...]}
+        label_reps = {}
+        for cid, lbl_map in representatives.items():
+            for lbl, idx in lbl_map.items():
+                label_reps.setdefault(lbl, []).append((cid, idx))
+
+        # Pre-compute label count per (cluster, label)
+        counts = dataframe.groupby(['membership', target_lbl]).size()
+        known = dataframe[dataframe[target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL]
+        label_freq = known[target_lbl].value_counts()
+
+        parts = ['<div style="display:grid;gap:14px;">']
+        for label, total in label_freq.items():
+            if label not in label_reps:
+                continue
+            clusters = sorted(label_reps[label],
+                              key=lambda c: counts.get((c[0], label), 0),
+                              reverse=True)
+            n_cl = len(clusters)
+
+            cards = ''
+            for cid, idx in clusters:
+                row = dataframe.loc[idx]
+                cs = purity_dataframe.loc[cid]
+                n_lbl = int(counts.get((cid, label), 0))
+                is_dom = cs['Dominant_Label'] == label
+                border = '#27ae60' if is_dom else '#e74c3c'
+                pur = cs['Purity']
+                pur_s = f'{pur:.0%}' if pd.notna(pur) else '?'
+                svg = (row['svg'].to_string()
+                       if hasattr(row.get('svg', None), 'to_string') else '')
+                cards += (
+                    f'<div style="display:inline-block;text-align:center;margin:3px;'
+                    f'border:3px solid {border};border-radius:6px;padding:5px;'
+                    f'background:white;min-width:70px;">'
+                    f'<div style="width:36px;height:36px;margin:0 auto;display:flex;'
+                    f'align-items:center;justify-content:center;">{svg}</div>'
+                    f'<div style="font-size:9px;margin-top:3px;">'
+                    f'<b>C{cid}</b> {n_lbl}/{int(cs["Size"])}'
+                    f'<br>P={pur_s}</div></div>'
+                )
+
+            color = '#27ae60' if n_cl == 1 else '#e67e22' if n_cl <= 3 else '#e74c3c'
+            parts.append(
+                f'<div style="background:white;padding:10px;border-radius:8px;'
+                f'box-shadow:0 1px 3px rgba(0,0,0,.1);border-left:4px solid {color};">'
+                f'<h4 style="margin:0 0 5px;color:{color};">"{label}" '
+                f'<span style="font-weight:normal;font-size:.8em;color:#888;">'
+                f'— {total} inst, {n_cl} cluster{"s" if n_cl != 1 else ""}'
+                f'</span></h4>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{cards}</div>'
+                f'</div>'
+            )
+
+        parts.append('</div>')
+        self.report_raw_html(
+            '\n'.join(parts),
+            title=f"Label → Cluster Inspection ({len(label_freq)} labels)"
+        )
+
+    # ================================================================
     #  Master orchestrator
     # ================================================================
 
@@ -1113,6 +1181,12 @@ class ClusteringSweepReporter(AutoReport):
         # Section 6: Label fragmentation
         with self.section("Label Fragmentation"):
             self.report_fragmentation(dataframe, quality.label_dataframe)
+
+        # Section 6b: Label → Cluster inspection (per-label representatives)
+        with self.section("Label → Cluster Inspection"):
+            self.report_label_cluster_inspection(
+                dataframe, quality.purity_dataframe,
+                quality.representatives)
 
         # Section 7: Summary & metrics
         hapax_df = self.report_summary_and_metrics(
