@@ -603,3 +603,92 @@ class PCAZScoreRematchStep(ClusterRefinementStep):
                 n_candidates=self.n_candidates,
             ),
         )
+
+
+# ════════════════════════════════════════════════════════════════════
+#  4. Label-based cluster splitting
+# ════════════════════════════════════════════════════════════════════
+
+class LabelSplitStep(ClusterRefinementStep):
+    """
+    Split each cluster by ground-truth label.
+
+    For each cluster, members are grouped by their known label.
+    Groups with >= ``min_label_size`` members become their own
+    sub-cluster.  Smaller groups are dissolved into individual
+    singleton clusters.  Unknowns stay with the dominant sub-cluster
+    (or become singletons if no large group exists).
+    """
+
+    name = "label_split"
+
+    def __init__(self, min_label_size: int = 2):
+        self.min_label_size = min_label_size
+
+    def run(self, dataframe, membership, renderer, *,
+            target_lbl, **ctx) -> RefinementResult:
+
+        labels = dataframe[target_lbl].fillna(UNKNOWN_LABEL).values
+        new_mem = np.empty_like(membership)
+        log = []
+        next_id = 0
+
+        for cid in np.unique(membership):
+            pos = np.where(membership == cid)[0]
+            clabels = labels[pos]
+            known_mask = clabels != UNKNOWN_LABEL
+            known_pos = pos[known_mask]
+            unknown_pos = pos[~known_mask]
+
+            if len(known_pos) == 0:
+                # All unknown — keep as one cluster
+                new_mem[pos] = next_id
+                next_id += 1
+                log.append(dict(cluster=int(cid), action='keep',
+                                size=len(pos), n_sub=1))
+                continue
+
+            # Group known members by label
+            ulabels, inv = np.unique(clabels[known_mask], return_inverse=True)
+            counts = np.bincount(inv)
+
+            # Dominant label → will receive unknowns
+            dominant_new_id = None
+            dominant_count = 0
+
+            for i, lbl in enumerate(ulabels):
+                lbl_pos = known_pos[inv == i]
+                if counts[i] >= self.min_label_size:
+                    new_mem[lbl_pos] = next_id
+                    if counts[i] > dominant_count:
+                        dominant_count = counts[i]
+                        dominant_new_id = next_id
+                    next_id += 1
+                else:
+                    # Each member becomes a singleton
+                    for p in lbl_pos:
+                        new_mem[p] = next_id
+                        next_id += 1
+
+            # Assign unknowns
+            if dominant_new_id is not None and len(unknown_pos):
+                new_mem[unknown_pos] = dominant_new_id
+            else:
+                for p in unknown_pos:
+                    new_mem[p] = next_id
+                    next_id += 1
+
+            log.append(dict(
+                cluster=int(cid), action='split',
+                size=len(pos), n_labels=len(ulabels),
+                n_sub=len(np.unique(new_mem[pos])),
+            ))
+
+        return RefinementResult(
+            membership=new_mem,
+            log=log,
+            metadata=dict(
+                min_label_size=self.min_label_size,
+                n_split=sum(1 for e in log if e.get('n_sub', 1) > 1),
+            ),
+        )
