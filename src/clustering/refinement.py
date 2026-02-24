@@ -26,6 +26,8 @@ from scipy.spatial.distance import squareform
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 
+from collections import defaultdict
+
 from .bin_image_metrics import (
     compute_distance_matrices_batched,
     compute_hausdorff,
@@ -690,5 +692,154 @@ class LabelSplitStep(ClusterRefinementStep):
             metadata=dict(
                 min_label_size=self.min_label_size,
                 n_split=sum(1 for e in log if e.get('n_sub', 1) > 1),
+            ),
+        )
+
+
+# ════════════════════════════════════════════════════════════════════
+#  5. Hapax-to-cluster association
+# ════════════════════════════════════════════════════════════════════
+
+class HapaxAssociationStep(ClusterRefinementStep):
+    """
+    Merge singleton clusters into larger clusters with matching
+    dominant label, using HOG dissimilarity as an acceptance gate.
+
+    For each singleton whose known label has confidence >=
+    ``min_confidence``:
+      1. Find non-singleton clusters whose dominant label matches.
+      2. Pick the candidate with lowest mean HOG dissimilarity.
+      3. Accept if that dissimilarity <= threshold (per-cluster
+         median intra-cluster dissimilarity, or a fixed cap).
+    """
+
+    name = "hapax_association"
+
+    def __init__(
+        self,
+        min_confidence: float = 0.3,
+        max_dissimilarity: Optional[float] = None,
+    ):
+        self.min_confidence = min_confidence
+        self.max_dissimilarity = max_dissimilarity
+
+    def run(self, dataframe, membership, renderer, *,
+            target_lbl, **ctx) -> RefinementResult:
+
+        mem = membership.copy()
+        labels = dataframe[target_lbl].fillna(UNKNOWN_LABEL).values
+        confidences = (dataframe['conf_chat'].values
+                       if 'conf_chat' in dataframe.columns
+                       else np.ones(len(dataframe)))
+
+        # We need the dissimilarity matrix from context
+        dissimilarities = ctx.get('dissimilarities')
+        if dissimilarities is None:
+            return RefinementResult(
+                membership=mem, log=[],
+                metadata=dict(n_merged=0, reason='no_dissimilarities'),
+            )
+        dissim_np = dissimilarities
+        if hasattr(dissimilarities, 'cpu'):
+            dissim_np = dissimilarities.cpu().numpy()
+
+        log = []
+
+        # Identify singletons and non-singletons
+        cluster_sizes = pd.Series(mem).value_counts()
+        singleton_cids = set(cluster_sizes[cluster_sizes == 1].index)
+        nonsingleton_cids = set(cluster_sizes[cluster_sizes > 1].index)
+
+        # Build dominant label per non-singleton cluster
+        cluster_dominant = {}
+        for cid in nonsingleton_cids:
+            cmask = mem == cid
+            clabels = labels[cmask]
+            known = clabels[clabels != UNKNOWN_LABEL]
+            if len(known) > 0:
+                vals, counts = np.unique(known, return_counts=True)
+                cluster_dominant[cid] = vals[counts.argmax()]
+
+        label_to_clusters = defaultdict(list)
+        for cid, dom in cluster_dominant.items():
+            label_to_clusters[dom].append(cid)
+
+        # Adaptive threshold: median intra-cluster dissimilarity
+        cluster_median_dissim = {}
+        if self.max_dissimilarity is None:
+            for cid in nonsingleton_cids:
+                cidx = np.where(mem == cid)[0]
+                if len(cidx) < 2:
+                    continue
+                pairwise = dissim_np[np.ix_(cidx, cidx)]
+                triu_vals = pairwise[np.triu_indices(len(cidx), k=1)]
+                cluster_median_dissim[cid] = float(np.median(triu_vals))
+
+        # Try to merge each singleton
+        for cid in list(singleton_cids):
+            h_idx = np.where(mem == cid)[0]
+            if len(h_idx) != 1:
+                continue
+            h = h_idx[0]
+
+            h_label = labels[h]
+            h_conf = confidences[h]
+
+            if h_label == UNKNOWN_LABEL or h_conf < self.min_confidence:
+                log.append(dict(
+                    hapax_idx=int(h), label=h_label,
+                    target_cluster=None, accepted=False,
+                    reason='unknown_or_low_conf',
+                ))
+                continue
+
+            candidates = label_to_clusters.get(h_label, [])
+            if not candidates:
+                log.append(dict(
+                    hapax_idx=int(h), label=h_label,
+                    target_cluster=None, accepted=False,
+                    reason='no_candidate_cluster',
+                ))
+                continue
+
+            # Best candidate by mean dissimilarity
+            best_cid = None
+            best_mean = np.inf
+            for tcid in candidates:
+                tidx = np.where(mem == tcid)[0]
+                mean_d = float(dissim_np[h, tidx].mean())
+                if mean_d < best_mean:
+                    best_mean = mean_d
+                    best_cid = tcid
+
+            threshold = (self.max_dissimilarity
+                         if self.max_dissimilarity is not None
+                         else cluster_median_dissim.get(best_cid, np.inf))
+
+            accepted = best_mean <= threshold
+            if accepted:
+                mem[h] = best_cid
+
+            log.append(dict(
+                hapax_idx=int(h), label=h_label,
+                target_cluster=int(best_cid) if best_cid is not None else None,
+                mean_dissim=float(best_mean),
+                threshold=float(threshold),
+                accepted=accepted,
+                reason='accepted' if accepted else 'dissimilarity_too_high',
+            ))
+
+        # Re-number contiguously
+        unique_ids = np.unique(mem)
+        remap = {old: new for new, old in enumerate(unique_ids)}
+        mem = np.array([remap[v] for v in mem])
+
+        return RefinementResult(
+            membership=mem,
+            log=log,
+            metadata=dict(
+                n_merged=sum(1 for e in log if e.get('accepted')),
+                min_confidence=self.min_confidence,
+                max_dissimilarity=self.max_dissimilarity,
             ),
         )
