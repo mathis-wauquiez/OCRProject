@@ -65,6 +65,15 @@ class graphClusteringSweep:
             reporter: Optional[ClusteringSweepReporter] = None,
             refinement_steps: Optional[list] = None,
 
+            # ── Post-clustering refinement parameters ──
+            enable_chat_split: bool = False,
+            chat_split_purity_threshold: float = 0.90,
+            chat_split_min_size: int = 3,
+            chat_split_min_label_count: int = 2,
+            enable_hapax_association: bool = False,
+            hapax_min_confidence: float = 0.3,
+            hapax_max_dissimilarity: Optional[float] = None,
+
             # ── Post-clustering (reporting only) ──
             enable_glossary: bool = False,
     ):
@@ -95,6 +104,15 @@ class graphClusteringSweep:
         # ── Injected components ──
         self.reporter           = reporter
         self.refinement_steps   = refinement_steps
+
+        # ── Post-clustering refinement parameters ──
+        self.enable_chat_split              = enable_chat_split
+        self.chat_split_purity_threshold    = chat_split_purity_threshold
+        self.chat_split_min_size            = chat_split_min_size
+        self.chat_split_min_label_count     = chat_split_min_label_count
+        self.enable_hapax_association       = enable_hapax_association
+        self.hapax_min_confidence           = hapax_min_confidence
+        self.hapax_max_dissimilarity        = hapax_max_dissimilarity
 
         # ── Post-clustering (reporting only) ──
         self.enable_glossary             = enable_glossary
