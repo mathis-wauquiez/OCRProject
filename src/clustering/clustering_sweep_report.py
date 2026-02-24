@@ -914,28 +914,54 @@ class ClusteringSweepReporter(AutoReport):
         log_df = pd.DataFrame(log)
         n_actions = len(log_df)
 
-        if step_name == 'ocr_rematch':
-            color_start, color_end = '#11998e', '#38ef7d'
-            icon = 'OCR'
-        elif step_name == 'pca_zscore_rematch':
-            color_start, color_end = '#667eea', '#764ba2'
-            icon = 'PCA'
-        else:
-            color_start, color_end = '#888', '#aaa'
-            icon = step_name
-
         config_str = ', '.join(f'{k}={v}' for k, v in meta.items() if k != 'n_merged')
-        summary_html = self._summary_card(
-            f"{icon} Rematching — {step_name}",
-            f"{color_start} 0%, {color_end} 100%",
-            [
-                ("Clusters merged", str(n_actions), None),
-                ("Patches moved", str(log_df['source_size'].sum()), None),
-                ("Config", config_str, None),
-            ],
-        )
+
+        if step_name == 'label_split':
+            n_split = sum(1 for _, r in log_df.iterrows() if r.get('action') == 'split')
+            summary_html = self._summary_card(
+                f"Label Split — {step_name}",
+                "#e67e22 0%, #f39c12 100%",
+                [
+                    ("Clusters processed", str(n_actions), None),
+                    ("Clusters split", str(n_split), None),
+                    ("Config", config_str, None),
+                ],
+            )
+        elif step_name == 'hapax_association':
+            n_accepted = sum(1 for _, r in log_df.iterrows() if r.get('accepted'))
+            summary_html = self._summary_card(
+                f"Hapax Association — {step_name}",
+                "#8e44ad 0%, #9b59b6 100%",
+                [
+                    ("Singletons considered", str(n_actions), None),
+                    ("Singletons merged", str(n_accepted), None),
+                    ("Config", config_str, None),
+                ],
+            )
+        else:
+            if step_name == 'ocr_rematch':
+                color_start, color_end = '#11998e', '#38ef7d'
+                icon = 'OCR'
+            elif step_name == 'pca_zscore_rematch':
+                color_start, color_end = '#667eea', '#764ba2'
+                icon = 'PCA'
+            else:
+                color_start, color_end = '#888', '#aaa'
+                icon = step_name
+
+            patches_moved = (str(log_df['source_size'].sum())
+                             if 'source_size' in log_df.columns else 'N/A')
+            summary_html = self._summary_card(
+                f"{icon} Rematching — {step_name}",
+                f"{color_start} 0%, {color_end} 100%",
+                [
+                    ("Clusters merged", str(n_actions), None),
+                    ("Patches moved", patches_moved, None),
+                    ("Config", config_str, None),
+                ],
+            )
         self.report_raw_html(summary_html, title=f"Refinement: {step_name}")
-        self.report_table(log_df, title=f"{step_name} — merge log")
+        self.report_table(log_df, title=f"{step_name} — action log")
 
     # ================================================================
     #  Label fragmentation reporting

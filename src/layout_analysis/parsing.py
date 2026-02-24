@@ -200,24 +200,31 @@ def break_into_subcols(column_rectangles: pd.DataFrame):
 
 
 def get_reading_order(rectangles):
-    """ Returns the labels of the rectangles, in reading order """
+    """ Returns the labels of the rectangles, in reading order.
+
+    Traditional Chinese documents are read right-to-left across columns and
+    top-to-bottom within each column, so columns are processed in descending
+    col_idx order (rightmost first) and sub-lanes within a row are also
+    iterated right-to-left.
+    """
     ordered_labels = []
 
-    # For every column
-    for col_idx, col_rectangles in rectangles.groupby('col_idx'):
+    # For every column, right-to-left (traditional Chinese reading order)
+    col_groups = sorted(rectangles.groupby('col_idx'), key=lambda x: x[0], reverse=True)
+
+    for col_idx, col_rectangles in col_groups:
         subcolumns = break_into_subcols(col_rectangles) # subcol1, subcol2, ...
 
         # For every subcolumn in the column
         for subcolumn in subcolumns:
             n_elems = len(subcolumn['labels'].iloc[0])
-            # For every column of the subcolumn
-            for subcol_idx in range(n_elems):
+            # For every sub-lane, right-to-left within the row
+            for subcol_idx in range(n_elems - 1, -1, -1):
                 # For every row of the column of the subcolumn
                 for idx, row in subcolumn.iterrows():
                     lbl = row['labels'][subcol_idx]
                     if lbl != 0:
                         ordered_labels.append(lbl)
-
 
     return ordered_labels
 
