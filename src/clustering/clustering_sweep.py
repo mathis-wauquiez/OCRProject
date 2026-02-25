@@ -260,6 +260,17 @@ class graphClusteringSweep:
             membership=_to_list(post_split_membership),
         )
 
+        # ── Cross-column comparison: evaluate against all available label columns ──
+        _label_cols = ['char_chat', 'char_transcription', 'char_consensus']
+        comparative_metrics = {}
+        for col in _label_cols:
+            if col not in dataframe.columns or col == self.target_lbl:
+                continue
+            comparative_metrics[col] = self._evaluate_membership(
+                target_labels=dataframe[col],
+                membership=dataframe['membership'].tolist(),
+            )
+
         quality = ClusterQuality(
             purity_dataframe=purity_dataframe,
             representatives=representatives,
@@ -268,7 +279,7 @@ class graphClusteringSweep:
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
         )
-        return quality, pre_split_metrics, post_split_metrics
+        return quality, pre_split_metrics, post_split_metrics, comparative_metrics
 
     # ================================================================
     #  report_graph: orchestrator
@@ -321,7 +332,7 @@ class graphClusteringSweep:
         dataframe, glossary_df = self._run_post_clustering(dataframe)
 
         # ── 7. Compute quality metrics ──
-        quality, pre_split_metrics, post_split_metrics = \
+        quality, pre_split_metrics, post_split_metrics, comparative_metrics = \
             self._compute_quality(
                 dataframe, pre_split_membership,
                 post_split_membership, did_split,
@@ -371,6 +382,7 @@ class graphClusteringSweep:
             },
             refinement_steps=self.refinement_steps,
             glossary_df=glossary_df,
+            comparative_metrics=comparative_metrics,
         )
 
         # ── 10. Build filtered / representative dataframes ──
@@ -390,9 +402,28 @@ class graphClusteringSweep:
     #  __call__: HOG config sweep → best config → report_graph
     # ================================================================
 
+    @staticmethod
+    def _build_consensus_column(dataframe):
+        """Build ``char_consensus``: keep the label only when OCR and
+        transcription agree, otherwise mark as unknown.
+
+        Requires both ``char_chat`` and ``char_transcription`` columns.
+        """
+        if 'char_chat' not in dataframe.columns or \
+                'char_transcription' not in dataframe.columns:
+            return
+
+        ocr = dataframe['char_chat'].fillna(UNKNOWN_LABEL)
+        trans = dataframe['char_transcription'].fillna(UNKNOWN_LABEL)
+        consensus = ocr.where(ocr == trans, other=UNKNOWN_LABEL)
+        dataframe['char_consensus'] = consensus
+
     def __call__(self, dataframe):
         from itertools import product
         from torch.utils.data import DataLoader
+
+        # Build the consensus column so it can be used as target_lbl
+        self._build_consensus_column(dataframe)
 
         if self.cell_sizes is None:
             self.cell_sizes = [24]

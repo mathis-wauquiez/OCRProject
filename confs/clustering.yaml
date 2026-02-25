@@ -7,7 +7,11 @@ hydra:
 # Data paths
 data:
   # input_path: "outputs/preprocessing/book_small"
-  target_lbl: "char_chat"
+  # Ground-truth column for evaluation. Options:
+  #   "char_chat"          — raw OCR predictions (CHAT model)
+  #   "char_transcription" — aligned transcription labels
+  #   "char_consensus"     — only where OCR and transcription agree
+  target_lbl: "char_consensus"
   # output_path: "outputs/clustering/book_small"
   input_path: "outputs/preprocessing/book1"
   output_path: "outputs/clustering/book1"

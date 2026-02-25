@@ -1226,6 +1226,90 @@ class ClusteringSweepReporter(AutoReport):
         )
 
     # ================================================================
+    #  Cross-column evaluation comparison
+    # ================================================================
+
+    _LABEL_COL_NAMES = {
+        'char_chat':           'OCR (char_chat)',
+        'char_transcription':  'Transcription (char_transcription)',
+        'char_consensus':      'Consensus (char_consensus)',
+    }
+
+    def report_label_comparison(
+        self,
+        dataframe: pd.DataFrame,
+        primary_metrics: Dict[str, Any],
+        comparative_metrics: Dict[str, Dict[str, Any]],
+    ):
+        """Compare clustering metrics across all available label columns.
+
+        ``primary_metrics`` comes from ``target_lbl`` (the user's chosen column).
+        ``comparative_metrics`` maps column name → metrics dict for the others.
+        """
+        all_cols = {self.target_lbl: primary_metrics, **comparative_metrics}
+
+        # ── 1. Coverage stats ──
+        n_total = len(dataframe)
+        cov_parts = []
+        for col in ['char_chat', 'char_transcription', 'char_consensus']:
+            if col not in dataframe.columns:
+                continue
+            n_known = int((
+                dataframe[col].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
+            ).sum())
+            nice_name = self._LABEL_COL_NAMES.get(col, col)
+            marker = ' *' if col == self.target_lbl else ''
+            cov_parts.append(
+                f'{nice_name}{marker}: {n_known}/{n_total} '
+                f'({n_known / n_total * 100:.1f}%)'
+            )
+
+        coverage_html = (
+            '<div style="background:#f0f7ff;border-left:4px solid #667eea;'
+            'padding:12px;border-radius:4px;margin:10px 0;">'
+            '<b>Label coverage</b> (* = selected for evaluation)<br>'
+            + ' &nbsp;|&nbsp; '.join(cov_parts)
+            + '</div>'
+        )
+        self.report_raw_html(coverage_html, title="Label Coverage")
+
+        # ── 2. Summary card with primary column highlights ──
+        primary_name = self._LABEL_COL_NAMES.get(self.target_lbl, self.target_lbl)
+        card_items = [
+            ("ARI", f"{primary_metrics.get('adjusted_rand_index', 0):.4f}", primary_name),
+            ("Purity", f"{primary_metrics.get('purity', 0):.4f}", primary_name),
+            ("Accuracy", f"{primary_metrics.get('accuracy_optimal_match', 0):.4f}", primary_name),
+        ]
+        card = self._summary_card(
+            f"Evaluation — {primary_name}",
+            "#11998e 0%, #38ef7d 100%",
+            card_items,
+        )
+        self.report_raw_html(card, title="Selected Evaluation")
+
+        # ── 3. Side-by-side metrics table ──
+        _highlight = [
+            'adjusted_rand_index', 'normalized_mutual_info',
+            'adjusted_mutual_info', 'homogeneity', 'completeness',
+            'v_measure', 'purity', 'inverse_purity', 'f1_score',
+            'accuracy_optimal_match', 'fowlkes_mallows_index',
+        ]
+        rows = []
+        for key in _highlight:
+            row: Dict[str, Any] = {'Metric': key}
+            for col, metrics in all_cols.items():
+                nice = self._LABEL_COL_NAMES.get(col, col)
+                val = metrics.get(key)
+                row[nice] = round(val, 4) if val is not None else None
+            rows.append(row)
+        cmp_df = pd.DataFrame(rows)
+        if not cmp_df.empty:
+            self.report_table(
+                cmp_df.set_index('Metric'),
+                title="Metrics Across Label Columns",
+            )
+
+    # ================================================================
     #  Master orchestrator
     # ================================================================
 
@@ -1236,7 +1320,8 @@ class ClusteringSweepReporter(AutoReport):
                              feature_matcher,
                              sweep_cfg=None,
                              refinement_steps=None,
-                             glossary_df=None):
+                             glossary_df=None,
+                             comparative_metrics=None):
         """
         Single entry-point producing every report section for a given
         graph + partition.  Called once ALL computation is done.
@@ -1325,7 +1410,16 @@ class ClusteringSweepReporter(AutoReport):
         with self.section("Character Catalogue"):
             self.report_character_catalogue(dataframe)
 
-        # Section 7: Summary & metrics
+        # Section 7: Cross-column evaluation comparison
+        if comparative_metrics:
+            with self.section("Label Comparison"):
+                self.report_label_comparison(
+                    dataframe=dataframe,
+                    primary_metrics=quality.best_metrics,
+                    comparative_metrics=comparative_metrics,
+                )
+
+        # Section 8: Summary & metrics
         hapax_df = self.report_summary_and_metrics(
             dataframe, quality.purity_dataframe, quality.label_dataframe,
             quality.best_metrics, nlfa, best_epsilon, best_gamma, refinement.best_threshold
