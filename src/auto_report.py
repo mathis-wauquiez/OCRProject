@@ -379,10 +379,47 @@ class HTMLTemplates:
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             line-height: 1.6;
             margin: 0;
-            padding: 20px;
-            max-width: 1200px;
+            padding: 20px 20px 20px 220px;
+            max-width: 1400px;
             margin: 0 auto;
             background-color: #f9f9f9;
+        }
+        /* ── Sidebar TOC ── */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 200px;
+            height: 100vh;
+            overflow-y: auto;
+            background: #2d2d44;
+            padding: 14px 10px;
+            box-sizing: border-box;
+            z-index: 100;
+            font-size: 0.78em;
+        }
+        .sidebar h3 {
+            color: #ccc;
+            margin: 0 0 10px;
+            font-size: 1em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .sidebar a {
+            display: block;
+            padding: 5px 8px;
+            color: #b8b8d0;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sidebar a:hover,
+        .sidebar a.active {
+            background: #667eea33;
+            color: #fff;
         }
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -583,6 +620,15 @@ class HTMLTemplates:
     {% endif %}
 </head>
 <body>
+    <!-- Sidebar TOC -->
+    <nav class="sidebar" id="sidebar-toc">
+        <h3>Sections</h3>
+        {% for section in sections %}
+        <a href="#section-{{ loop.index }}"
+           onclick="event.preventDefault(); goToSection({{ loop.index }});">{{ section.title }}</a>
+        {% endfor %}
+    </nav>
+
     <div class="header">
         <h1>{{ title }}</h1>
         <div class="metadata">
@@ -591,22 +637,22 @@ class HTMLTemplates:
             <p><strong>Items:</strong> {{ item_count }}</p>
         </div>
     </div>
-    
+
     <div class="controls">
-        <button class="control-btn" onclick="expandAll()">📂 Expand All</button>
-        <button class="control-btn" onclick="collapseAll()">📁 Collapse All</button>
+        <button class="control-btn" onclick="expandAll()">Expand All</button>
+        <button class="control-btn" onclick="collapseAll()">Collapse All</button>
         <span style="margin-left: auto; color: #666; font-size: 0.9em;">
             Click section headers to toggle
         </span>
     </div>
-    
+
     {% for section in sections %}
     <div class="section collapsed" id="section-{{ loop.index }}">
         <div class="section-header" onclick="toggleSection({{ loop.index }})">
             <h2 class="section-title">{{ section.title }}</h2>
             <div class="section-toggle">
                 <span class="toggle-text">Click to expand</span>
-                <div class="toggle-icon">▶</div>
+                <div class="toggle-icon">&#x25B6;</div>
             </div>
         </div>
         <div class="section-content">
@@ -618,21 +664,54 @@ class HTMLTemplates:
     {% endfor %}
     
     <script>
+        // Navigate to section: expand it and scroll into view
+        function goToSection(index) {
+            const section = document.getElementById('section-' + index);
+            if (!section) return;
+            if (section.classList.contains('collapsed')) {
+                section.classList.remove('collapsed');
+                section.classList.add('expanded');
+                const t = section.querySelector('.toggle-text');
+                if (t) t.textContent = 'Click to collapse';
+            }
+            section.scrollIntoView({behavior: 'smooth', block: 'start'});
+            highlightTocLink(index);
+        }
+
+        // Highlight active TOC link
+        function highlightTocLink(index) {
+            document.querySelectorAll('#sidebar-toc a').forEach(a => a.classList.remove('active'));
+            const link = document.querySelector('#sidebar-toc a[href="#section-' + index + '"]');
+            if (link) link.classList.add('active');
+        }
+
+        // Track scroll position to highlight current section in TOC
+        const tocObserver = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const id = entry.target.id;
+                    const idx = id.replace('section-', '');
+                    highlightTocLink(idx);
+                }
+            });
+        }, {rootMargin: '-80px 0px -70% 0px'});
+        document.querySelectorAll('.section').forEach(s => tocObserver.observe(s));
+
         // Toggle individual section
         function toggleSection(index) {
             const section = document.getElementById('section-' + index);
             const toggleText = section.querySelector('.toggle-text');
-            
+
             section.classList.toggle('collapsed');
             section.classList.toggle('expanded');
-            
+
             if (section.classList.contains('expanded')) {
                 toggleText.textContent = 'Click to collapse';
             } else {
                 toggleText.textContent = 'Click to expand';
             }
         }
-        
+
         // Expand all sections
         function expandAll() {
             document.querySelectorAll('.section').forEach(section => {
@@ -642,7 +721,7 @@ class HTMLTemplates:
                 if (toggleText) toggleText.textContent = 'Click to collapse';
             });
         }
-        
+
         // Collapse all sections
         function collapseAll() {
             document.querySelectorAll('.section').forEach(section => {
@@ -652,7 +731,7 @@ class HTMLTemplates:
                 if (toggleText) toggleText.textContent = 'Click to expand';
             });
         }
-        
+
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
@@ -667,7 +746,7 @@ class HTMLTemplates:
     </script>
 </body>
 </html>
-"""    
+"""
     DARK_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">

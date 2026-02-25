@@ -1055,7 +1055,9 @@ class ClusteringSweepReporter(AutoReport):
 
     def report_label_cluster_inspection(self, dataframe, purity_dataframe,
                                         representatives):
-        """Per-label view: most-central representative in every hosting cluster."""
+        """Per-label view: most-central representative in every hosting cluster,
+        plus a confusion row showing each label's share of its clusters.
+        """
         target_lbl = self.target_lbl
         # Invert {cluster: {label: idx}} → {label: [(cluster, idx), ...]}
         label_reps = {}
@@ -1077,15 +1079,19 @@ class ClusteringSweepReporter(AutoReport):
                               reverse=True)
             n_cl = len(clusters)
 
+            # ── Row 1: representative thumbnails ──
             cards = ''
+            # ── Row 2: confusion ratios ──
+            confusion_cells = ''
             for cid, idx in clusters:
                 row = dataframe.loc[idx]
                 cs = purity_dataframe.loc[cid]
                 n_lbl = int(counts.get((cid, label), 0))
+                cluster_size = int(cs['Size'])
+                # Share of THIS label inside THIS cluster
+                label_share = n_lbl / cluster_size if cluster_size > 0 else 0
                 is_dom = cs['Dominant_Label'] == label
                 border = '#27ae60' if is_dom else '#e74c3c'
-                pur = cs['Purity']
-                pur_s = f'{pur:.0%}' if pd.notna(pur) else '?'
                 svg = (row['svg'].to_string()
                        if hasattr(row.get('svg', None), 'to_string') else '')
                 cards += (
@@ -1095,9 +1101,33 @@ class ClusteringSweepReporter(AutoReport):
                     f'<div style="width:36px;height:36px;margin:0 auto;display:flex;'
                     f'align-items:center;justify-content:center;">{svg}</div>'
                     f'<div style="font-size:9px;margin-top:3px;">'
-                    f'<b>C{cid}</b> {n_lbl}/{int(cs["Size"])}'
-                    f'<br>P={pur_s}</div></div>'
+                    f'<b>C{cid}</b> {n_lbl}/{cluster_size}'
+                    f'</div></div>'
                 )
+                # Confusion cell: share badge
+                share_color = (
+                    '#27ae60' if label_share >= 0.8
+                    else '#e67e22' if label_share >= 0.5
+                    else '#e74c3c'
+                )
+                confusion_cells += (
+                    f'<div style="display:inline-block;text-align:center;margin:3px;'
+                    f'min-width:70px;padding:4px 6px;border-radius:4px;'
+                    f'background:{share_color}15;border:1px solid {share_color};">'
+                    f'<span style="font-size:11px;font-weight:bold;color:{share_color};">'
+                    f'{label_share:.0%}</span>'
+                    f'</div>'
+                )
+
+            # Overall confusion: sum(label in these clusters) / sum(cluster sizes)
+            total_in_clusters = sum(
+                int(counts.get((c, label), 0)) for c, _ in clusters
+            )
+            total_cluster_sizes = sum(
+                int(purity_dataframe.loc[c, 'Size']) for c, _ in clusters
+            )
+            overall_ratio = (total_in_clusters / total_cluster_sizes
+                             if total_cluster_sizes > 0 else 0)
 
             color = '#27ae60' if n_cl == 1 else '#e67e22' if n_cl <= 3 else '#e74c3c'
             parts.append(
@@ -1106,8 +1136,12 @@ class ClusteringSweepReporter(AutoReport):
                 f'<h4 style="margin:0 0 5px;color:{color};">"{label}" '
                 f'<span style="font-weight:normal;font-size:.8em;color:#888;">'
                 f'— {total} inst, {n_cl} cluster{"s" if n_cl != 1 else ""}'
+                f', confusion ratio: {overall_ratio:.0%}'
                 f'</span></h4>'
                 f'<div style="display:flex;flex-wrap:wrap;gap:3px;">{cards}</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:2px;'
+                f'border-top:1px dashed #ddd;padding-top:3px;">'
+                f'{confusion_cells}</div>'
                 f'</div>'
             )
 
@@ -1226,6 +1260,130 @@ class ClusteringSweepReporter(AutoReport):
         )
 
     # ================================================================
+    #  Character Gallery: all occurrences with cluster-coloured borders
+    # ================================================================
+
+    # Palette of visually distinct colours for cluster borders
+    _CLUSTER_PALETTE = [
+        '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
+        '#1abc9c', '#e67e22', '#34495e', '#d35400', '#16a085',
+        '#c0392b', '#2980b9', '#27ae60', '#f1c40f', '#8e44ad',
+        '#2c3e50', '#7f8c8d', '#e84393', '#00b894', '#6c5ce7',
+    ]
+
+    def report_character_gallery(self, dataframe):
+        """For every character, render ALL occurrences with one border
+        colour per cluster, grouped by cluster and sorted by cluster size.
+        """
+        target_lbl = self.target_lbl
+        membership_col = 'membership'
+        has_svg = 'svg' in dataframe.columns
+
+        known = dataframe[
+            dataframe[target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
+        ].copy()
+
+        if known.empty:
+            self.report_text("No known labels — skipping character gallery.")
+            return
+
+        char_freq = known[target_lbl].value_counts()
+        cluster_sizes = dataframe[membership_col].value_counts()
+
+        MAX_THUMBS = 80
+
+        parts = ['<div style="display:grid; gap:18px;">']
+
+        for char, total_count in char_freq.items():
+            char_df = known[known[target_lbl] == char]
+            cluster_groups = char_df.groupby(membership_col)
+
+            # Clusters sorted by number of this char in each (desc)
+            cluster_order = (
+                cluster_groups.size()
+                .sort_values(ascending=False)
+                .index.tolist()
+            )
+            n_clusters = len(cluster_order)
+
+            # Assign a colour to each cluster
+            cid_to_color = {
+                cid: self._CLUSTER_PALETTE[i % len(self._CLUSTER_PALETTE)]
+                for i, cid in enumerate(cluster_order)
+            }
+
+            bar_color = (
+                '#27ae60' if n_clusters == 1
+                else '#e67e22' if n_clusters <= 3
+                else '#e74c3c'
+            )
+
+            # Legend: cluster → colour
+            legend = ''
+            for cid in cluster_order:
+                c = cid_to_color[cid]
+                n = int(cluster_groups.size().loc[cid])
+                legend += (
+                    f'<span style="display:inline-block;margin:0 6px 2px 0;'
+                    f'font-size:9px;">'
+                    f'<span style="display:inline-block;width:10px;height:10px;'
+                    f'background:{c};border-radius:2px;vertical-align:middle;'
+                    f'margin-right:3px;"></span>'
+                    f'C{cid} ({n})</span>'
+                )
+
+            # Render all thumbnails with cluster-coloured borders
+            thumbs = ''
+            shown = 0
+            for cid in cluster_order:
+                grp = cluster_groups.get_group(cid)
+                color = cid_to_color[cid]
+                for _, row in grp.iterrows():
+                    if shown >= MAX_THUMBS:
+                        break
+                    svg = ''
+                    if has_svg and hasattr(row.get('svg', None), 'to_string'):
+                        svg = row['svg'].to_string()
+                    thumbs += (
+                        f'<div style="display:inline-block;margin:1px;'
+                        f'border:2px solid {color};border-radius:3px;'
+                        f'padding:1px;background:white;">'
+                        f'<div style="width:30px;height:30px;display:flex;'
+                        f'align-items:center;justify-content:center;">'
+                        f'{svg}</div></div>'
+                    )
+                    shown += 1
+                if shown >= MAX_THUMBS:
+                    break
+
+            overflow = ''
+            if total_count > MAX_THUMBS:
+                overflow = (
+                    f'<span style="font-size:9px;color:#888;margin-left:4px;">'
+                    f'+{total_count - MAX_THUMBS} more</span>'
+                )
+
+            parts.append(
+                f'<div style="background:white;padding:12px;border-radius:8px;'
+                f'box-shadow:0 1px 3px rgba(0,0,0,.1);'
+                f'border-left:4px solid {bar_color};">'
+                f'<h4 style="margin:0 0 4px;color:{bar_color};">'
+                f'"{char}"'
+                f'<span style="font-weight:normal;font-size:.8em;color:#888;">'
+                f' — {total_count} occ, {n_clusters} '
+                f'cluster{"s" if n_clusters != 1 else ""}</span></h4>'
+                f'<div style="margin-bottom:4px;">{legend}</div>'
+                f'<div style="display:flex;flex-wrap:wrap;gap:1px;">'
+                f'{thumbs}{overflow}</div></div>'
+            )
+
+        parts.append('</div>')
+        self.report_raw_html(
+            '\n'.join(parts),
+            title=f"Character Gallery ({len(char_freq)} characters)"
+        )
+
+    # ================================================================
     #  Cross-column evaluation comparison
     # ================================================================
 
@@ -1326,7 +1484,34 @@ class ClusteringSweepReporter(AutoReport):
         Single entry-point producing every report section for a given
         graph + partition.  Called once ALL computation is done.
         """
-        # Section 0 (optional): Pipeline configuration
+        # Section 0: Executive dashboard (top-level KPIs)
+        with self.section("Dashboard"):
+            m = quality.best_metrics
+            n_clusters = dataframe['membership'].nunique()
+            n_patches = len(dataframe)
+            target_col = self.target_lbl
+            n_known = int((
+                dataframe[target_col].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
+            ).sum())
+            cluster_sizes = dataframe['membership'].value_counts()
+            n_hapax = int((cluster_sizes == 1).sum())
+            card = self._summary_card(
+                f"Clustering Dashboard ({target_col})",
+                "#667eea 0%, #764ba2 100%",
+                [
+                    ("ARI", f"{m.get('adjusted_rand_index', 0):.4f}",
+                     f"{n_patches} patches"),
+                    ("Purity", f"{m.get('purity', 0):.4f}",
+                     f"{n_clusters} clusters"),
+                    ("Accuracy", f"{m.get('accuracy_optimal_match', 0):.4f}",
+                     f"{n_known} known labels"),
+                    ("Hapax", f"{n_hapax}",
+                     f"{n_hapax / n_clusters * 100:.0f}% of clusters"),
+                ],
+            )
+            self.report_raw_html(card, title="Key Metrics")
+
+        # Section 0b (optional): Pipeline configuration
         if sweep_cfg is not None or refinement_steps is not None:
             with self.section("Pipeline Configuration"):
                 self.report_pipeline_config(
@@ -1409,6 +1594,10 @@ class ClusteringSweepReporter(AutoReport):
         # Section 6c: Character → Cluster catalogue (all occurrences)
         with self.section("Character Catalogue"):
             self.report_character_catalogue(dataframe)
+
+        # Section 6d: Character Gallery (all occurrences, cluster-coloured borders)
+        with self.section("Character Gallery"):
+            self.report_character_gallery(dataframe)
 
         # Section 7: Cross-column evaluation comparison
         if comparative_metrics:
