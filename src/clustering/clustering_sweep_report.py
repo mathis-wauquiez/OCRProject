@@ -1118,6 +1118,114 @@ class ClusteringSweepReporter(AutoReport):
         )
 
     # ================================================================
+    #  Character → Cluster catalogue
+    # ================================================================
+
+    def report_character_catalogue(self, dataframe):
+        """For every distinct character, show all patch occurrences grouped
+        by cluster (sorted by cluster size descending).
+
+        Each cluster group renders every patch thumbnail inline so one can
+        visually verify whether the clustering matches the transcription.
+        """
+        target_lbl = self.target_lbl
+        membership_col = 'membership'
+        has_svg = 'svg' in dataframe.columns
+
+        known = dataframe[
+            dataframe[target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
+        ].copy()
+
+        if known.empty:
+            self.report_text("No known labels — skipping character catalogue.")
+            return
+
+        # Characters sorted by descending frequency
+        char_freq = known[target_lbl].value_counts()
+        cluster_sizes = dataframe[membership_col].value_counts()
+
+        MAX_THUMBS_PER_CLUSTER = 60
+
+        parts = ['<div style="display:grid; gap:18px;">']
+
+        for char, total_count in char_freq.items():
+            char_df = known[known[target_lbl] == char]
+            cluster_groups = char_df.groupby(membership_col)
+
+            # Sort clusters by number of patches of this character (desc)
+            cluster_order = (
+                cluster_groups.size()
+                .sort_values(ascending=False)
+                .index.tolist()
+            )
+            n_clusters = len(cluster_order)
+
+            # Colour of the left bar: green=1 cluster, orange=2-3, red=4+
+            bar_color = (
+                '#27ae60' if n_clusters == 1
+                else '#e67e22' if n_clusters <= 3
+                else '#e74c3c'
+            )
+
+            cluster_cards = ''
+            for cid in cluster_order:
+                grp = cluster_groups.get_group(cid)
+                n_in_cluster = len(grp)
+                cl_total = int(cluster_sizes.get(cid, n_in_cluster))
+
+                # Render thumbnails
+                thumbs = ''
+                sample = grp.head(MAX_THUMBS_PER_CLUSTER)
+                for _, row in sample.iterrows():
+                    svg = ''
+                    if has_svg and hasattr(row.get('svg', None), 'to_string'):
+                        svg = row['svg'].to_string()
+                    thumbs += (
+                        '<div style="display:inline-block;margin:1px;'
+                        'border:1px solid #ddd;border-radius:3px;'
+                        'padding:2px;background:white;">'
+                        '<div style="width:32px;height:32px;display:flex;'
+                        f'align-items:center;justify-content:center;">{svg}</div>'
+                        '</div>'
+                    )
+
+                overflow = ''
+                if len(grp) > MAX_THUMBS_PER_CLUSTER:
+                    overflow = (
+                        f'<span style="font-size:9px;color:#888;margin-left:4px;">'
+                        f'+{len(grp) - MAX_THUMBS_PER_CLUSTER} more</span>'
+                    )
+
+                cluster_cards += (
+                    f'<div style="margin:4px 0;padding:6px;background:#fafafa;'
+                    f'border-radius:5px;border:1px solid #eee;">'
+                    f'<div style="font-size:10px;font-weight:bold;margin-bottom:3px;">'
+                    f'Cluster {cid}'
+                    f'<span style="font-weight:normal;color:#888;margin-left:6px;">'
+                    f'{n_in_cluster} / {cl_total} patches</span></div>'
+                    f'<div style="display:flex;flex-wrap:wrap;gap:1px;">'
+                    f'{thumbs}{overflow}</div></div>'
+                )
+
+            parts.append(
+                f'<div style="background:white;padding:12px;border-radius:8px;'
+                f'box-shadow:0 1px 3px rgba(0,0,0,.1);'
+                f'border-left:4px solid {bar_color};">'
+                f'<h4 style="margin:0 0 6px;color:{bar_color};">'
+                f'"{char}"'
+                f'<span style="font-weight:normal;font-size:.8em;color:#888;">'
+                f' — {total_count} occurrences, {n_clusters} '
+                f'cluster{"s" if n_clusters != 1 else ""}</span></h4>'
+                f'{cluster_cards}</div>'
+            )
+
+        parts.append('</div>')
+        self.report_raw_html(
+            '\n'.join(parts),
+            title=f"Character Catalogue ({len(char_freq)} characters)"
+        )
+
+    # ================================================================
     #  Master orchestrator
     # ================================================================
 
@@ -1212,6 +1320,10 @@ class ClusteringSweepReporter(AutoReport):
             self.report_label_cluster_inspection(
                 dataframe, quality.purity_dataframe,
                 quality.representatives)
+
+        # Section 6c: Character → Cluster catalogue (all occurrences)
+        with self.section("Character Catalogue"):
+            self.report_character_catalogue(dataframe)
 
         # Section 7: Summary & metrics
         hapax_df = self.report_summary_and_metrics(
