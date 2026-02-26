@@ -12,7 +12,7 @@ extraction → preprocessing pipeline on a single page:
   (e) Final alignment (OCR vs transcription)
 
 Usage:
-    python scripts/generate_paper_main_figure.py \
+    python scripts/figure_generation/generate_paper_main_figure.py \
         --image       data/datasets/book1/wdl_13516_005.jpg \
         --components  results/extraction/book1/components/wdl_13516_005.jpg.npz \
         --dataframe   results/preprocessing/book1 \

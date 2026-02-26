@@ -10,7 +10,7 @@ light blue.  Two versions are produced:
   (b) On a blank white background (characters only)
 
 Usage:
-    python scripts/generate_reverse_manuscript.py \
+    python scripts/figure_generation/generate_reverse_manuscript.py \
         --dataframe   results/clustering/book1/clustered_patches \
         --images-dir  data/datasets/book1 \
         --output-dir  paper/figures/generated/reverse_manuscript

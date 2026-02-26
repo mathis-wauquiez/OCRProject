@@ -5,17 +5,17 @@ Master script — generate ALL paper figures from pipeline results.
 Links together every figure-generation script so you only run one command.
 
 Usage:
-    python scripts/generate_all_figures.py
+    python scripts/figure_generation/generate_all_figures.py
 
     Override paths:
-    python scripts/generate_all_figures.py \
+    python scripts/figure_generation/generate_all_figures.py \
         --clustering-dir   results/clustering/book1 \
         --preprocessing-dir results/preprocessing/book1 \
         --images-dir       data/datasets/book1 \
         --output-dir       paper/figures/generated
 
     Generate only specific figures:
-    python scripts/generate_all_figures.py --only glossary reverse_manuscript
+    python scripts/figure_generation/generate_all_figures.py --only glossary reverse_manuscript
 """
 
 import argparse

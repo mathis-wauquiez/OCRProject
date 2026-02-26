@@ -8,7 +8,7 @@ Produces a self-contained HTML file with KaTeX math that can be opened in a
 browser and printed to PDF.
 
 Usage:
-    python scripts/generate_post_clustering_report.py [--output-dir ./reports]
+    python scripts/figure_generation/generate_post_clustering_report.py [--output-dir ./reports]
 """
 
 import sys

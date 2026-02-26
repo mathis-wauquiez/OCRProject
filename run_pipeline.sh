@@ -156,7 +156,7 @@ if should_run "figure"; then
             FIGURE_ARGS+=(--components "$COMPONENTS_FILE")
         fi
 
-        python scripts/generate_paper_main_figure.py "${FIGURE_ARGS[@]}"
+        python scripts/figure_generation/generate_paper_main_figure.py "${FIGURE_ARGS[@]}"
     else
         echo "   WARNING: No images found in data/datasets/${BOOK}/, skipping figure."
     fi
@@ -166,7 +166,7 @@ fi
 # ── Stage 6: All paper figures ──
 if should_run "figures"; then
     echo ">> Stage 6: Generating all paper figures..."
-    python scripts/generate_all_figures.py \
+    python scripts/figure_generation/generate_all_figures.py \
         --clustering-dir "results/clustering/${BOOK}" \
         --preprocessing-dir "results/preprocessing/${BOOK}" \
         --images-dir "data/datasets/${BOOK}" \

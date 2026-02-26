@@ -6,8 +6,8 @@ opened in a browser and printed to PDF.  When ``--viz-dir`` is supplied the
 report embeds real pipeline visualisations instead of figure placeholders.
 
 Usage:
-    python scripts/generate_extraction_report.py [--output-dir ./reports]
-    python scripts/generate_extraction_report.py --viz-dir results/extraction/book1/visualizations
+    python scripts/figure_generation/generate_extraction_report.py [--output-dir ./reports]
+    python scripts/figure_generation/generate_extraction_report.py --viz-dir results/extraction/book1/visualizations
 """
 
 import sys
