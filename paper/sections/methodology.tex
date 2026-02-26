@@ -143,24 +143,52 @@ We store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \m
 
 
 % ============================================================================
-\subsection{Graph Construction and Community Detection}
+\subsection{Graph Construction and Correlation Clustering}
 \label{sec:graph-clustering}
 
-A similarity graph $G = (V, E, w)$ is built with one vertex per character.
+\paragraph{Problem formulation.}
+We seek a partition of the $N$ character tokens into clusters, one per distinct character.
+The NFA scores $p_{ij}$ are ordinal---they rank pairs by similarity but are not calibrated probabilities---the number of distinct characters is unknown (though a lower bound is available from the OCR vocabulary), and the cluster size distribution is expected to follow a Zipf law: a few high-frequency characters and many rare ones.
+
+We cast this as a \emph{correlation clustering} problem~\cite{bansal2004correlation}: given a graph where tokens are nodes and edges encode pairwise similarity, find a partition minimising the total \emph{disagreement}---the cost of placing dissimilar tokens together plus the cost of separating similar tokens.
+
+\paragraph{Similarity graph.}
+A graph $G = (V, E, w)$ is built with one vertex per character token.
 An edge $(i,j)$ is created when both NLFA values exceed threshold $\tau_\text{NFA} = -\log\varepsilon + 2\log N$:
 \begin{equation}
     (i,j) \in E \iff \text{NLFA}(i,j) \ge \tau_\text{NFA} \;\wedge\; \text{NLFA}(j,i) \ge \tau_\text{NFA}.
     \label{eq:reciprocal}
 \end{equation}
 The reciprocal condition discards asymmetric similarities.
-Edge weights are the symmetrised NLFA: $w_{ij} = \frac{1}{2}[\text{NLFA}(i,j) + \text{NLFA}(j,i)]$.
+Edge weights are the symmetrised NLFA: $w_{ij} = \tfrac{1}{2}[\text{NLFA}(i,j) + \text{NLFA}(j,i)]$.
 
-Communities are detected using the Leiden algorithm~\cite{traag2019louvain} with the Constant Potts Model (CPM) quality function, which minimises the correlation clustering disagreement objective:
+\paragraph{CPM objective.}
+For an unweighted-node correlation clustering problem with resolution $\gamma \in (0,1)$, the \emph{LambdaCC} disagreement objective~\cite{veldt2018correlation} is:
 \begin{equation}
-    \mathcal{Q}_\gamma = \sum_{c} \left[e_c - \gamma \binom{n_c}{2}\right],
+    \mathcal{L}_\gamma(\mathcal{C}) = \!\sum_{(i,j)\in E}\!(1{-}\gamma)\, x_{ij}
+        + \!\sum_{(i,j)\notin E}\!\gamma\,(1{-}x_{ij}),
+    \label{eq:lambdacc}
 \end{equation}
-where $e_c$ is the total edge weight within community $c$, $n_c$ its size, and $\gamma$ is the resolution parameter.
-We sweep over the NFA threshold $\varepsilon$ and the resolution parameter $\gamma$ to find the partition maximising ARI with respect to OCR labels (see Section~\ref{sec:sensitivity}).
+where $x_{ij} = 0$ if $i,j$ are co-clustered and $1$ otherwise.
+Expanding in terms of within-cluster edge weight $e_c$ and cluster size $n_c$ shows that $\mathcal{L}_\gamma = \text{const} - \mathcal{Q}_\gamma$, where
+\begin{equation}
+    \mathcal{Q}_\gamma = \sum_{c} \left[e_c - \gamma \binom{n_c}{2}\right]
+    \label{eq:cpm}
+\end{equation}
+is the Constant Potts Model (CPM) quality function~\cite{traag2011narrow}.
+Minimising disagreement is thus equivalent to maximising $\mathcal{Q}_\gamma$.
+
+The CPM is a special case of the Reichardt--Bornholdt framework~\cite{reichardt2006statistical} with an Erd\H{o}s--R\'enyi null model ($P_{ij} = \text{const}$), in contrast to the configuration-model null model that yields modularity.
+CPM is preferred here for three reasons:
+\begin{enumerate}[nosep]
+    \item \emph{No resolution limit.}  Modularity cannot resolve clusters smaller than ${\sim}\sqrt{2m}$ edges~\cite{fortunato2007resolution}, which would merge rare characters.  CPM has no such limitation.
+    \item \emph{Ordinal compatibility.}  Only the relative ordering of edge weights matters, not their absolute calibration---appropriate for NFA-derived scores.
+    \item \emph{Density interpretation.}  The resolution parameter $\gamma$ has a direct meaning: every cluster in an optimal partition has internal edge density $\ge \gamma$.
+\end{enumerate}
+
+\paragraph{Optimisation.}
+We optimise $\mathcal{Q}_\gamma$ using the Leiden algorithm~\cite{traag2019louvain}, which guarantees well-connected communities and runs in seconds at our scale (${\sim}$13\,k tokens, ${\sim}$200\,k edges).
+We sweep over both $\varepsilon$ and $\gamma$, selecting the configuration maximising ARI with respect to OCR labels (Section~\ref{sec:sensitivity}).
 
 \input{figures/methodology/fig_clustering_pipeline}
 
