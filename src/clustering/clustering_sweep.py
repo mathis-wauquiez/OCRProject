@@ -388,7 +388,7 @@ class graphClusteringSweep:
                 'metric': self.featureMatcher._params.metric,
                 'keep_reciprocal': self.keep_reciprocal,
                 'device': self.device,
-                'partition_type': best_overall_config['partition_type'],
+                'partition_type': partition_type,
                 'best_epsilon': best_epsilon,
                 'best_gamma': best_gamma,
             },
