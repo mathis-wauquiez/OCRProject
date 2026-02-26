@@ -1,20 +1,34 @@
 % ============================================================================
-%  Experiments — Ablation Studies, Comparisons, and Evaluation Protocol
+%  Experiments — Results and Evaluation
 % ============================================================================
 
 \section{Experiments}
 \label{sec:experiments}
 
-This section describes the evaluation protocol, ablation studies, and comparative experiments.
+This section describes the dataset, evaluation protocol, and experimental results.
 
 
 % ============================================================================
-\subsection{Evaluation Protocol}
+\subsection{Dataset}
+\label{sec:dataset}
+
+We evaluate on the \emph{Ying huan zhi lue} (Brief Records of the World, 1848), a Chinese book printed from individually carved woodblocks.
+The corpus contains 40 page images from which the extraction pipeline produces approximately 13\,500 character patches.
+Each character was uniquely engraved---no two occurrences share the same printing block---making this a maximally challenging scenario for visual clustering.
+
+Ground-truth labels are obtained at two levels:
+\begin{itemize}[nosep]
+    \item \textbf{OCR predictions} ($\ell_\text{chat}$): Kraken model output, used during hyperparameter selection to avoid methodological leak.
+    \item \textbf{Consensus labels} ($\ell_\text{consensus}$): agreement between OCR predictions and aligned transcription labels, used only for final evaluation.
+\end{itemize}
+
+
+% ============================================================================
+\subsection{Evaluation Metrics}
 \label{sec:eval-protocol}
 
-\paragraph{Metrics.}
-All metrics are computed against manually annotated reference labels (not OCR-derived).
-Table~\ref{tab:metrics} summarises the evaluation metrics.
+Clustering quality is measured using the metrics summarised in Table~\ref{tab:metrics}.
+Characters with unknown ground-truth labels are excluded from all metric computations.
 
 \begin{table}[t]
     \centering
@@ -28,130 +42,111 @@ Table~\ref{tab:metrics} summarises the evaluation metrics.
         ARI~\cite{hubert1985comparing} & Chance-adjusted pairwise agreement; primary metric. \\
         NMI & Information-theoretic overlap; robust to different cluster counts. \\
         V-measure~\cite{rosenberg2007v} & Harmonic mean of homogeneity and completeness. \\
-        Per-class F1 & Precision/recall per character class via Hungarian matching. \\
-        Noise fraction & Fraction classified as noise (HDBSCAN only). \\
+        Purity & Fraction of majority-label members per cluster (weighted by cluster size). \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-\paragraph{Ground truth.}
-At least 500 characters from each corpus are manually annotated by two independent annotators; inter-annotator agreement is reported via Cohen's~$\kappa$.
-
-\paragraph{Statistical significance.}
-For main comparisons: mean and standard deviation over 5 bootstrap sub-samplings, paired Wilcoxon signed-rank test, and Cohen's $d$ effect size.
+\paragraph{Hyperparameter selection.}
+The pipeline performs a grid sweep over epsilon thresholds ($\varepsilon \in \{2.5{\times}10^{-4}, 3.8{\times}10^{-4}, 5{\times}10^{-4}\}$), Leiden resolution ($\gamma = 1.0$), and partition types (RBConfiguration, CPM).
+The configuration maximising ARI on OCR-derived labels is selected; final metrics are reported on consensus labels.
 
 
 % ============================================================================
-\subsection{Ablation Studies}
-\label{sec:ablations}
+\subsection{Results}
+\label{sec:results}
 
-Each ablation isolates one variable while holding others at their default setting.
-We report ARI, NMI, V-measure, and the number of clusters.
-
-\subsubsection{Feature Representation (A1--A4)}
-
+% ── Placeholder for main results table ──
+% TODO: Fill with actual metric values from a pipeline run
 \begin{table}[t]
     \centering
     \small
-    \caption{Feature representation ablations.}
-    \label{tab:ablation-features}
-    \begin{tabular}{@{}llp{5.5cm}@{}}
+    \caption{Clustering results on the \emph{Ying huan zhi lue} corpus.
+    Metrics are computed on consensus labels after each refinement stage.}
+    \label{tab:main-results}
+    \begin{tabular}{@{}lccccc@{}}
         \toprule
-        \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
+        \textbf{Stage} & \textbf{$K$} & \textbf{ARI} & \textbf{NMI} & \textbf{V-measure} & \textbf{Purity} \\
         \midrule
-        A1 & HOG cell size & $8{\times}8$, $12{\times}12$, $16{\times}16$, $24{\times}24$\,px \\
-        A2 & Orientation bins & 4, 8, 12, 16, 24 unsigned bins \\
-        A3 & Feature type & HOG, Shape Context, Learned (CNN), HOG + persistent homology \\
-        A4 & Dissimilarity & CEMD vs.\ Sinkhorn OT \\
+        Leiden (baseline)    & ---  & ---  & ---  & ---  & ---  \\
+        + Hausdorff split    & ---  & ---  & ---  & ---  & ---  \\
+        + Label split        & ---  & ---  & ---  & ---  & ---  \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-\subsubsection{A Contrario Framework (A5--A7)}
+Table~\ref{tab:main-results} reports clustering quality at each stage of the pipeline.
+The Leiden partition provides the initial grouping; the Hausdorff split breaks impure clusters by visual dissimilarity, typically increasing the number of clusters~$K$ while improving purity; the label split further enforces label consistency within clusters.
 
-\begin{table}[t]
-    \centering
-    \small
-    \caption{A contrario framework ablations.}
-    \label{tab:ablation-acontrario}
-    \begin{tabular}{@{}llp{5.5cm}@{}}
-        \toprule
-        \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
-        \midrule
-        A5 & Background model & Independent cells, Empirical (bootstrap), Gamma-fitted \\
-        A6 & Gaussianity & Q-Q plots at $K = 4, 16, 36, 64$ cells \\
-        A7 & NFA threshold & $\varepsilon \in \{0.01, 0.1, 1, 10, 100\}$ \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-\subsubsection{Clustering and Refinement (A8--A13)}
-
-\begin{table}[t]
-    \centering
-    \small
-    \caption{Clustering and refinement ablations.}
-    \label{tab:ablation-clustering}
-    \begin{tabular}{@{}llp{5.5cm}@{}}
-        \toprule
-        \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
-        \midrule
-        A8 & Clustering algorithm & Connected comp., HDBSCAN, AP, Louvain, Leiden \\
-        A9 & HDBSCAN min\_cluster\_size & $\{2, 3, 5, 10, 20\}$ \\
-        A10 & HDBSCAN min\_samples & $\{1, 3, 5, 10, 15\}$ \\
-        A11 & Refinement method & None, 3-stage, K-medoids, MRF, HDBSCAN \\
-        A12 & MRF weight $\beta$ & $\{0.1, 0.5, 1, 2, 5\} / \text{med.\ NLFA}$ \\
-        A13 & Stage ablation & Full, $-$S1, $-$S2, $-$S3, none \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-\subsubsection{Registration (A14--A15)}
-
-\begin{table}[t]
-    \centering
-    \small
-    \caption{Registration ablations.}
-    \label{tab:ablation-registration}
-    \begin{tabular}{@{}llp{5.5cm}@{}}
-        \toprule
-        \textbf{ID} & \textbf{Variable} & \textbf{Variants} \\
-        \midrule
-        A14 & Registration method & None, Pairwise affine, MST, Congealing \\
-        A15 & Impact on clustering & Full pipeline $\pm$ registration \\
-        \bottomrule
-    \end{tabular}
-\end{table}
+% ── Placeholder for graph topology ──
+\paragraph{Graph topology.}
+% TODO: Fill from clustering sweep report
+The NFA similarity graph contains $N$ nodes and $|E|$ edges (density~$\rho$), with an average degree of~$\bar{d}$ and $C$ connected components.
+The degree distribution characterises the connectivity structure: isolated characters ($d{=}0$) are predominantly rare or damaged glyphs, while high-degree nodes correspond to frequent characters with many visually similar instances.
 
 
 % ============================================================================
-\subsection{Comparative Experiments}
-\label{sec:comparisons}
+\subsection{Hyperparameter Sensitivity}
+\label{sec:sensitivity}
 
-\subsubsection{Baselines}
+% ── Placeholder for epsilon sweep figure ──
+% TODO: Generate figure from sweep results
+% \begin{figure}[t]
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/epsilon_sweep.pdf}
+%     \caption{ARI as a function of the NFA threshold $\varepsilon$ for both partition types.
+%     Dashed lines indicate OCR-label ARI (used for selection); solid lines show consensus-label ARI (final evaluation).}
+%     \label{fig:epsilon-sweep}
+% \end{figure}
 
+\paragraph{NFA threshold.}
+The epsilon parameter controls graph sparsity: smaller $\varepsilon$ yields stricter matching (fewer edges, more clusters), while larger $\varepsilon$ produces denser graphs.
+% TODO: Describe the sensitivity curve and optimal epsilon.
+
+\paragraph{Split threshold.}
+The Hausdorff dendrogram cut $\tau_\text{split}$ trades off cluster purity against fragmentation.
+% TODO: Describe the ARI curve across split thresholds.
+
+
+% ============================================================================
+\subsection{Qualitative Results}
+\label{sec:qualitative}
+
+% ── Placeholder for qualitative figure ──
+% TODO: Generate figure showing example clusters
+% \begin{figure}[t]
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/cluster_gallery.pdf}
+%     \caption{Example clusters from the glossary.  Each row shows all members of one cluster, with the representative (highest degree centrality) highlighted.
+%     Left: pure clusters with consistent character identity.
+%     Right: impure clusters where visually similar but distinct characters are grouped together.}
+%     \label{fig:cluster-gallery}
+% \end{figure}
+
+The character glossary provides a visual summary of the clustering output.
+% TODO: Describe representative examples: pure clusters, split clusters, remaining errors.
+
+
+% ============================================================================
+\subsection{Comparison with OCR-Only Clustering}
+\label{sec:ocr-baseline}
+
+% ── Placeholder for comparison table ──
+% TODO: Fill with OCR-only baseline metrics
 \begin{table}[t]
     \centering
     \small
-    \caption{Baseline methods for comparison.}
-    \label{tab:baselines}
-    \begin{tabular}{@{}lp{8cm}@{}}
+    \caption{Comparison with the OCR-only baseline (clustering by predicted label).}
+    \label{tab:ocr-comparison}
+    \begin{tabular}{@{}lcccc@{}}
         \toprule
-        \textbf{Baseline} & \textbf{Description} \\
+        \textbf{Method} & \textbf{ARI} & \textbf{NMI} & \textbf{V-measure} & \textbf{Purity} \\
         \midrule
-        B1: K-means on HOG & HOG + $k$-means ($K$ = ground-truth classes). Tests the \textit{a contrario} contribution. \\
-        B2: Learned + K-means & Contrastive ResNet-18 embeddings + $k$-means. Tests feature representation. \\
-        B3: OCR-only & Cluster by OCR-predicted label. Upper bound on linguistic signal. \\
-        B4: End-to-end & Fine-tuned segmentation + classification (if available). \\
+        OCR-only (Kraken)     & --- & --- & --- & --- \\
+        Ours (full pipeline)  & --- & --- & --- & --- \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-\subsubsection{Cross-Corpus Generalisation}
-
-The pipeline is run with identical hyperparameters on $\ge 3$ corpora: (i)~medieval Latin manuscripts, (ii)~early modern printed text, (iii)~non-Latin script (e.g., Hebrew or Arabic).
-We report the performance drop relative to per-corpus tuning, testing whether the \textit{a contrario} framework adapts to data distribution.
-
-\subsubsection{Scalability}
-
-The pipeline is run on subsets of increasing size ($n \in \{500, 1\text{k}, 2\text{k}, 5\text{k}, 10\text{k}, 15\text{k}\}$) to verify complexity bounds: NFA computation $O(N^2)$, HDBSCAN $O(N k + N \log N)$, MST alignment $O(mk \cdot HW)$ per cluster, MRF-BP $O(|\mathcal{E}| \cdot K \cdot T)$.
+Clustering by OCR-predicted label provides an informative baseline: it uses no visual similarity and relies entirely on the linguistic signal.
+% TODO: Discuss the comparison.

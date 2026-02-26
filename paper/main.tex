@@ -142,7 +142,7 @@ Section~\ref{sec:conclusion} concludes.
 \label{sec:conclusion}
 
 We have presented a fully unsupervised pipeline for \emph{reverse typography}: the automatic reconstruction of a vectorised character glossary from historical printed books, respecting the original calligraphy.
-The method combines CRAFT text detection, affine scale-space vectorisation, \textit{a contrario} statistical matching, Leiden community detection, and a composable three-stage refinement pipeline.
+The method combines CRAFT text detection, affine scale-space vectorisation, \textit{a contrario} statistical matching, Leiden community detection, and a two-stage refinement pipeline.
 Demonstrated on the \emph{Ying huan zhi lue}, an 1848 Chinese book in which every character was uniquely carved from woodblocks, the pipeline handles the full variability of historical printing without any annotated training data.
 The extensions outlined in Section~\ref{sec:proposed-methods}---alternative clustering strategies, principled refinement, registration-based template computation, and deformation-invariant features---provide directions for further improving the glossary quality.
 Future work will focus on cross-corpus generalisation and systematic comparison of these extensions through the ablation framework described in Section~\ref{sec:experiments}.
