@@ -13,7 +13,7 @@ Reads pipeline outputs and produces:
   --   Ablation tables (A1: HOG config, A2: CPM vs Modularity, A4: reciprocal)
 
 Usage:
-    python scripts/generate_experiment_figures.py \
+    python scripts/figure_generation/generate_experiment_figures.py \
         --clustering-dir   results/clustering/book1 \
         --output-dir       paper/figures/generated
 

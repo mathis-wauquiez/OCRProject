@@ -7,7 +7,7 @@ frequency, with their OCR label printed below each cell.
 This is the main output of the reverse typography pipeline.
 
 Usage:
-    python scripts/generate_glossary_figure.py \
+    python scripts/figure_generation/generate_glossary_figure.py \
         --dataframe results/clustering/book1/clustered_patches \
         --output     paper/figures/generated/glossary.pdf
 

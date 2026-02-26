@@ -10,7 +10,7 @@ light blue.  Two versions are produced:
   (b) On a blank white background (characters only)
 
 Usage:
-    python scripts/generate_reverse_manuscript.py \
+    python scripts/figure_generation/generate_reverse_manuscript.py \
         --dataframe   results/clustering/book1/clustered_patches \
         --images-dir  data/datasets/book1 \
         --output-dir  paper/figures/generated/reverse_manuscript
@@ -191,12 +191,12 @@ def get_page_files(dataframe):
         return {}
     files = dataframe['file'].unique()
     page_map = {}
-    for f in files:
+    for i, f in enumerate(sorted(files)):
         try:
             page_num = int(f.split('_')[-1].split('.')[0])
-            page_map[page_num] = f
         except (ValueError, IndexError):
-            page_map[f] = f
+            page_num = i
+        page_map[page_num] = f
     return page_map
 
 

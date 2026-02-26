@@ -5,17 +5,17 @@ Master script — generate ALL paper figures from pipeline results.
 Links together every figure-generation script so you only run one command.
 
 Usage:
-    python scripts/generate_all_figures.py
+    python scripts/figure_generation/generate_all_figures.py
 
     Override paths:
-    python scripts/generate_all_figures.py \
+    python scripts/figure_generation/generate_all_figures.py \
         --clustering-dir   results/clustering/book1 \
         --preprocessing-dir results/preprocessing/book1 \
         --images-dir       data/datasets/book1 \
         --output-dir       paper/figures/generated
 
     Generate only specific figures:
-    python scripts/generate_all_figures.py --only glossary reverse_manuscript
+    python scripts/figure_generation/generate_all_figures.py --only glossary reverse_manuscript
 """
 
 import argparse
@@ -148,26 +148,19 @@ def main():
     # ─────────────────────────────────────────────────────────────
     if should_run('extraction_report'):
         extraction_dir = Path(f"results/extraction/{images_dir.name}")
-        if extraction_dir.exists():
-            run_script('generate_extraction_report.py', [
-                '--extraction-dir', extraction_dir,
-                '--images-dir', images_dir,
-                '--output', out / 'extraction_report.html',
-            ], args.dry_run)
-        else:
-            print("\n  [extraction_report] Skipping: no extraction results")
+        viz_dir = extraction_dir / 'visualizations'
+        report_args = ['--output-dir', out / 'extraction_report']
+        if viz_dir.exists():
+            report_args += ['--viz-dir', viz_dir]
+        run_script('generate_extraction_report.py', report_args, args.dry_run)
 
     # ─────────────────────────────────────────────────────────────
     #  6. Post-clustering methodology report
     # ─────────────────────────────────────────────────────────────
     if should_run('post_clustering_report'):
-        if (clust_dir / 'clustered_patches').exists():
-            run_script('generate_post_clustering_report.py', [
-                '--dataframe', clust_dir / 'clustered_patches',
-                '--output', out / 'post_clustering_report.html',
-            ], args.dry_run)
-        else:
-            print("\n  [post_clustering_report] Skipping: no clustering results")
+        run_script('generate_post_clustering_report.py', [
+            '--output-dir', out / 'post_clustering_report',
+        ], args.dry_run)
 
     print(f"\n{'='*60}")
     print(f"  All figures generated in {out}")
