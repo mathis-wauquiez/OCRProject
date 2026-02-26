@@ -2,47 +2,6 @@
 %  Methodology Section — Historical Document Character Clustering Pipeline
 % ============================================================================
 
-
-% Our stages:
-% 1. Character extraction
-%  a. CRAFT character detection
-%  b. dubious character extraction based on this detection and binary connected components
-%     | see the slides
-%  c. determine the columns, sub-columns and reading order via projection-based layout analysis
-% 2. OCR
-%   We use a Kraken-based model trained on similar historical Chinese documents, operating at the sub-column level. Baseline is extracted by taking the median of the x-barycenters of the characters
-%   Predicted character sequences are spatially matched to CRAFT detections via the Hungarian algorithm on vertical distances.
-%   When no characters can be matched, we assign a token representing an unknown character (e.g. $\square$).
-% 3. Character vectorisation
-%   We use affine scale-space smoothing, an affine-invariant geometric PDE that evolves each level line according to its curvature, producing smooth vector outlines.
-%   Document skew is estimated using LSD and corrected via the length-weighted circular mean of line segment orientations.
-%   Additionally, we apply a small filter (what is it's name already?) to clean the binary patches before vectorisation, removing small holes and noise specks.
-% 4. Glyph extraction
-%   So far, we have:
-%   - a set of (possibly noisy) vectorized character images
-%   - an OCR label
-%   We wish to get the best possible character image for each character in the book.
-%   Intuitively, this character should be the most similar to the other instances of the same character.
-%
-%   Steps for the extraction:
-%    a. Compute HOG descriptors on the vectorised character images (rendered at 256 DPI, 24x24 px cells, 16 bins per cell, Gaussian derivative filters with sigma=5 and kernel size=31 px, L2-clip-L2 normalisation with clipping threshold t=0.2).
-%    b. Compute pairwise dissimilarities using the Circular Earth Mover's Distance (CEMD) on the HOG descriptors.
-%    c. Use an a contrario framework to determine a statistically grounded matching threshold, computing the probability of a false alarm (NFA) for each pair of characters under a null model where dissimilarities are Gaussian
-%    d. Construct a graph weighted by the NFA scores and partition it using the Leiden algorithm, to minimise the correlation clustering disagreement objective (x).
-%       We sweep over the NFA threshold and the resolution parameter of the Leiden algorithm to find the best clustering according to the Adjusted Rand Index (ARI) with respect to the OCR labels.
-%    e. Refine the clusters via a three-stage process:
-%       1. Large clusters (>=5 members) are split using hierarchical clustering on pairwise Hausdorff distances computed on registered binary images (registration via multiscale inverse compositional alignment
-%       2. Split the clusters by OCR label
-%    The new clusters are:
-%       1. Guaranteed to be pure according to the OCR
-%       2. Guaranteed to be more compact in terms of Hausdorff distance (criterion: average linkage dendrogram cut at tau_split=21.5)
-%    Therefore, in the biggest cluster, the most representative character is likely to be a good candidate for the glossary.
-%    When the two biggest clusters have the same size, we use the intra NFA as a tie-breaker, selecting the cluster with the lowest mean intra-cluster NFA.
-%    Criterions for the representative:
-%       a - the character that minimises the mean intra-cluster dissimilarity.
-%       b - the most central according to the degree or weighted degree in the similarity graph.
-%       c - ...
-
 \section{Methodology}
 \label{sec:methodology}
 
@@ -72,6 +31,18 @@ Filters discard components outside the expected bounding-box range ($30 \times 3
 \label{sec:preprocessing}
 
 Each extracted character undergoes preprocessing to produce a vectorised representation, an OCR label, and a HOG descriptor.
+Figure~\ref{fig:preprocessing} illustrates the three stages on representative examples.
+
+% ── Generated figure: preprocessing before/after ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/generated/preprocessing.pdf}
+    \caption{Preprocessing pipeline for individual character patches.
+    \emph{Top row:} raw image patches extracted by CRAFT.
+    \emph{Middle row:} binarised patches after Otsu thresholding and morphological cleaning.
+    \emph{Bottom row:} vectorised SVG outlines produced by affine scale-space smoothing.}
+    \label{fig:preprocessing}
+\end{figure}
 
 \paragraph{Layout analysis and reading order.}
 A projection-based layout module identifies columns and sub-columns from vertical ink-density profiles.
@@ -114,6 +85,15 @@ The descriptor is normalised via L2-clip-L2 with clipping threshold $t = 0.2$.
 
 \input{figures/methodology/fig_hog_descriptor}
 
+% ── Generated figure: HOG descriptor example ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/generated/hog_descriptor.pdf}
+    \caption{HOG descriptor computation on a representative character.
+    From left to right: rendered SVG, gradient magnitude, gradient orientation, and the resulting HOG descriptor (orientation bins $\times$ cell index).}
+    \label{fig:hog-example}
+\end{figure}
+
 
 % ============================================================================
 \subsection{A Contrario Feature Matching}
@@ -140,6 +120,17 @@ The NFA is:
 where $\Phi$ is the standard normal CDF.
 Two characters are meaningfully similar when $\text{NFA} \le \varepsilon = 5 \times 10^{-4}$.
 We store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \mu_A}{\sigma_A}\bigr)$.
+
+% ── Generated figure: a contrario distribution ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/generated/a_contrario.pdf}
+    \caption{A contrario null-hypothesis test.
+    \emph{Left:} histogram of pairwise dissimilarities for a query character and the fitted Gaussian null model $\mathcal{N}(\mu_A, \sigma_A^2)$.
+    Characters with dissimilarity in the far left tail are \emph{meaningful} matches.
+    \emph{Right:} per-character null-model parameters $(\mu_i, \sigma_i)$ across the corpus; the query character is marked in red.}
+    \label{fig:a-contrario}
+\end{figure}
 
 
 % ============================================================================
@@ -187,7 +178,7 @@ CPM is preferred here for three reasons:
 \end{enumerate}
 
 \paragraph{Optimisation.}
-We optimise $\mathcal{Q}_\gamma$ using the Leiden algorithm~\cite{traag2019louvain}, which guarantees well-connected communities and runs in seconds at our scale (${\sim}$13\,k tokens, ${\sim}$200\,k edges).
+We optimise $\mathcal{Q}_\gamma$ using the Leiden algorithm~\cite{traag2019louvain}, which guarantees well-connected communities and runs in seconds at our scale (${\sim}$\nNodes{} tokens, ${\sim}$\nEdges{} edges).
 We sweep over both $\varepsilon$ and $\gamma$, selecting the configuration maximising ARI with respect to OCR labels (Section~\ref{sec:sensitivity}).
 
 \input{figures/methodology/fig_clustering_pipeline}
@@ -202,7 +193,7 @@ A sequential two-stage refinement addresses these issues (Fig.~\ref{fig:refineme
 
 \paragraph{Stage~1: Hausdorff-based splitting.}
 Large clusters ($\ge 5$ members) are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} computed on registered binary images.
-Registration is performed via multiscale inverse compositional alignment, which compensates for positional and scale differences between character patches.
+Registration is performed via multiscale inverse compositional alignment~\cite{briand2018ipol}, which compensates for positional and scale differences between character patches.
 The Hausdorff distance matrix is used to build an average-linkage dendrogram, cut at $\tau_\text{split} = 21.5$.
 The threshold is selected via a sweep evaluated by ARI on OCR-derived labels.
 
@@ -215,14 +206,6 @@ After both stages, the refined clusters satisfy two guarantees: (i)~they are pur
 Consequently, the most representative member of the largest cluster for a given character is a reliable glossary candidate.
 
 \input{figures/methodology/fig_refinement_pipeline}
-
-
-% ============================================================================
-\subsection{Evaluation Metrics}
-\label{sec:metrics}
-
-Clustering quality is evaluated using: Adjusted Rand Index (ARI)~\cite{hubert1985comparing} as the primary metric, Normalised Mutual Information (NMI), homogeneity/completeness/V-measure~\cite{rosenberg2007v}, pairwise F1 score, and Hungarian-matching accuracy.
-Characters with unknown ground-truth labels are excluded from all metric computations.
 
 
 % ============================================================================
