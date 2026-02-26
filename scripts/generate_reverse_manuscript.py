@@ -191,12 +191,12 @@ def get_page_files(dataframe):
         return {}
     files = dataframe['file'].unique()
     page_map = {}
-    for f in files:
+    for i, f in enumerate(sorted(files)):
         try:
             page_num = int(f.split('_')[-1].split('.')[0])
-            page_map[page_num] = f
         except (ValueError, IndexError):
-            page_map[f] = f
+            page_num = i
+        page_map[page_num] = f
     return page_map
 
 
