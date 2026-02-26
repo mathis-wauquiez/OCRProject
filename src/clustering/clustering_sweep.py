@@ -563,7 +563,7 @@ class graphClusteringSweep:
                         partition = la.find_partition(
                             G_ig, pt_class,
                             resolution_parameter=gamma,
-                            n_iterations=10, seed=42
+                            n_iterations=-1, seed=42
                         )
                         metrics = self._evaluate_membership(
                             target_labels=sweep_labels,

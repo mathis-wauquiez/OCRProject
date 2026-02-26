@@ -227,7 +227,7 @@ def visualize_page_alignment(
 
     # Try to load a CJK font for PIL text rendering
     font_path = _find_cjk_font_path()
-    font_size = 18
+    font_size = 44
     try:
         pil_font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
     except Exception:

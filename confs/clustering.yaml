@@ -39,12 +39,13 @@ method:
   # Partition types for Leiden algorithm:
   #   "RBConfiguration" — modularity-based (null model)
   #   "CPM"             — Constant Potts Model (absolute density)
-  partition_types: ["RBConfiguration", "CPM"]
+  partition_types: ["RBConfiguration"]
+  # partition_types: ["CPM"]
 
-  epsilons: [0.00025, 0.00038, .0005]
+  epsilons: [0.001, 0.00015, 0.0002, 0.00025, 0.00038]
   # epsilons: [0.0005]
   # gammas: [1.0, 1.25]
-  gammas: [1.0]
+  gammas: [1.0, 1.25, 1.5, 1.75, 2.0]
 
   cell_sizes: [22]  # Cell size for HOG computation
   # cell_sizes: [48]  # Cell size for HOG computation
@@ -75,12 +76,5 @@ refinement_steps:
     min_cluster_size: 5
     batch_size: 256
 
-  - _target_: src.clustering.refinement.OCRRematchStep
-    max_cluster_size: 3
-
   - _target_: src.clustering.refinement.LabelSplitStep
     min_label_size: 2
-
-  - _target_: src.clustering.refinement.HapaxAssociationStep
-    min_confidence: 0.5
-    max_dissimilarity: null

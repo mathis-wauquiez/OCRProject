@@ -49,7 +49,8 @@ class Congealing:
 
         for _ in range(self.n_alternations):
             aligned, transforms, total_res = [], [], 0.0
-            for i in range(m):
+
+            for i in range(m): # for each image, align to current template and compute residual
                 T, warped = pairwise_align(self.aligner, template, images[i], self.device)
                 warped_img = warp_image(images[i], T, self.device)
                 aligned.append(warped_img)
@@ -57,7 +58,7 @@ class Congealing:
                 total_res += (template - warped_img).abs().mean().item()
 
             residuals_per_iter.append(total_res / m)
-            template = median_template(aligned)
+            template = median_template(aligned) # update template as median of aligned images
             templates_per_iter.append(template.clone())
 
         return {
