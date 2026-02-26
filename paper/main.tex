@@ -6,6 +6,8 @@
 % ============================================================================
 \documentclass[runningheads]{llncs}
 
+\usepackage{graphicx}
+
 % ── Encoding & Fonts ──
 \usepackage[T1]{fontenc}
 
@@ -53,9 +55,17 @@
 }
 \titlerunning{Reverse Typography via A Contrario Matching}
 
-\author{Anonymous Author(s)}
-\authorrunning{Anonymous}
-\institute{Anonymous Institution}
+\author{First Author\inst{1}\orcidID{0000-1111-2222-3333} \and
+Second Author\inst{2,3}\orcidID{1111-2222-3333-4444} \and
+Third Author\inst{3}\orcidID{2222--3333-4444-5555}}
+\authorrunning{F. Author et al.}
+
+\institute{Princeton University, Princeton NJ 08544, USA \and
+Springer Heidelberg, Tiergartenstr. 17, 69121 Heidelberg, Germany
+\email{lncs@springer.com}\\
+\url{http://www.springer.com/gp/computer-science/lncs} \and
+ABC Institute, Rupert-Karls-University Heidelberg, Heidelberg, Germany\\
+\email{\{abc,lncs\}@uni-heidelberg.de}}
 
 \begin{document}
 \maketitle
@@ -82,70 +92,26 @@ The method is demonstrated on the \emph{Ying huan zhi lue} (Brief Records of the
 % ============================================================================
 %  1. Introduction
 % ============================================================================
-\section{Introduction}
-\label{sec:introduction}
-
-The history of Chinese printing spans more than twelve centuries.
-Woodblock printing appeared in the 8th century: entire pages were carved in reverse on wood planks or ceramic plates, inked, and pressed onto paper.
-Movable-type printing, invented by Bi Sheng around~1040, allowed individual characters to be cast in ceramic, wood, or metal and assembled into pages.
-Both technologies coexisted for more than a thousand years, each producing distinct patterns of character variation.
-In every case, craftsmen carving wood or moulding metal imitated character models painted by a calligrapher.
-The variability of printed characters therefore depends on the regularity of craftsmanship, quality of paper and ink, and centuries of document ageing.
-
-\emph{Reverse typography} addresses the inverse problem: given a historical printed book, reconstruct faithful vectorised versions of the character models used to produce it.
-The goal is to automatically generate a \emph{character glossary}---an inventory of all distinct character forms, each represented as a clean vector outline respecting the original calligraphy.
-Such a glossary enables digital preservation, palaeographic study of printing workshops, font reconstruction, and cross-document comparison of printing traditions.
-Modern OCR systems, trained on millions of annotated examples, adapt poorly to historical prints due to degraded ink, irregular spacing, archaic character variants, and the absence of labelled training data.
-A fully unsupervised approach is therefore required.
-
-Our pipeline leverages three key techniques:
-\begin{enumerate}[nosep]
-    \item \textbf{CRAFT}~\cite{baek2019character}, a learned text detector that provides reliable character-level extraction without fine-tuning;
-    \item \textbf{Affine scale-space vectorisation}~\cite{alvarez1993axioms,ciomaga2017curvature}, an affine-invariant geometric PDE that smooths character boundaries into clean vector outlines while preserving their essential shape;
-    \item \textbf{A contrario matching}~\cite{desolneux2000meaningful}, a statistical framework providing a principled, adaptive test for whether two character images depict the same glyph.
-\end{enumerate}
-Characters deemed similar are connected in a graph partitioned by the Leiden community detection algorithm~\cite{traag2019louvain}, and a composable refinement pipeline fusing visual registration and linguistic signals produces the final clusters from which the glossary is assembled.
-
-We demonstrate the method on the \emph{Ying huan zhi lue} (Brief Records of the World), a famous 1848 Chinese book by Xu Jiyu, printed from individually carved woodblocks.
-In this book, every character occurrence was uniquely engraved---a maximally challenging scenario for clustering, since no two instances of the same character share the same printing block.
-We provide evidence that the method adapts to other historical printed books.
-
-The paper is organised as follows.
-Section~\ref{sec:methodology} describes the pipeline.
-Section~\ref{sec:proposed-methods} outlines proposed extensions.
-Section~\ref{sec:experiments} details the evaluation protocol.
-Section~\ref{sec:conclusion} concludes.
 
 
 % ============================================================================
 %  2. Methodology (baseline pipeline)
 % ============================================================================
-\input{methodology}
+\input{sections/methodology}
 
-
-% ============================================================================
-%  3. Proposed Extensions
-% ============================================================================
-\input{proposed_methods}
 
 
 % ============================================================================
-%  4. Experiments
+%  3. Experiments
 % ============================================================================
-\input{experiments}
+\input{sections/experiments}
 
 
 % ============================================================================
 %  5. Conclusion
 % ============================================================================
-\section{Conclusion}
-\label{sec:conclusion}
+\input{sections/conclusion}
 
-We have presented a fully unsupervised pipeline for \emph{reverse typography}: the automatic reconstruction of a vectorised character glossary from historical printed books, respecting the original calligraphy.
-The method combines CRAFT text detection, affine scale-space vectorisation, \textit{a contrario} statistical matching, Leiden community detection, and a two-stage refinement pipeline.
-Demonstrated on the \emph{Ying huan zhi lue}, an 1848 Chinese book in which every character was uniquely carved from woodblocks, the pipeline handles the full variability of historical printing without any annotated training data.
-The extensions outlined in Section~\ref{sec:proposed-methods}---alternative clustering strategies, principled refinement, registration-based template computation, and deformation-invariant features---provide directions for further improving the glossary quality.
-Future work will focus on cross-corpus generalisation and systematic comparison of these extensions through the ablation framework described in Section~\ref{sec:experiments}.
 
 
 % ============================================================================
