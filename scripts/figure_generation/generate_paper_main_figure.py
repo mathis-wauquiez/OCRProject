@@ -3,13 +3,13 @@
 Generate the main pipeline example figure for the paper.
 
 Produces a multi-panel figure showing the five key stages of the
-extraction → preprocessing pipeline on a single page:
+extraction -> preprocessing pipeline on a single page:
 
   (a) Input image
   (b) Extraction result (character bounding boxes)
-  (c) Reading order and columns
+  (c) Columns + reading order (projection + overlay)
   (d) Line extraction + OCR matching
-  (e) Final alignment (OCR vs transcription)
+  (e) Final alignment (OCR vs transcription, from align_transcription)
 
 Usage:
     python scripts/figure_generation/generate_paper_main_figure.py \
@@ -27,19 +27,26 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import Patch, FancyArrowPatch
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPTS_DIR.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from font_config import configure_matplotlib_fonts, CJK_FONT_PATH
+configure_matplotlib_fonts()
 
 from src.utils import connectedComponent
 from src.layout_analysis.parsing import find_columns, split_to_rectangles, get_reading_order
+from src.layout_analysis.visualisations import show_reading_order_df
 
 
-# ── Colour palette ──────────────────────────────────────────────────
+# -- Colour palette -------------------------------------------------------
 _GREEN  = (0, 200, 0)
 _ORANGE = (255, 165, 0)
 _RED    = (220, 40, 40)
@@ -47,9 +54,9 @@ _GREY   = (130, 130, 130)
 _BLUE   = (60, 120, 220)
 
 
-# ====================================================================
+# ======================================================================
 #  Panel generators
-# ====================================================================
+# ======================================================================
 
 def panel_input(ax, image):
     """(a) Raw input image."""
@@ -59,7 +66,7 @@ def panel_input(ax, image):
 
 
 def panel_extraction(ax, image, components):
-    """(b) Extraction result — character bounding boxes on the page."""
+    """(b) Extraction result -- character bounding boxes on the page."""
     canvas = image.copy()
     for region in components.regions:
         if components.is_deleted(region.label):
@@ -72,12 +79,20 @@ def panel_extraction(ax, image, components):
     ax.axis("off")
 
 
-def panel_reading_order(ax, image, components):
-    """(c) Columns + reading order."""
+def panel_reading_order(ax, image, components, page_df=None):
+    """(c) Columns detection + reading order.
+
+    Two-part panel:
+      - Column boundaries derived from horizontal projection of the label
+        image, drawn as coloured semi-transparent overlays.
+      - Reading order numbers drawn on each character's centroid using the
+        dataframe (bounding-box positions), falling back to component
+        centroids when the dataframe is unavailable.
+    """
     labels = components.labels
     bin_image = labels != 0
 
-    # Detect columns
+    # -- Detect columns -------------------------------------------------
     left_cols, right_cols = find_columns(bin_image, threshold=1, min_col_area=2000)
     rectangles = split_to_rectangles(labels, min_col_area=2000)
     ordered_labels = get_reading_order(rectangles)
@@ -89,24 +104,35 @@ def panel_reading_order(ax, image, components):
     col_colors = plt.cm.Set2(np.linspace(0, 1, max(len(left_cols), 1)))
     for i, (l, r) in enumerate(zip(left_cols, right_cols)):
         color_bgr = tuple(int(c * 255) for c in col_colors[i % len(col_colors)][:3])
-        # Semi-transparent column overlay
         overlay = canvas.copy()
         cv2.rectangle(overlay, (int(l), 0), (int(r), h_img), color_bgr, -1)
         cv2.addWeighted(overlay, 0.15, canvas, 0.85, 0, canvas)
         cv2.rectangle(canvas, (int(l), 0), (int(r), h_img), color_bgr, 3)
 
-    # Draw reading-order numbers on character centroids
-    label_to_order = {lbl: idx for idx, lbl in enumerate(ordered_labels)}
-    for region in components.regions:
-        if components.is_deleted(region.label):
-            continue
-        order = label_to_order.get(region.label)
-        if order is None:
-            continue
-        cy, cx = int(region.centroid[0]), int(region.centroid[1])
-        cv2.putText(canvas, str(order), (cx - 8, cy + 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (220, 30, 30), 1,
-                    cv2.LINE_AA)
+    # -- Draw reading-order numbers ------------------------------------
+    if page_df is not None and 'reading_order' in page_df.columns:
+        # Use the dataframe bounding boxes (more accurate)
+        df_sorted = page_df.dropna(subset=['reading_order']).sort_values('reading_order')
+        for _, row in df_sorted.iterrows():
+            order = int(row['reading_order'])
+            cx = int(row['left'] + row['width'] / 2)
+            cy = int(row['top'] + row['height'] / 2)
+            cv2.putText(canvas, str(order), (cx - 8, cy + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (220, 30, 30), 1,
+                        cv2.LINE_AA)
+    else:
+        # Fallback: use component centroids
+        label_to_order = {lbl: idx for idx, lbl in enumerate(ordered_labels)}
+        for region in components.regions:
+            if components.is_deleted(region.label):
+                continue
+            order = label_to_order.get(region.label)
+            if order is None:
+                continue
+            cy, cx = int(region.centroid[0]), int(region.centroid[1])
+            cv2.putText(canvas, str(order), (cx - 8, cy + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (220, 30, 30), 1,
+                        cv2.LINE_AA)
 
     ax.imshow(canvas)
     ax.set_title(
@@ -138,10 +164,8 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
     else:
         gray = image
 
-    # Group by approximate x-position to find columns
     page_df = page_df.copy()
     page_df["cx"] = page_df["left"] + page_df["width"] // 2
-    # Cluster into columns by binning cx
     if len(page_df) == 0:
         ax.text(0.5, 0.5, "(d) No data", ha="center", va="center",
                 transform=ax.transAxes, fontsize=10, color="grey")
@@ -149,7 +173,6 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
         return
 
     # Use the first n_show natural column groups
-    col_x_centers = []
     df_sorted = page_df.sort_values("cx", ascending=False)  # right-to-left
     prev_cx = None
     cols = []
@@ -186,7 +209,6 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
         if crop.size == 0:
             continue
 
-        # Build text column
         chars = col_df["char_chat"].tolist()
         col_images.append((crop, chars))
 
@@ -195,11 +217,9 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
         return
 
     # Display crops + OCR text
-    n = len(col_images)
-    # Create sub-layout inside the axes using inset axes
     ax.axis("off")
 
-    total_w = sum(c.shape[1] for c, _ in col_images) + 40 * n
+    total_w = sum(c.shape[1] for c, _ in col_images) + 40 * len(col_images)
     max_h = max(c.shape[0] for c, _ in col_images)
 
     composite = np.ones((max_h, total_w, 3), dtype=np.uint8) * 255
@@ -208,11 +228,10 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
         h, w = crop.shape
         crop_rgb = cv2.cvtColor(crop, cv2.COLOR_GRAY2RGB)
         composite[:h, x_offset:x_offset + w] = crop_rgb
-        # Draw OCR text next to crop
         text_x = x_offset + w + 3
         text_y = 15
         for ch in chars:
-            if ch and ch != "▯":
+            if ch and ch != "\u25af":
                 cv2.putText(composite, ch, (text_x, text_y),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 120, 0), 1,
                             cv2.LINE_AA)
@@ -224,7 +243,12 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
 
 
 def panel_final_alignment(ax, image, page_df):
-    """(e) Final result with OCR / transcription + colour-coded alignment."""
+    """(e) Final result: OCR / transcription alignment with colour-coded boxes.
+
+    Uses the same logic and colour scheme as ``scripts/align_transcription.py``
+    ``visualize_page_alignment``, so that the figure matches the full-page
+    visualization produced during the alignment step.
+    """
     if page_df is None or "char_chat" not in page_df.columns:
         ax.text(0.5, 0.5, "(e) Final alignment\n[run preprocessing first]",
                 ha="center", va="center", transform=ax.transAxes,
@@ -232,34 +256,92 @@ def panel_final_alignment(ax, image, page_df):
         ax.axis("off")
         return
 
-    canvas = image.copy()
     has_transcription = "char_transcription" in page_df.columns
+
+    # Classify each patch and pick a colour
+    canvas = image.copy()
+    try:
+        from src.ocr.wrappers import is_chinese_character
+    except ImportError:
+        is_chinese_character = lambda ch: True  # noqa: E731
+
+    # Try to load a CJK-capable font for PIL text
+    font_size = 28
+    try:
+        pil_font = ImageFont.truetype(CJK_FONT_PATH, font_size) if CJK_FONT_PATH else ImageFont.load_default()
+    except Exception:
+        pil_font = ImageFont.load_default()
+
+    # Sort by reading order if available
+    if 'reading_order' in page_df.columns:
+        page_df = page_df.sort_values('reading_order')
 
     for _, row in page_df.iterrows():
         left, top = int(row["left"]), int(row["top"])
         w, h = int(row["width"]), int(row["height"])
 
-        ocr_ch = row.get("char_chat", "▯")
+        ocr_ch = row.get("char_chat", "\u25af")
         trans_ch = row.get("char_transcription", None)
 
-        if has_transcription and trans_ch is not None and trans_ch != "▯":
-            if ocr_ch == trans_ch:
-                color = _GREEN    # match
+        is_placeholder = (ocr_ch is None or ocr_ch == "\u25af"
+                          or not is_chinese_character(str(ocr_ch)))
+
+        if has_transcription and trans_ch is not None and trans_ch != "\u25af":
+            if is_placeholder:
+                color = _GREY      # unknown OCR -> transcription
+            elif ocr_ch == trans_ch:
+                color = _GREEN     # match
             else:
-                color = _ORANGE   # replace
-        elif ocr_ch and ocr_ch != "▯":
-            color = _BLUE         # OCR only (no transcription)
+                color = _ORANGE    # replace
+        elif not is_placeholder:
+            color = _BLUE          # OCR only
         else:
-            color = _GREY         # unknown
+            color = _GREY          # unknown
 
         cv2.rectangle(canvas, (left, top), (left + w, top + h), color, 2)
 
+    # Add CJK labels via PIL (cv2 cannot render CJK glyphs)
+    pil_img = Image.fromarray(canvas)
+    draw = ImageDraw.Draw(pil_img)
+
+    for _, row in page_df.iterrows():
+        left, top = int(row["left"]), int(row["top"])
+        w, h = int(row["width"]), int(row["height"])
+
+        ocr_ch = row.get("char_chat", "\u25af")
+        trans_ch = row.get("char_transcription", None)
+
+        is_placeholder = (ocr_ch is None or ocr_ch == "\u25af"
+                          or not is_chinese_character(str(ocr_ch)))
+
+        if has_transcription and trans_ch is not None and trans_ch != "\u25af":
+            if is_placeholder:
+                color, label = _GREY, f"?|{trans_ch}"
+            elif ocr_ch == trans_ch:
+                color, label = _GREEN, str(trans_ch)
+            else:
+                color, label = _ORANGE, f"{ocr_ch}|{trans_ch}"
+        elif not is_placeholder:
+            color, label = _BLUE, str(ocr_ch)
+        else:
+            continue  # nothing useful to label
+
+        tx = left + w + 2
+        ty = top
+        try:
+            bbox = draw.textbbox((tx, ty), label, font=pil_font)
+            draw.rectangle(bbox, fill=(255, 255, 255, 200))
+            draw.text((tx, ty), label, font=pil_font, fill=color)
+        except Exception:
+            pass
+
+    canvas = np.array(pil_img)
     ax.imshow(canvas)
 
     # Legend
     legend_items = [
         Patch(facecolor=np.array(_GREEN) / 255, label="OCR = Transcription"),
-        Patch(facecolor=np.array(_ORANGE) / 255, label="OCR ≠ Transcription"),
+        Patch(facecolor=np.array(_ORANGE) / 255, label="OCR \u2260 Transcription"),
         Patch(facecolor=np.array(_BLUE) / 255, label="OCR only"),
         Patch(facecolor=np.array(_GREY) / 255, label="Unknown"),
     ]
@@ -269,25 +351,23 @@ def panel_final_alignment(ax, image, page_df):
     ax.axis("off")
 
 
-# ====================================================================
+# ======================================================================
 #  Compose figure
-# ====================================================================
+# ======================================================================
 
 def build_figure(image, components=None, page_df=None, output_path=None):
     """Compose the five-panel main pipeline figure.
 
     Layout:
-        ┌───────┐  ┌───────┐  ┌───────┐
-        │  (a)  │→│  (b)  │→│  (c)  │
-        └───────┘  └───────┘  └───────┘
-              ┌───────────┐  ┌───────────┐
-              │    (d)    │→│    (e)    │
-              └───────────┘  └───────────┘
+        +--------+  +--------+  +--------+
+        |  (a)   |->|  (b)   |->|  (c)   |
+        +--------+  +--------+  +--------+
+              +------------+  +------------+
+              |    (d)     |->|    (e)     |
+              +------------+  +------------+
     """
     fig = plt.figure(figsize=(14, 10))
 
-    # Top row: 3 panels (input, extraction, columns)
-    # Bottom row: 2 wider panels (OCR, alignment)
     gs = gridspec.GridSpec(
         2, 6,
         figure=fig,
@@ -315,9 +395,9 @@ def build_figure(image, components=None, page_df=None, output_path=None):
         ax_b.axis("off")
         ax_b.set_title("(b) Extracted characters", fontsize=9, fontweight="bold")
 
-    # (c) Reading order + columns
+    # (c) Reading order + columns (pass page_df for bbox-based numbering)
     if components is not None:
-        panel_reading_order(ax_c, image, components)
+        panel_reading_order(ax_c, image, components, page_df=page_df)
     else:
         ax_c.text(0.5, 0.5, "(c) Columns + reading order\n[load components]",
                   ha="center", va="center", transform=ax_c.transAxes,
@@ -331,7 +411,7 @@ def build_figure(image, components=None, page_df=None, output_path=None):
     # (e) Final alignment
     panel_final_alignment(ax_e, image, page_df)
 
-    # ── Arrows between panels (annotation arrows in figure coords) ──
+    # -- Arrows between panels (annotation arrows in figure coords) --
     arrow_kw = dict(
         arrowstyle="->", color="black", lw=1.5,
         connectionstyle="arc3,rad=0",
@@ -364,9 +444,9 @@ def build_figure(image, components=None, page_df=None, output_path=None):
     return fig
 
 
-# ====================================================================
+# ======================================================================
 #  CLI
-# ====================================================================
+# ======================================================================
 
 def main():
     parser = argparse.ArgumentParser(
@@ -421,9 +501,7 @@ def main():
             df = load_columns(args.dataframe, cols)
 
         if args.page is not None:
-            # Filter by page
             if "file" in df.columns:
-                # Match page number from filename
                 df["_page"] = df["file"].apply(
                     lambda x: int(x.split("_")[-1].split(".")[0])
                 )
