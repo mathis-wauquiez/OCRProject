@@ -69,6 +69,7 @@ class graphClusteringSweep:
             normalization_methods: None | List[None | str] = ['patch'],
             grdt_sigmas: None | List[float] = None,
             nums_bins: None | List[int] = None,
+            keep_reciprocals: None | List[bool] = None,
 
             # ── Injected components (instantiated externally, e.g. by Hydra) ──
             reporter: Optional[ClusteringSweepReporter] = None,
@@ -109,6 +110,7 @@ class graphClusteringSweep:
         self.target_lbl         = target_lbl
         self.sweep_lbl          = sweep_lbl
         self.keep_reciprocal    = keep_reciprocal
+        self.keep_reciprocals   = keep_reciprocals or [keep_reciprocal]
         self.device             = device
         self.partition_types    = partition_types or ['RBConfiguration']
 
@@ -147,9 +149,11 @@ class graphClusteringSweep:
     #  Graph construction (delegates to clustering.graph)
     # ================================================================
 
-    def get_graph(self, nlfa, dissimilarities, epsilon):
+    def get_graph(self, nlfa, dissimilarities, epsilon, keep_reciprocal=None):
+        if keep_reciprocal is None:
+            keep_reciprocal = self.keep_reciprocal
         return build_graph(nlfa, dissimilarities, epsilon,
-                           self.edges_type, self.keep_reciprocal)
+                           self.edges_type, keep_reciprocal)
 
     # ================================================================
     #  Purity & completeness (delegates to clustering.metrics)
@@ -351,6 +355,10 @@ class graphClusteringSweep:
             self._run_refinement(dataframe, pre_split_membership, renderer, graph,
                                 dissimilarities=dissimilarities)
 
+        # Stash for external access (e.g. saving split_sweep.csv)
+        self._last_refinement_results = refinement_results
+        self._last_refinement_step_names = refinement_step_names
+
         dataframe.loc[:, 'membership'] = pd.Series(
             post_split_membership, index=dataframe.index
         )
@@ -541,46 +549,49 @@ class graphClusteringSweep:
             dataframe['var_tot'] = var_tot.cpu().numpy()
 
 
-            # ==== Sweep epsilon × gamma × partition_type ====
+            # ==== Sweep epsilon × gamma × partition_type × keep_reciprocal ====
             # Use OCR-only labels (sweep_lbl) for config selection to avoid
             # methodological leak: the cross-validated consensus labels
             # (target_lbl) are reserved for final evaluation only.
             sweep_labels = dataframe[self.sweep_lbl]
             config_results = []
-            for epsilon in tqdm(self.epsilons, desc="Epsilon",
-                                leave=False, colour="blue"):
+            for kr in self.keep_reciprocals:
+                for epsilon in tqdm(self.epsilons, desc="Epsilon",
+                                    leave=False, colour="blue"):
 
-                graph, edges = self.get_graph(nlfa, dissimilarities, epsilon)
-                G_ig = ig.Graph.from_networkx(graph)
+                    graph, edges = self.get_graph(nlfa, dissimilarities, epsilon,
+                                                   keep_reciprocal=kr)
+                    G_ig = ig.Graph.from_networkx(graph)
 
-                for pt_name in self.partition_types:
-                    pt_class = _PARTITION_TYPES[pt_name]
+                    for pt_name in self.partition_types:
+                        pt_class = _PARTITION_TYPES[pt_name]
 
-                    for gamma in tqdm(self.gammas,
-                                      desc=f"Gamma ({pt_name})",
-                                      leave=False, colour="green"):
+                        for gamma in tqdm(self.gammas,
+                                          desc=f"Gamma ({pt_name})",
+                                          leave=False, colour="green"):
 
-                        partition = la.find_partition(
-                            G_ig, pt_class,
-                            resolution_parameter=gamma,
-                            n_iterations=-1, seed=42
-                        )
-                        metrics = self._evaluate_membership(
-                            target_labels=sweep_labels,
-                            membership=partition.membership
-                        )
-                        result = {
-                            'hog_config': config_name,
-                            'cell_size': hog_cfg['cell_size'],
-                            'grdt_sigma': hog_cfg['grdt_sigma'],
-                            'num_bins': hog_cfg['num_bins'],
-                            'partition_type': pt_name,
-                            'epsilon': epsilon,
-                            'gamma': gamma,
-                            **metrics
-                        }
-                        config_results.append(result)
-                        all_results.append(result)
+                            partition = la.find_partition(
+                                G_ig, pt_class,
+                                resolution_parameter=gamma,
+                                n_iterations=-1, seed=42
+                            )
+                            metrics = self._evaluate_membership(
+                                target_labels=sweep_labels,
+                                membership=partition.membership
+                            )
+                            result = {
+                                'hog_config': config_name,
+                                'cell_size': hog_cfg['cell_size'],
+                                'grdt_sigma': hog_cfg['grdt_sigma'],
+                                'num_bins': hog_cfg['num_bins'],
+                                'partition_type': pt_name,
+                                'keep_reciprocal': kr,
+                                'epsilon': epsilon,
+                                'gamma': gamma,
+                                **metrics
+                            }
+                            config_results.append(result)
+                            all_results.append(result)
 
             config_df = pd.DataFrame(config_results)
             best_idx = config_df['adjusted_rand_index'].idxmax()
@@ -596,12 +607,15 @@ class graphClusteringSweep:
                     'dissimilarities': dissimilarities,
                     **config_df.loc[best_idx].to_dict()
                 }
+                if 'keep_reciprocal' not in best_overall_config:
+                    best_overall_config['keep_reciprocal'] = self.keep_reciprocal
 
             del features, nlfa, dissimilarities, histograms, hog_processor, hog_renderer
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
         results_df = pd.DataFrame(all_results)
+        self.sweep_results_df = results_df  # store for external access
 
         print(f"\n{'='*60}\nBEST OVERALL CONFIGURATION\n{'='*60}")
         print(f"HOG Config: {best_overall_config['config_name']}")
@@ -619,6 +633,11 @@ class graphClusteringSweep:
         # Re-instantiate the renderer for the best config (the factory was stored,
         # not the instance, which was deleted earlier to free GPU memory).
         best_renderer = best_overall_config['hog_cfg']['renderer'](dataframe['svg'])
+
+        # Apply best keep_reciprocal to self so report_graph uses it
+        self.keep_reciprocal = best_overall_config.get(
+            'keep_reciprocal', self.keep_reciprocal
+        )
 
         dataframe, filtered_dataframe, label_representatives_dataframe, \
             graph, partition = self.report_graph(
