@@ -32,6 +32,7 @@ class GlobalPipeline:
             imageComponentsPipelineParams, self.craftDetector
         )
         self.progress_callback = None
+        self._verbose = False
 
     def set_progress_callback(self, callback: Optional[Callable[[str, Any, str], None]]):
         """Set a callback function to report progress with intermediate data"""

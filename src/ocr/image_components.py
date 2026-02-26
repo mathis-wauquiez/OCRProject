@@ -213,7 +213,8 @@ class imageComponentsPipeline:
         timer('#|1 Binary image: {:.2f}')
 
         img_components = connectedComponent.from_image(binary_img.astype(np.uint8) * 255)
-        filtered_img_components = self.filter_image_components(img_components)
+        import copy
+        filtered_img_components = self.filter_image_components(copy.deepcopy(img_components))
         timer('#|2 Filtering components: {:.2f}')
         
         similarities = self.compute_similarities(filtered_img_components, craftComponents)
