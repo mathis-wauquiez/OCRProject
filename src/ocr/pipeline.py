@@ -103,28 +103,15 @@ class GlobalPipeline:
         )
 
         # ============ CRAFT Filtering ============
-        self._report_progress('Filtering components by area and aspect ratio...')
+        self._report_progress('Filtering components by area...')
         text_components = craft_components.filter_craft_components(
             self.craftComponentAnalysisParams, text_components
         )
-        
+
         filtered_count = len(text_components.regions)
         deleted_count = len(text_components._deleted_labels)
         self._report_progress(
-            f'After filtering: {filtered_count} components remaining ({deleted_count} filtered out)', 
-            text_components, "components"
-        )
-        
-        # ============ CRAFT Merging ============
-        self._report_progress('Merging nearby components...')
-        text_components = craft_components.merge_craft_components(
-            self.craftComponentAnalysisParams, text_components
-        )
-
-        merged_count = len(np.unique(text_components.labels)) - 1
-        n_merge_groups = len(text_components.get_merged_groups())
-        self._report_progress(
-            f'After merging: {merged_count} final text components ({n_merge_groups} merge groups)', 
+            f'After filtering: {filtered_count} components remaining ({deleted_count} filtered out)',
             text_components, "components"
         )
 

@@ -57,14 +57,12 @@ class craftComponentsParams(Updateable):
     sub-components of composite characters. Set to None to disable.
     Recommended: 0.3-0.7."""
 
+    # Watershed seed spacing (peak_local_max min_distance)
+    min_dist: float = 8.
+    """Minimum distance between watershed seeds (pixels)."""
+
     # Components filtering
     min_area: int | None = 10
-    min_aspect_ratio: float | None = .5
-    max_aspect_ratio: float | None = 2
-
-    # Components merging
-    min_dist: float | None = 8.
-    """"Blobs whose centroids are < 8 pixels away will be merged"""
 
     # Unary potential parameters
     # UNUSED AT THE MOMENT

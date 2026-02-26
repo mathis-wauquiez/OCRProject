@@ -74,13 +74,3 @@ refinement_steps:
     linkage_method: "average"
     min_cluster_size: 5
     batch_size: 256
-
-  - _target_: src.clustering.refinement.OCRRematchStep
-    max_cluster_size: 3
-
-  - _target_: src.clustering.refinement.LabelSplitStep
-    min_label_size: 2
-
-  - _target_: src.clustering.refinement.HapaxAssociationStep
-    min_confidence: 0.5
-    max_dissimilarity: null

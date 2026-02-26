@@ -35,7 +35,7 @@ from src.patch_processing.hog import HOG
 # Refinement pipeline
 from .refinement import (
     RefinementResult,
-    HausdorffSplitStep, PCAZScoreRematchStep,
+    HausdorffSplitStep,
 )
 
 from tqdm import tqdm
@@ -188,7 +188,7 @@ class graphClusteringSweep:
 
         has_renderer = renderer is not None
         for step in self.refinement_steps:
-            if not has_renderer and isinstance(step, (HausdorffSplitStep, PCAZScoreRematchStep)):
+            if not has_renderer and isinstance(step, HausdorffSplitStep):
                 continue  # skip GPU steps when no renderer available
             result = step.run(
                 dataframe, current_membership, renderer,

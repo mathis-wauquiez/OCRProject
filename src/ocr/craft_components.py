@@ -1,18 +1,13 @@
 """
 This files handles the different operations on the components extracted from CRAFT's output:
 - combine_text_link_scores -> combine text and link score maps before watershed
-- filter_craft_components  -> filter the components by aspect ratio and area
-- merge_craft_components   -> merge the components that are too close to each other (composite characters usually)
+- filter_craft_components  -> filter the components by area
 """
 
 from .params import craftComponentsParams
 from ..utils import connectedComponent
 
-import cv2
 import numpy as np
-import networkx as nx
-
-from scipy.spatial import cKDTree
 
 
 def combine_text_link_scores(score_text: np.ndarray,
@@ -48,54 +43,13 @@ def combine_text_link_scores(score_text: np.ndarray,
 
 
 def filter_craft_components(params: craftComponentsParams, components: connectedComponent):
-    """Filter CRAFT components by area and aspect ratio, marking deletions with reasons."""
-    
+    """Filter CRAFT components by area, marking deletions with reasons."""
+
     for region in components.regions:
         label = region.label
-        
-        # Get component stats
-        bbox = region.bbox
-        width = bbox[3] - bbox[1]
-        height = bbox[2] - bbox[0]
         area = region.area
-        aspect_ratio = width / height if height > 0 else 0
-        
-        # Check criteria and delete with specific reason
+
         if params.min_area is not None and area < params.min_area:
             components.delete(label, reason="area_too_small")
-        elif params.min_aspect_ratio is not None and aspect_ratio < params.min_aspect_ratio:
-            components.delete(label, reason="aspect_ratio_too_low")
-        elif params.max_aspect_ratio is not None and aspect_ratio > params.max_aspect_ratio:
-            components.delete(label, reason="aspect_ratio_too_high")
-    
-    return components
 
-def merge_craft_components(params: craftComponentsParams, components: connectedComponent):
-    """Merge CRAFT components that are too close to each other."""
-    
-    # Get all non-deleted labels
-    unique_labels = np.unique(components.labels)
-    active_labels = unique_labels[unique_labels != 0].tolist()
-    
-    if len(active_labels) <= 1:
-        return components
-    
-    # Build a mapping from label to region
-    label_to_region = {region.label: region for region in components.regions}
-    
-    # Get centroids for active regions
-    centroids = np.array([label_to_region[label].centroid for label in active_labels])
-    
-    # Radius search via k-d tree — O(N log N) instead of dense O(N^2)
-    tree = cKDTree(centroids)
-    pairs = tree.query_pairs(r=params.min_dist)
-    n = len(active_labels)
-    link_matrix = np.zeros((n, n), dtype=bool)
-    for i, j in pairs:
-        link_matrix[i, j] = True
-        link_matrix[j, i] = True
-    
-    # Merge the components
-    components.merge(link_matrix, labels_list=active_labels)
-    
     return components
