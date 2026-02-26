@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --extraction-config NAME Hydra config for extraction (default: extraction_pipeline)"
             echo "  --preprocessing-config N Hydra config for preprocessing (default: preprocessing)"
             echo ""
-            echo "Stages: build, extraction, preprocessing, alignment, clustering"
+            echo "Stages: build, extraction, preprocessing, alignment, clustering, figure"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -63,7 +63,7 @@ should_run() {
         return
     fi
     if [[ -n "$FROM" ]]; then
-        local stages=(build extraction preprocessing alignment clustering)
+        local stages=(build extraction preprocessing alignment clustering figure)
         local from_idx=-1 stage_idx=-1
         for i in "${!stages[@]}"; do
             [[ "${stages[$i]}" == "$FROM" ]] && from_idx=$i
@@ -104,7 +104,7 @@ if should_run "extraction"; then
     echo ">> Stage 1: Character extraction..."
     python scripts/run_extraction.py \
         --image-folder "data/datasets/${BOOK}" \
-        --save-folder "outputs/extraction/${BOOK}" \
+        --save-folder "results/extraction/${BOOK}" \
         --config "$EXTRACTION_CONFIG" \
         --workers "$WORKERS"
     echo ""
@@ -121,9 +121,9 @@ fi
 if should_run "alignment"; then
     echo ">> Stage 3: Transcription alignment..."
     python scripts/align_transcription.py \
-        --dataframe "outputs/preprocessing/${BOOK}" \
+        --dataframe "results/preprocessing/${BOOK}" \
         --transcriptions "data/datasets/transcript/" \
-        --output "outputs/preprocessing/${BOOK}" \
+        --output "results/preprocessing/${BOOK}" \
         --images "data/datasets/${BOOK}"
     echo ""
 fi
@@ -135,13 +135,42 @@ if should_run "clustering"; then
     echo ""
 fi
 
+# ── Stage 5: Main figure generation ──
+if should_run "figure"; then
+    echo ">> Stage 5: Generating main pipeline figure..."
+    # Pick the first image in the dataset as the example page
+    EXAMPLE_IMAGE=$(ls "data/datasets/${BOOK}/"*.jpg 2>/dev/null | head -1)
+    if [[ -z "$EXAMPLE_IMAGE" ]]; then
+        EXAMPLE_IMAGE=$(ls "data/datasets/${BOOK}/"*.png 2>/dev/null | head -1)
+    fi
+    if [[ -n "$EXAMPLE_IMAGE" ]]; then
+        BASENAME=$(basename "$EXAMPLE_IMAGE")
+        COMPONENTS_FILE="results/extraction/${BOOK}/components/${BASENAME}.npz"
+
+        FIGURE_ARGS=(
+            --image "$EXAMPLE_IMAGE"
+            --dataframe "results/preprocessing/${BOOK}"
+            --output "paper/figures/generated/main_pipeline.pdf"
+        )
+        if [[ -f "$COMPONENTS_FILE" ]]; then
+            FIGURE_ARGS+=(--components "$COMPONENTS_FILE")
+        fi
+
+        python scripts/generate_paper_main_figure.py "${FIGURE_ARGS[@]}"
+    else
+        echo "   WARNING: No images found in data/datasets/${BOOK}/, skipping figure."
+    fi
+    echo ""
+fi
+
 echo "=========================================="
 echo "  Pipeline complete!"
 echo "=========================================="
 echo ""
 echo "Outputs:"
-echo "  Extraction:     outputs/extraction/${BOOK}/"
-echo "  Preprocessing:  outputs/preprocessing/${BOOK}/"
-echo "  Alignment viz:  outputs/preprocessing/alignment_viz/"
-echo "  Clustering:     outputs/clustering/${BOOK}/"
+echo "  Extraction:     results/extraction/${BOOK}/"
+echo "  Preprocessing:  results/preprocessing/${BOOK}/"
+echo "  Alignment viz:  results/preprocessing/alignment_viz/"
+echo "  Clustering:     results/clustering/${BOOK}/"
+echo "  Main figure:    paper/figures/generated/main_pipeline.pdf"
 echo ""

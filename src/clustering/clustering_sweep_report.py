@@ -83,7 +83,7 @@ class ClusteringSweepReporter(AutoReport):
         use_jpeg: bool = True,
         jpeg_quality: int = 70,
         # AutoReport passthrough
-        output_dir: str = "./outputs/clustering/results/reports",
+        output_dir: str = "./results/clustering/results/reports",
         report_config: Optional[ReportConfig] = None,
     ):
         if report_config is None:

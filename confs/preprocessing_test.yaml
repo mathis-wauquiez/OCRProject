@@ -5,8 +5,8 @@ defaults:
 # === Data ===
 data:
   image_folder: "data/datasets/book_small"
-  comps_folder: "outputs/extraction/book_small"
-  output_path: "outputs/preprocessing/book_small"
+  comps_folder: "results/extraction/book_small"
+  output_path: "results/preprocessing/book_small"
 
 verbose: true
 return_plots: false
@@ -15,7 +15,7 @@ return_plots: false
 patch_preprocessor:
   _target_: src.patch_processing.PatchPreprocessing
   verbose: ${verbose}
-  output_viz: outputs/preprocessing/viz/
+  output_viz: results/preprocessing/viz/
 
   reading_order:
     _target_: src.layout_analysis.parsing.ReadingOrder
@@ -81,4 +81,4 @@ patch_preprocessor:
 # === Hydra ===
 hydra:
   run:
-    dir: .hydra_outputs/${now:%Y-%m-%d_%H-%M-%S}
+    dir: .hydra_results/${now:%Y-%m-%d_%H-%M-%S}

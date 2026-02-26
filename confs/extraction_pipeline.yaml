@@ -37,9 +37,7 @@ craftComponentAnalysisParams:
 
   #! Component filtering
   min_area: 18  #!Remove components smaller than this
-  min_aspect_ratio: 0.2  #? Remove too elongated components
-  max_aspect_ratio: 5.0
-  
+
   # Component merging
   min_dist: 8.0  #!Merge components closer than this (pixels)
   

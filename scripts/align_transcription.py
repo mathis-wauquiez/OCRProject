@@ -9,9 +9,9 @@ a new ``char_transcription`` column.
 
 Usage:
     python scripts/align_transcription.py \
-        --dataframe outputs/preprocessing/book1 \
+        --dataframe results/preprocessing/book1 \
         --transcriptions data/transcriptions/book1 \
-        --output outputs/preprocessing/book1
+        --output results/preprocessing/book1
 """
 
 import argparse

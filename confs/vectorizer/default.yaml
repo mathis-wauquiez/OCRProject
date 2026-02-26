@@ -13,7 +13,7 @@ config:
   return_svg: true
   return_svg_string: false
   return_rendered: false
-  save_dir: ./outputs/vectorization/svg
+  save_dir: ./results/vectorization/svg
   
   # Rendering (if return_rendered=true)
   output_size: [512, 512]

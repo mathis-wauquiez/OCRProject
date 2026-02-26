@@ -62,8 +62,9 @@ We use pre-trained weights without fine-tuning, with magnification ratio~$5.0$ (
 Connected components are extracted via dual-threshold watershed: pixels with $S_\text{text} \ge \tau_\text{text} = 0.6$ serve as seeds, and basins expand to a lower mask threshold $\tau_\text{mask} = 0.3$.
 Components with area below 10\,px are discarded as noise (area opening).
 
-In parallel, the page is binarised (Otsu's method) and binary connected components are associated with CRAFT detections via negative Mahalanobis distance using the CRAFT region's inertia tensor.
-Filters discard components outside the expected size range ($30 \times 30$ to $150 \times 150$\,px) or with insufficient filled area ($<200$\,px$^2$).
+In parallel, the page is binarised (Otsu's method) and binary connected components are associated with CRAFT detections via negative Mahalanobis distance using each CRAFT region's inertia tensor.
+Each binary component is assigned to the CRAFT detection whose elliptic distance is smallest, yielding a set of character candidates with both a binary image and a precise bounding box.
+Filters discard components outside the expected bounding-box range ($30 \times 30$ to $250 \times 250$\,px) or with insufficient filled area ($<700$\,px$^2$).
 
 
 % ============================================================================
@@ -73,8 +74,8 @@ Filters discard components outside the expected size range ($30 \times 30$ to $1
 Each extracted character undergoes preprocessing to produce a vectorised representation, an OCR label, and a HOG descriptor.
 
 \paragraph{Layout analysis and reading order.}
-A projection-based layout module identifies columns and rows.
-The reading order follows right-to-left, top-to-bottom (classical Chinese), assigning each character an integer index.
+A projection-based layout module identifies columns and sub-columns from vertical ink-density profiles.
+Within each sub-column, the reading order follows right-to-left, top-to-bottom (classical Chinese), assigning each character an integer index.
 
 \paragraph{Vectorisation via affine scale-space.}
 Binary patches are cleaned by area opening and closing (removing foreground specks below 5\,px and background holes below 10\,px), then vectorised using affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}.
@@ -93,14 +94,16 @@ Document skew is estimated using LSD~\cite{von2010lsd} and corrected via the len
 \end{equation}
 
 \paragraph{Character recognition (CHAT).}
-Characters are labelled using a Kraken-based~\cite{kiessling2019kraken} model operating at the subcolumn level.
+Characters are labelled using a Kraken-based~\cite{kiessling2019kraken} model trained on similar historical Chinese documents, operating at the sub-column level.
+A baseline is extracted by taking the median of the $x$-barycenters of the characters within each sub-column.
 Predicted character sequences are spatially matched to CRAFT detections via the Hungarian algorithm on vertical distances.
-Each character receives a label $\ell_i \in \mathcal{A} \cup \{\square\}$ and confidence $c_i \in [0,1]$.
+When no detection can be matched, the character is assigned an unknown token~$\square$.
+Each character receives a label $\ell_i \in \mathcal{A} \cup \{\square\}$.
 
 
 % ---------- HOG ----------
 \paragraph{HOG descriptors.}
-Each character is described by a HOG descriptor~\cite{dalal2005histograms} computed on a rendered SVG image ($22 \times 22$\,px cells, 256\,DPI).
+Each character is described by a HOG descriptor~\cite{dalal2005histograms} computed on a rendered SVG image ($24 \times 24$\,px cells, 256\,DPI).
 Gradients use Gaussian derivative filters ($\sigma = 5$, kernel size~31\,px).
 Unsigned orientations are accumulated into $B = 16$ bins per cell via trilinear interpolation:
 \begin{equation}
@@ -140,23 +143,52 @@ We store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \m
 
 
 % ============================================================================
-\subsection{Graph Construction and Community Detection}
+\subsection{Graph Construction and Correlation Clustering}
 \label{sec:graph-clustering}
 
-A similarity graph $G = (V, E, w)$ is built with one vertex per character.
+\paragraph{Problem formulation.}
+We seek a partition of the $N$ character tokens into clusters, one per distinct character.
+The NFA scores $p_{ij}$ are ordinal---they rank pairs by similarity but are not calibrated probabilities---the number of distinct characters is unknown (though a lower bound is available from the OCR vocabulary), and the cluster size distribution is expected to follow a Zipf law: a few high-frequency characters and many rare ones.
+
+We cast this as a \emph{correlation clustering} problem~\cite{bansal2004correlation}: given a graph where tokens are nodes and edges encode pairwise similarity, find a partition minimising the total \emph{disagreement}---the cost of placing dissimilar tokens together plus the cost of separating similar tokens.
+
+\paragraph{Similarity graph.}
+A graph $G = (V, E, w)$ is built with one vertex per character token.
 An edge $(i,j)$ is created when both NLFA values exceed threshold $\tau_\text{NFA} = -\log\varepsilon + 2\log N$:
 \begin{equation}
     (i,j) \in E \iff \text{NLFA}(i,j) \ge \tau_\text{NFA} \;\wedge\; \text{NLFA}(j,i) \ge \tau_\text{NFA}.
     \label{eq:reciprocal}
 \end{equation}
 The reciprocal condition discards asymmetric similarities.
-Edge weights are the symmetrised NLFA: $w_{ij} = \frac{1}{2}[\text{NLFA}(i,j) + \text{NLFA}(j,i)]$.
+Edge weights are the symmetrised NLFA: $w_{ij} = \tfrac{1}{2}[\text{NLFA}(i,j) + \text{NLFA}(j,i)]$.
 
-Communities are detected using the Leiden algorithm~\cite{traag2019louvain} with the Reichardt--Bornholdt quality function:
+\paragraph{CPM objective.}
+For an unweighted-node correlation clustering problem with resolution $\gamma \in (0,1)$, the \emph{LambdaCC} disagreement objective~\cite{veldt2018correlation} is:
 \begin{equation}
-    \mathcal{Q}_\gamma = \sum_{c} \left[e_c - \gamma \binom{n_c}{2}\right],
+    \mathcal{L}_\gamma(\mathcal{C}) = \!\sum_{(i,j)\in E}\!(1{-}\gamma)\, x_{ij}
+        + \!\sum_{(i,j)\notin E}\!\gamma\,(1{-}x_{ij}),
+    \label{eq:lambdacc}
 \end{equation}
-where $e_c$ is the total edge weight within community $c$, $n_c$ its size, and $\gamma = 1.0$.
+where $x_{ij} = 0$ if $i,j$ are co-clustered and $1$ otherwise.
+Expanding in terms of within-cluster edge weight $e_c$ and cluster size $n_c$ shows that $\mathcal{L}_\gamma = \text{const} - \mathcal{Q}_\gamma$, where
+\begin{equation}
+    \mathcal{Q}_\gamma = \sum_{c} \left[e_c - \gamma \binom{n_c}{2}\right]
+    \label{eq:cpm}
+\end{equation}
+is the Constant Potts Model (CPM) quality function~\cite{traag2011narrow}.
+Minimising disagreement is thus equivalent to maximising $\mathcal{Q}_\gamma$.
+
+The CPM is a special case of the Reichardt--Bornholdt framework~\cite{reichardt2006statistical} with an Erd\H{o}s--R\'enyi null model ($P_{ij} = \text{const}$), in contrast to the configuration-model null model that yields modularity.
+CPM is preferred here for three reasons:
+\begin{enumerate}[nosep]
+    \item \emph{No resolution limit.}  Modularity cannot resolve clusters smaller than ${\sim}\sqrt{2m}$ edges~\cite{fortunato2007resolution}, which would merge rare characters.  CPM has no such limitation.
+    \item \emph{Ordinal compatibility.}  Only the relative ordering of edge weights matters, not their absolute calibration---appropriate for NFA-derived scores.
+    \item \emph{Density interpretation.}  The resolution parameter $\gamma$ has a direct meaning: every cluster in an optimal partition has internal edge density $\ge \gamma$.
+\end{enumerate}
+
+\paragraph{Optimisation.}
+We optimise $\mathcal{Q}_\gamma$ using the Leiden algorithm~\cite{traag2019louvain}, which guarantees well-connected communities and runs in seconds at our scale (${\sim}$13\,k tokens, ${\sim}$200\,k edges).
+We sweep over both $\varepsilon$ and $\gamma$, selecting the configuration maximising ARI with respect to OCR labels (Section~\ref{sec:sensitivity}).
 
 \input{figures/methodology/fig_clustering_pipeline}
 
@@ -169,7 +201,8 @@ The Leiden partition may contain impure or over-fragmented clusters.
 A sequential two-stage refinement addresses these issues (Fig.~\ref{fig:refinement-pipeline}).
 
 \paragraph{Stage~1: Hausdorff-based splitting.}
-Large clusters ($\ge 5$ members) are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} on binary images.
+Large clusters ($\ge 5$ members) are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} computed on registered binary images.
+Registration is performed via multiscale inverse compositional alignment, which compensates for positional and scale differences between character patches.
 The Hausdorff distance matrix is used to build an average-linkage dendrogram, cut at $\tau_\text{split} = 21.5$.
 The threshold is selected via a sweep evaluated by ARI on OCR-derived labels.
 
@@ -177,7 +210,9 @@ The threshold is selected via a sweep evaluated by ARI on OCR-derived labels.
 Within each cluster, members are grouped by their known OCR label.
 Groups with $\ge 2$ members become their own sub-cluster; smaller groups are dissolved into singletons.
 Unknown-label members are assigned to the dominant sub-cluster.
-This step enforces label consistency within clusters without relying on image-space registration.
+
+After both stages, the refined clusters satisfy two guarantees: (i)~they are pure with respect to OCR labels, and (ii)~they are more compact in Hausdorff distance than the original Leiden clusters (average-linkage cut at $\tau_\text{split}$).
+Consequently, the most representative member of the largest cluster for a given character is a reliable glossary candidate.
 
 \input{figures/methodology/fig_refinement_pipeline}
 
@@ -195,5 +230,6 @@ Characters with unknown ground-truth labels are excluded from all metric computa
 \label{sec:glossary}
 
 The final output of the pipeline is a \emph{character glossary}: for each OCR-predicted character, we identify the cluster containing the most occurrences and select its most central member (by degree centrality in the NFA similarity graph) as the representative.
+When two clusters contain equally many instances of a character, we use the mean intra-cluster NFA as a tie-breaker, selecting the cluster with the lowest mean dissimilarity (highest total NFA).
 The glossary records the dominant OCR label, cluster size, and representative patch index, sorted by frequency.
 This produces an inventory of all distinct character forms in the book along with their vectorised outlines---the desired output of reverse typography.
