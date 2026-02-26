@@ -62,6 +62,7 @@ class graphClusteringSweep:
             keep_reciprocal: bool = True,
             device: str = "cuda",
 
+            sweep_lbl: str = 'char_chat',
             partition_types: None | List[str] = None,
 
             cell_sizes: None | List[int] = None,
@@ -106,6 +107,7 @@ class graphClusteringSweep:
 
         self.edges_type         = edges_type
         self.target_lbl         = target_lbl
+        self.sweep_lbl          = sweep_lbl
         self.keep_reciprocal    = keep_reciprocal
         self.device             = device
         self.partition_types    = partition_types or ['RBConfiguration']
@@ -230,15 +232,32 @@ class graphClusteringSweep:
         return (dataframe, graph, nlfa, dissimilarities,
                 pre_split_membership, post_split_membership)
 
-    def _run_post_clustering(self, dataframe):
+    def _run_post_clustering(self, dataframe, nlfa=None):
         """Run optional post-clustering reporting (glossary)."""
         glossary_df = None
 
-        if self.enable_glossary and self.target_lbl in dataframe.columns:
+        if self.enable_glossary and 'char_chat' in dataframe.columns:
             from .post_clustering import build_glossary
-            glossary_df = build_glossary(dataframe, target_lbl=self.target_lbl)
+            cluster_total_nfa = self._compute_cluster_total_nfa(dataframe, nlfa)
+            glossary_df = build_glossary(dataframe,
+                                         cluster_total_nfa=cluster_total_nfa)
 
         return dataframe, glossary_df
+
+    @staticmethod
+    def _compute_cluster_total_nfa(dataframe, nlfa):
+        """Sum of pairwise NFA values within each cluster."""
+        if nlfa is None:
+            return {}
+        result = {}
+        for cid, grp in dataframe.groupby('membership'):
+            idx = grp.index.tolist()
+            if len(idx) < 2:
+                result[int(cid)] = 0.0
+                continue
+            idx_t = torch.tensor(idx, device=nlfa.device, dtype=torch.long)
+            result[int(cid)] = float(nlfa[idx_t][:, idx_t].sum())
+        return result
 
     def _compute_quality(self, dataframe, pre_split_membership,
                          post_split_membership, did_split):
@@ -307,12 +326,18 @@ class graphClusteringSweep:
             resolution_parameter=best_gamma, n_iterations=-1, seed=42
         )
 
-        # ── 2. Degree centrality ──
-        degree_centrality = nx.degree_centrality(graph)
-        dataframe['degree_centrality'] = pd.Series(
-            [degree_centrality[i] for i in range(len(dataframe))],
-            index=dataframe.index
-        )
+        # ── 2. Centrality measures ──
+        N = len(dataframe)
+        _to_series = lambda d: pd.Series([d[i] for i in range(N)],
+                                         index=dataframe.index)
+        dataframe['degree_centrality'] = _to_series(nx.degree_centrality(graph))
+        dataframe['betweenness_centrality'] = _to_series(nx.betweenness_centrality(graph))
+        dataframe['closeness_centrality'] = _to_series(nx.closeness_centrality(graph))
+        try:
+            eigvec = nx.eigenvector_centrality(graph, max_iter=500)
+        except nx.PowerIterationFailedConvergence:
+            eigvec = {i: 0.0 for i in range(N)}
+        dataframe['eigenvector_centrality'] = _to_series(eigvec)
 
         # ── 3. Pre-split membership ──
         pre_split_membership = np.array(partition.membership)
@@ -340,7 +365,7 @@ class graphClusteringSweep:
             )
 
         # ── 6. Post-clustering reporting (optional) ──
-        dataframe, glossary_df = self._run_post_clustering(dataframe)
+        dataframe, glossary_df = self._run_post_clustering(dataframe, nlfa=nlfa)
 
         # ── 7. Compute quality metrics ──
         quality, pre_split_metrics, post_split_metrics, comparative_metrics = \
@@ -391,6 +416,8 @@ class graphClusteringSweep:
                 'partition_type': partition_type,
                 'best_epsilon': best_epsilon,
                 'best_gamma': best_gamma,
+                'sweep_lbl': self.sweep_lbl,
+                'eval_lbl': self.target_lbl,
             },
             refinement_steps=self.refinement_steps,
             glossary_df=glossary_df,
@@ -403,8 +430,10 @@ class graphClusteringSweep:
             dataframe.groupby(self.target_lbl)[self.target_lbl]
             .transform('size') >= min_size
         ]
+        from .post_clustering import compute_representative
         label_representatives_dataframe = filtered_dataframe.loc[
-            filtered_dataframe.groupby(self.target_lbl)['degree_centrality'].idxmax()
+            filtered_dataframe.groupby(self.target_lbl).apply(
+                lambda g: compute_representative(g)).values
         ]
 
         return (dataframe, filtered_dataframe,
@@ -513,6 +542,10 @@ class graphClusteringSweep:
 
 
             # ==== Sweep epsilon × gamma × partition_type ====
+            # Use OCR-only labels (sweep_lbl) for config selection to avoid
+            # methodological leak: the cross-validated consensus labels
+            # (target_lbl) are reserved for final evaluation only.
+            sweep_labels = dataframe[self.sweep_lbl]
             config_results = []
             for epsilon in tqdm(self.epsilons, desc="Epsilon",
                                 leave=False, colour="blue"):
@@ -533,7 +566,7 @@ class graphClusteringSweep:
                             n_iterations=10, seed=42
                         )
                         metrics = self._evaluate_membership(
-                            target_labels=dataframe[self.target_lbl],
+                            target_labels=sweep_labels,
                             membership=partition.membership
                         )
                         result = {
@@ -576,6 +609,7 @@ class graphClusteringSweep:
         print(f"Epsilon: {best_overall_config['epsilon']:.4f}")
         print(f"Gamma: {best_overall_config['gamma']:.4f}")
         print(f"ARI: {best_overall_config['adjusted_rand_index']:.4f}")
+        print(f"  (sweep label: {self.sweep_lbl}, evaluation label: {self.target_lbl})")
 
         # ── HOG sweep report section ──
         self.reporter.report_hog_sweep(results_df, hog_configs)

@@ -716,7 +716,7 @@ class ClusteringSweepReporter(AutoReport):
         with self.section("Summary & Metrics"):
             self.report_table(
                 best_metrics_df.T,
-                title=f'Best Parameters (ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_t={best_threshold})'
+                title=f'Best Parameters (ε={best_epsilon:.4f}, γ={best_gamma:.4f}, split_t={best_threshold if best_threshold is not None else "N/A"})'
             )
             self.report_executive_summary(
                 dataframe, purity_dataframe, label_dataframe,
@@ -1579,7 +1579,7 @@ class ClusteringSweepReporter(AutoReport):
                     <tr><td style="padding: 4px 12px; font-weight:bold;">Gamma (&gamma;)</td>
                         <td style="padding: 4px 12px;">{best_gamma:.4f}</td></tr>
                     <tr><td style="padding: 4px 12px; font-weight:bold;">Split Threshold</td>
-                        <td style="padding: 4px 12px;">{refinement.best_threshold}</td></tr>
+                        <td style="padding: 4px 12px;">{f'{refinement.best_threshold:.4f}' if refinement.best_threshold is not None else 'N/A (no Hausdorff split)'}</td></tr>
                     <tr><td style="padding: 4px 12px; font-weight:bold;">Best ARI</td>
                         <td style="padding: 4px 12px;">{quality.best_metrics.get('adjusted_rand_index', 'N/A')}</td></tr>
                 </table>
@@ -1677,24 +1677,27 @@ class ClusteringSweepReporter(AutoReport):
 
     def report_glossary(self, glossary_df, dataframe):
         with self.section("Character Glossary"):
-            # Summary statistics
             n_entries = len(glossary_df)
-            total_patches = glossary_df['count'].sum()
-            known_entries = len(glossary_df[glossary_df['character'] != UNKNOWN_LABEL])
-            mean_purity = glossary_df['purity'].dropna().mean()
+            total_occurrences = int(glossary_df['n'].sum())
+
+            # Coverage: characters with > 2 occurrences in their best cluster
+            good_mask = glossary_df['n_chars_c'] > 2
+            covered_occurrences = int(glossary_df.loc[good_mask, 'n'].sum())
+            coverage = covered_occurrences / total_occurrences if total_occurrences else 0
 
             summary = pd.DataFrame([{
-                'Glossary Entries': n_entries,
-                'Known Characters': known_entries,
-                'Total Patches': int(total_patches),
-                'Mean Purity': f'{mean_purity:.3f}' if not np.isnan(mean_purity) else 'N/A',
+                'Characters': n_entries,
+                'Total Occurrences': total_occurrences,
+                'Covered (green)': int(good_mask.sum()),
+                'Coverage': f'{coverage:.1%}',
+                'Covered Occurrences': covered_occurrences,
             }])
-            self.report_table(summary, title="Glossary Summary")
+            self.report_table(summary, title="Glossary Summary & Coverage")
 
             # Top entries table
-            top_n = min(50, len(glossary_df))
+            top_n = min(50, n_entries)
             top = glossary_df.head(top_n)[
-                ['character', 'count', 'purity', 'mean_confidence', 'n_unknown']
+                ['character', 'n', 'n_chars_c', 'n_c', 'cluster_id']
             ].copy()
             top.index = range(1, len(top) + 1)
             top.index.name = 'Rank'
@@ -1714,12 +1717,11 @@ class ClusteringSweepReporter(AutoReport):
                         svg_str = row['svg'].to_string()
 
                 char_display = grow['character']
-                count = grow['count']
-                purity = grow['purity']
-                purity_str = f'{purity:.0%}' if not (isinstance(purity, float) and np.isnan(purity)) else '?'
+                n = int(grow['n'])
+                n_chars_c = int(grow['n_chars_c'])
+                n_c = int(grow['n_c'])
 
-                border_color = '#4caf50' if purity_str != '?' and purity >= 0.9 else (
-                    '#ff9800' if purity_str != '?' and purity >= 0.7 else '#f44336')
+                border_color = '#4caf50' if n_chars_c > 2 else '#f44336'
 
                 grid_html += f'''
                 <div style="border: 2px solid {border_color}; padding: 6px;
@@ -1732,7 +1734,7 @@ class ClusteringSweepReporter(AutoReport):
                         {char_display}
                     </div>
                     <div style="font-size:10px; color:#666;">
-                        n={count} | {purity_str}
+                        n={n} | {n_chars_c}/{n_c}
                     </div>
                 </div>'''
 

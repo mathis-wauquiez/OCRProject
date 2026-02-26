@@ -92,9 +92,10 @@ class HausdorffSplitStep(ClusterRefinementStep):
     Split large clusters using pairwise Hausdorff distances and
     hierarchical linkage.
 
-    Unknown-label patches (``UNKNOWN_LABEL``) are excluded from the
-    distance-matrix computation and linkage tree, then reassigned to
-    the largest sub-cluster of their original Leiden cluster.
+    **All** patches participate in the distance matrix and linkage tree
+    regardless of label status: the dendrogram cut alone decides which
+    sub-cluster each patch belongs to.  This avoids blind spots where
+    OCR-unknown characters are silently absorbed into the dominant group.
     """
 
     name = "hausdorff_split"
@@ -115,21 +116,15 @@ class HausdorffSplitStep(ClusterRefinementStep):
 
     @staticmethod
     def _compute_one(
-        cid, known_idx, unknown_idx, dataframe, reg_metric, renderer,
+        cid, indices, dataframe, reg_metric, renderer,
         batch_size, linkage_method, min_cluster_size, gpu_sem,
     ):
-        all_idx = np.concatenate([known_idx, unknown_idx]) \
-            if len(unknown_idx) else known_idx
-        size = len(all_idx)
-        n_known = len(known_idx)
+        size = len(indices)
 
-        if n_known < min_cluster_size:
-            return cid, dict(
-                all_idx=all_idx, known_idx=known_idx,
-                unknown_idx=unknown_idx, linkage=None, size=size,
-            )
+        if size < min_cluster_size:
+            return cid, dict(indices=indices, linkage=None, size=size)
 
-        subdf = dataframe.iloc[known_idx]
+        subdf = dataframe.iloc[indices]
 
         if gpu_sem is not None:
             gpu_sem.acquire()
@@ -152,31 +147,21 @@ class HausdorffSplitStep(ClusterRefinementStep):
             condensed[bad] = fmax * 10
         Z = linkage(condensed, method=linkage_method)
 
-        return cid, dict(
-            all_idx=all_idx, known_idx=known_idx,
-            unknown_idx=unknown_idx, linkage=Z, size=size,
-        )
+        return cid, dict(indices=indices, linkage=Z, size=size)
 
     # ── linkage computation (parallel) ──────────────────────────────
 
-    def _compute_linkages(self, dataframe, membership, renderer, target_lbl):
+    def _compute_linkages(self, dataframe, membership, renderer):
         metrics_dict = {'hausdorff': compute_hausdorff}
         reg_metric = registeredMetric(metrics=metrics_dict, sym=True)
 
         cluster_ids = np.unique(membership)
-        labels = dataframe[target_lbl].fillna(UNKNOWN_LABEL).values
-
-        cluster_info = {}
-        for cid in cluster_ids:
-            all_pos = np.where(membership == cid)[0]
-            known_mask = labels[all_pos] != UNKNOWN_LABEL
-            cluster_info[cid] = {
-                'known_idx': all_pos[known_mask],
-                'unknown_idx': all_pos[~known_mask],
-            }
+        cluster_indices = {
+            cid: np.where(membership == cid)[0] for cid in cluster_ids
+        }
 
         sorted_cids = sorted(cluster_ids,
-                             key=lambda c: len(cluster_info[c]['known_idx']),
+                             key=lambda c: len(cluster_indices[c]),
                              reverse=True)
 
         linkages = {}
@@ -187,8 +172,7 @@ class HausdorffSplitStep(ClusterRefinementStep):
                 pool.submit(
                     self._compute_one,
                     cid,
-                    cluster_info[cid]['known_idx'],
-                    cluster_info[cid]['unknown_idx'],
+                    cluster_indices[cid],
                     dataframe, reg_metric, renderer,
                     self.batch_size, self.linkage_method,
                     self.min_cluster_size, gpu_sem,
@@ -209,20 +193,19 @@ class HausdorffSplitStep(ClusterRefinementStep):
     def _apply_threshold(self, linkages, threshold):
         n_total = max(
             idx.max() for info in linkages.values()
-            for idx in [info['all_idx']] if len(idx)
+            for idx in [info['indices']] if len(idx)
         ) + 1
         new_mem = np.full(n_total, -1, dtype=int)
         log = []
         next_id = 0
 
         for cid, info in linkages.items():
-            known_idx = info['known_idx']
-            unknown_idx = info['unknown_idx']
+            indices = info['indices']
             Z = info['linkage']
 
             if Z is None:
                 # Cluster too small to split — assign everything to one id
-                new_mem[info['all_idx']] = next_id
+                new_mem[indices] = next_id
                 log.append(dict(
                     original_cluster=int(cid),
                     original_size=info['size'],
@@ -236,22 +219,12 @@ class HausdorffSplitStep(ClusterRefinementStep):
             unique_subs = np.unique(sub_labels)
             n_sub = len(unique_subs)
 
-            # Map each sub-label to a new global id
-            sub_id_map = {}
             sub_sizes = []
             for s in unique_subs:
                 mask_s = sub_labels == s
-                new_mem[known_idx[mask_s]] = next_id
-                sub_id_map[s] = next_id
+                new_mem[indices[mask_s]] = next_id
                 sub_sizes.append(int(mask_s.sum()))
                 next_id += 1
-
-            # Assign unknowns to the largest sub-cluster
-            if len(unknown_idx):
-                largest_sub = unique_subs[np.argmax(
-                    [int((sub_labels == s).sum()) for s in unique_subs]
-                )]
-                new_mem[unknown_idx] = sub_id_map[largest_sub]
 
             log.append(dict(
                 original_cluster=int(cid),
@@ -271,7 +244,7 @@ class HausdorffSplitStep(ClusterRefinementStep):
         evaluate_fn = ctx.get('evaluate_fn')
 
         linkages = self._compute_linkages(
-            dataframe, membership, renderer, target_lbl,
+            dataframe, membership, renderer,
         )
 
         best_score = -np.inf
