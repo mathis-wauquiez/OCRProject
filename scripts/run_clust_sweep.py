@@ -61,6 +61,7 @@ def main(cfg: DictConfig):
         edges_type=cfg.method.edges_type,
         metric=cfg.method.metric,
         keep_reciprocal=cfg.method.keep_reciprocal,
+        keep_reciprocals=list(cfg.method.get('keep_reciprocals', [cfg.method.keep_reciprocal])),
         device=cfg.method.device,
         reporter=reporter,
         refinement_steps=refinement_steps,
@@ -81,6 +82,23 @@ def main(cfg: DictConfig):
 
     import pickle
     pickle.dump(graph, open(output_path / 'graph.gpickle', 'wb'))
+
+    # Save sweep results (parameter sweep + split sweep) for figure generation
+    if hasattr(sweep, 'sweep_results_df') and sweep.sweep_results_df is not None:
+        sweep.sweep_results_df.to_csv(output_path / 'sweep_results.csv', index=False)
+        logger.info(f"Saved parameter sweep results → {output_path / 'sweep_results.csv'}")
+
+    # Save split threshold sweep from Hausdorff refinement step (if it ran)
+    for step_name, result in zip(
+        getattr(sweep, '_last_refinement_step_names', []),
+        getattr(sweep, '_last_refinement_results', []),
+    ):
+        if step_name == 'hausdorff_split' and result.metadata.get('sweep_df') is not None:
+            result.metadata['sweep_df'].to_csv(
+                output_path / 'split_sweep.csv', index=False
+            )
+            logger.info(f"Saved split sweep results → {output_path / 'split_sweep.csv'}")
+            break
 
     # Generate HTML report (single call, includes all sections)
     html_path = sweep.reporter.generate_html()

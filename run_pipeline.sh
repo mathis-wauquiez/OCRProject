@@ -48,7 +48,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --extraction-config NAME Hydra config for extraction (default: extraction_pipeline)"
             echo "  --preprocessing-config N Hydra config for preprocessing (default: preprocessing)"
             echo ""
-            echo "Stages: build, extraction, preprocessing, alignment, clustering, figure"
+            echo "Stages: build, extraction, preprocessing, alignment, clustering, figure, figures"
             exit 0
             ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -63,7 +63,7 @@ should_run() {
         return
     fi
     if [[ -n "$FROM" ]]; then
-        local stages=(build extraction preprocessing alignment clustering figure)
+        local stages=(build extraction preprocessing alignment clustering figure figures)
         local from_idx=-1 stage_idx=-1
         for i in "${!stages[@]}"; do
             [[ "${stages[$i]}" == "$FROM" ]] && from_idx=$i
@@ -163,6 +163,17 @@ if should_run "figure"; then
     echo ""
 fi
 
+# ── Stage 6: All paper figures ──
+if should_run "figures"; then
+    echo ">> Stage 6: Generating all paper figures..."
+    python scripts/generate_all_figures.py \
+        --clustering-dir "results/clustering/${BOOK}" \
+        --preprocessing-dir "results/preprocessing/${BOOK}" \
+        --images-dir "data/datasets/${BOOK}" \
+        --output-dir "paper/figures/generated"
+    echo ""
+fi
+
 echo "=========================================="
 echo "  Pipeline complete!"
 echo "=========================================="
@@ -173,4 +184,5 @@ echo "  Preprocessing:  results/preprocessing/${BOOK}/"
 echo "  Alignment viz:  results/preprocessing/alignment_viz/"
 echo "  Clustering:     results/clustering/${BOOK}/"
 echo "  Main figure:    paper/figures/generated/main_pipeline.pdf"
+echo "  All figures:    paper/figures/generated/"
 echo ""

@@ -28,18 +28,23 @@ method:
   edges_type: "nlfa"
   metric: "CEMD"
   keep_reciprocal: true
+  # Ablation A4: sweep over reciprocal edge filtering.
+  # Set to [true, false] to compare reciprocal vs. non-reciprocal edges.
+  keep_reciprocals: [true]
   device: "cuda"
 
   # Parameter sweep ranges
 
-  # cell_sizes: [16, 24, 32]  # Cell size for HOG computation
-  # grdt_sigmas: [5]       # Gradient sigma for smoothing
-  # nums_bins: [8, 16]        # Number of orientation bins
+  # HOG ablation (A1): uncomment extra values to sweep.
+  # cell_sizes: [16, 22, 32]
+  # grdt_sigmas: [3, 5, 7]
+  # nums_bins: [8, 16]
 
-  # Partition types for Leiden algorithm:
+  # Partition types for Leiden algorithm (A2):
   #   "RBConfiguration" — modularity-based (null model)
   #   "CPM"             — Constant Potts Model (absolute density)
-  partition_types: ["CPM"]
+  # Set to ["CPM", "RBConfiguration"] to compare both.
+  partition_types: ["CPM", "RBConfiguration"]
 
   epsilons: [0.001, 0.00015, 0.0002, 0.00025, 0.00038]
   # epsilons: [0.0005]
@@ -61,7 +66,7 @@ reporter:
   _target_: src.clustering.clustering_sweep_report.ClusteringSweepReporter
   target_lbl: ${data.target_lbl}
   split_linkage_method: "average"
-  split_thresholds: [21.5]
+  split_thresholds: [10, 14, 17, 19, 21, 21.5, 22, 24, 28, 35]
   embed_images: true
   image_dpi: 75
   use_jpeg: false
@@ -70,7 +75,7 @@ reporter:
 # Refinement pipeline (injected into graphClusteringSweep)
 refinement_steps:
   - _target_: src.clustering.refinement.HausdorffSplitStep
-    thresholds: [21.5]
+    thresholds: [10, 14, 17, 19, 21, 21.5, 22, 24, 28, 35]
     linkage_method: "average"
     min_cluster_size: 5
     batch_size: 256
