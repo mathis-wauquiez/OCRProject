@@ -14,8 +14,8 @@ extraction → preprocessing pipeline on a single page:
 Usage:
     python scripts/generate_paper_main_figure.py \
         --image       data/datasets/book1/wdl_13516_005.jpg \
-        --components  outputs/extraction/book1/components/wdl_13516_005.jpg.npz \
-        --dataframe   outputs/preprocessing/book1 \
+        --components  results/extraction/book1/components/wdl_13516_005.jpg.npz \
+        --dataframe   results/preprocessing/book1 \
         --page        5 \
         --output      paper/figures/generated/main_pipeline.pdf
 """

@@ -13,8 +13,16 @@ __pycache__/
 *.fth
 *.mlmodel
 
-# ── All pipeline outputs (extraction, preprocessing, clustering, etc.) ──
+# ── Transient pipeline outputs (not committed) ──
 /outputs
+
+# ── Publishable results (committed so tables can be filled) ──
+# Override global *.parquet / *.json / *.npz ignores for this folder:
+!results/
+!results/**
+!results/**/*.parquet
+!results/**/*.json
+!results/**/*.npz
 
 # ── Legacy output directories (kept for safety, can be removed) ──
 /tests

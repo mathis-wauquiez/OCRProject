@@ -5,8 +5,8 @@ defaults:
 # === Data ===
 data:
   image_folder: "data/datasets/book1"
-  comps_folder: "outputs/extraction/book1"
-  output_path: "outputs/preprocessing/book1"
+  comps_folder: "results/extraction/book1"
+  output_path: "results/preprocessing/book1"
 
 verbose: false
 
@@ -14,7 +14,7 @@ verbose: false
 patch_preprocessor:
   _target_: src.patch_processing.PatchPreprocessing
   verbose: ${verbose}
-  output_viz: outputs/preprocessing/viz/
+  output_viz: results/preprocessing/viz/
 
   reading_order:
     _target_: src.layout_analysis.parsing.ReadingOrder

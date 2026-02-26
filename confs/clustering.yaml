@@ -2,11 +2,11 @@
 # === Hydra ===
 hydra:
   run:
-    dir: .hydra_outputs/clustering/${now:%Y-%m-%d_%H-%M-%S}
+    dir: .hydra_results/clustering/${now:%Y-%m-%d_%H-%M-%S}
 
 # Data paths
 data:
-  # input_path: "outputs/preprocessing/book_small"
+  # input_path: "results/preprocessing/book_small"
   # Ground-truth column for final evaluation. Options:
   #   "char_chat"          — raw OCR predictions (CHAT model)
   #   "char_transcription" — aligned transcription labels
@@ -17,9 +17,9 @@ data:
   # cross-validated consensus should only be used for evaluation, not
   # for choosing the best configuration.
   sweep_lbl: "char_chat"
-  # output_path: "outputs/clustering/book_small"
-  input_path: "outputs/preprocessing/book1"
-  output_path: "outputs/clustering/book1"
+  # output_path: "results/clustering/book_small"
+  input_path: "results/preprocessing/book1"
+  output_path: "results/clustering/book1"
 
 
 # Clustering method

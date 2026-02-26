@@ -9,7 +9,7 @@ Outputs are saved in the format expected by downstream PatchPreprocessing:
 
 Usage:
     python scripts/run_extraction.py
-    python scripts/run_extraction.py --image-folder data/datasets/book1 --save-folder outputs/extraction/book1
+    python scripts/run_extraction.py --image-folder data/datasets/book1 --save-folder results/extraction/book1
     python scripts/run_extraction.py --workers 2 --config extraction_pipeline
     python scripts/run_extraction.py --no-report  # skip report generation
 """
@@ -82,8 +82,8 @@ def main():
                         default='data/datasets/book1',
                         help='Input image folder (default: data/datasets/book1)')
     parser.add_argument('--save-folder', type=Path,
-                        default='outputs/extraction/book1',
-                        help='Output folder (default: outputs/extraction/book1)')
+                        default='results/extraction/book1',
+                        help='Output folder (default: results/extraction/book1)')
     parser.add_argument('--config', default='extraction_pipeline',
                         help='Hydra config name (default: extraction_pipeline)')
     parser.add_argument('--workers', type=int, default=1,
