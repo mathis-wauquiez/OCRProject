@@ -62,6 +62,7 @@ class graphClusteringSweep:
             keep_reciprocal: bool = True,
             device: str = "cuda",
 
+            sweep_lbl: str = 'char_chat',
             partition_types: None | List[str] = None,
 
             cell_sizes: None | List[int] = None,
@@ -106,6 +107,7 @@ class graphClusteringSweep:
 
         self.edges_type         = edges_type
         self.target_lbl         = target_lbl
+        self.sweep_lbl          = sweep_lbl
         self.keep_reciprocal    = keep_reciprocal
         self.device             = device
         self.partition_types    = partition_types or ['RBConfiguration']
@@ -391,6 +393,8 @@ class graphClusteringSweep:
                 'partition_type': partition_type,
                 'best_epsilon': best_epsilon,
                 'best_gamma': best_gamma,
+                'sweep_lbl': self.sweep_lbl,
+                'eval_lbl': self.target_lbl,
             },
             refinement_steps=self.refinement_steps,
             glossary_df=glossary_df,
@@ -513,6 +517,10 @@ class graphClusteringSweep:
 
 
             # ==== Sweep epsilon × gamma × partition_type ====
+            # Use OCR-only labels (sweep_lbl) for config selection to avoid
+            # methodological leak: the cross-validated consensus labels
+            # (target_lbl) are reserved for final evaluation only.
+            sweep_labels = dataframe[self.sweep_lbl]
             config_results = []
             for epsilon in tqdm(self.epsilons, desc="Epsilon",
                                 leave=False, colour="blue"):
@@ -533,7 +541,7 @@ class graphClusteringSweep:
                             n_iterations=10, seed=42
                         )
                         metrics = self._evaluate_membership(
-                            target_labels=dataframe[self.target_lbl],
+                            target_labels=sweep_labels,
                             membership=partition.membership
                         )
                         result = {
@@ -576,6 +584,7 @@ class graphClusteringSweep:
         print(f"Epsilon: {best_overall_config['epsilon']:.4f}")
         print(f"Gamma: {best_overall_config['gamma']:.4f}")
         print(f"ARI: {best_overall_config['adjusted_rand_index']:.4f}")
+        print(f"  (sweep label: {self.sweep_lbl}, evaluation label: {self.target_lbl})")
 
         # ── HOG sweep report section ──
         self.reporter.report_hog_sweep(results_df, hog_configs)

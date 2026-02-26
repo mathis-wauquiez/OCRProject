@@ -56,6 +56,7 @@ def main(cfg: DictConfig):
         grdt_sigmas=cfg.method.grdt_sigmas,
         nums_bins=cfg.method.nums_bins,
         target_lbl=cfg.data.target_lbl,
+        sweep_lbl=cfg.data.sweep_lbl,
         edges_type=cfg.method.edges_type,
         metric=cfg.method.metric,
         keep_reciprocal=cfg.method.keep_reciprocal,
