@@ -27,7 +27,7 @@
     \node[box=green!8] (svg) {SVG\\character};
 
     % ── Render ──
-    \node[box=yellow!10, right=0.7cm of svg] (render) {Render\\$24n \times 24n$\,px};
+    \node[box=yellow!10, right=0.7cm of svg] (render) {Render\\$22n \times 22n$\,px};
 
     % ── Gaussian derivative ──
     \node[box=blue!8, right=0.7cm of render] (gradient) {Gaussian\\derivatives\\$\sigma{=}5$};
@@ -40,7 +40,7 @@
 
     % ── Cell decomposition ──
     \node[box=orange!10, right=1.2cm of gradient, yshift=0cm] (cells)
-        {Cell grid\\$24{\times}24$\,px};
+        {Cell grid\\$22{\times}22$\,px};
 
     % ── Histogram ──
     \node[box=cyan!10, right=0.7cm of cells] (hist)

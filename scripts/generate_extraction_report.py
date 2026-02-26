@@ -120,11 +120,7 @@ def build_report(output_dir: str = "./reports/extraction_methodology",
             "The document covers:\n"
             "- The complete extraction pipeline (CRAFT detection → watershed "
             "segmentation → binarization → component assignment → filtering)\n"
-            "- A known failure mode for composite characters with vertically-"
-            "stacked radicals\n"
-            "- A proposed improvement: dual-threshold watershed with optional "
-            "link score enhancement\n"
-            "- Configuration reference and alternative approaches considered",
+            "- Configuration reference",
             title="Scope",
         )
 
@@ -156,7 +152,7 @@ def build_report(output_dir: str = "./reports/extraction_methodology",
             "  → Filter image components (remove lines)\n"
             "  → Compute similarity: image CCs ↔ CRAFT components\n"
             "  → Assign each image CC to nearest CRAFT component\n"
-            "  → Filter by contour proximity, size, aspect ratio, fill area\n"
+            "  → Filter by contour proximity, size, area\n"
             "  → Final character components\n"
             "```",
             title="Pipeline Architecture",
@@ -302,10 +298,7 @@ def build_report(output_dir: str = "./reports/extraction_methodology",
             "(> 4000 px area). This removes artifacts near borders and seals.\n"
             "2. **Size filter**: Remove characters with bounding box outside "
             "[30, 30] — [150, 150] pixels\n"
-            "3. **Aspect ratio filter**: Remove characters with aspect ratio > 3\n"
-            "4. **Fill area filter**: Remove characters where "
-            "filled_area / bbox_area > 0.9\n"
-            "5. **Minimum area filter**: Remove characters with filled area "
+            "3. **Minimum area filter**: Remove characters with filled area "
             "< 200 px",
             title="Character Filtering",
         )
@@ -320,173 +313,9 @@ def build_report(output_dir: str = "./reports/extraction_methodology",
              "*[Figure placeholder: characters coloured by deletion reason]*")
 
     # ==================================================================
-    # Section 3: Problem Analysis
+    # Section 3: Configuration Reference
     # ==================================================================
-    with report.section("3. Problem: Composite Character Misassignment"):
-        report.report_text(
-            "Characters with vertically-stacked sub-components present a "
-            "systematic extraction failure. Consider the character 蒸:\n\n"
-            "- The top portion (body) has high CRAFT score → becomes a CRAFT "
-            "component with a watershed seed\n"
-            "- The bottom portion (water radical 氺) has moderate CRAFT score "
-            "(~0.3–0.5) → **falls below** ``text_threshold`` (0.6) → "
-            "**excluded from the watershed mask entirely**\n"
-            "- The radical receives no CRAFT label\n"
-            "- During Mahalanobis assignment, the radical's ink CC centroid is "
-            "spatially closer to the CRAFT blob of the character below\n"
-            "- **Result**: the water radical is stolen by the wrong character\n\n"
-            "This affects many composite characters: 蒸, 烝, 黑, 煮, 熟, and "
-            "any character where a bottom radical separates into a distinct "
-            "ink blob positioned closer to the next character.",
-            title="Failure Mechanism",
-        )
-        report.report_text(
-            "The root cause is that a **single threshold** (``text_threshold`` = "
-            "0.6) serves two conflicting purposes:\n\n"
-            "1. **Seed detection** — needs a high threshold to avoid spurious "
-            "seeds in noisy regions\n"
-            "2. **Basin expansion mask** — needs a lower threshold so that "
-            "basins can grow into moderate-score areas where radicals reside\n\n"
-            "By using 0.6 for both, we get precise seeds but overly restrictive "
-            "basin expansion. The radical area (score 0.3–0.5) is treated as "
-            "background.",
-            title="Root Cause: Single-Threshold Watershed",
-        )
-        report.report_text(
-            "*[Figure placeholder: Side-by-side showing (a) CRAFT score heatmap "
-            "for a page region with 蒸, (b) watershed mask at threshold 0.6 "
-            "(radical excluded), (c) watershed mask at threshold 0.3 "
-            "(radical included)]*",
-            title="Figure: Threshold Effect on Watershed Mask",
-        )
-
-    # ==================================================================
-    # Section 4: Proposed Solution
-    # ==================================================================
-    with report.section("4. Proposed Solution: Dual-Threshold Watershed"):
-        report.report_text(
-            "We split the single ``binary_threshold`` into two independent "
-            "thresholds:\n\n"
-            "- **Peak threshold** \\(\\tau_p\\) (= ``text_threshold``, "
-            "default 0.6): controls where watershed seeds are placed. Only "
-            "strong character regions produce seeds.\n"
-            "- **Mask threshold** \\(\\tau_m\\) (= ``mask_threshold``, "
-            "default 0.3): controls how far watershed basins can expand. "
-            "Basins grow into moderate-score areas, capturing radicals.\n\n"
-            "The modified watershed algorithm:\n"
-            "1. Seed mask: \\(M_p = \\{(x,y) : \\texttt{score}(x,y) > \\tau_p\\}\\)\n"
-            "2. Expansion mask: \\(M_m = \\{(x,y) : \\texttt{score}(x,y) > \\tau_m\\}\\)\n"
-            "3. Seeds: ``peak_local_max(score, labels=`` \\(M_p\\) ``)``\n"
-            "4. Watershed: ``watershed(−score, markers, mask=`` \\(M_m\\) ``)``\n\n"
-            "Since \\(\\tau_m < \\tau_p\\), we have \\(M_p \\subseteq M_m\\): "
-            "seeds are always within the expansion mask. The key difference is "
-            "that basins can now grow into the moderate-score radical area.",
-            title="Dual-Threshold Mechanism",
-            is_katex=True,
-        )
-
-    with report.section("4.1 Why This Works"):
-        report.report_text(
-            "Consider the character 蒸 with the character 者 directly below it.\n\n"
-            "The CRAFT score landscape in the vertical direction looks "
-            "approximately like:\n\n"
-            "```\n"
-            "Score  ^  \n"
-            " 1.0   |  ┌──┐               ← 蒸 body (seed here)\n"
-            "       |  │  │\n"
-            " 0.6 ──|──┤  ├── τ_p ────── seed threshold (current)\n"
-            "       |  │  │\n"
-            " 0.4   |  │  └─┐  ← radical area (moderate score)\n"
-            " 0.3 ──|──┤    ├── τ_m ──── mask threshold (new)\n"
-            "       |  │    │\n"
-            " 0.1   |  └────┘\n"
-            "       |          ← inter-character gap (very low score)\n"
-            " 0.0   |──────────── background\n"
-            "       |  ┌──┐\n"
-            " 1.0   |  │  │      ← 者 body (separate seed)\n"
-            "       +──┴──┴─────────→ y\n"
-            "```\n\n"
-            "With \\(\\tau_p = 0.6\\): the 蒸 body gets a seed. The radical area "
-            "(score ~0.4) is above \\(\\tau_m = 0.3\\) → included in the "
-            "expansion mask. The inter-character gap (score ~0.1) is below "
-            "\\(\\tau_m\\) → remains excluded.\n\n"
-            "The 蒸 body's basin expands downward through the radical area "
-            "(following the gradient of \\(-\\texttt{score}\\)) and stops at the "
-            "inter-character gap. The radical is now part of the 蒸 CRAFT "
-            "component, and downstream Mahalanobis assignment works correctly.",
-            title="Score Landscape Analysis",
-            is_katex=True,
-        )
-        report.report_text(
-            "*[Figure placeholder: Before/after comparison of CRAFT components "
-            "on a page with composite characters, showing the radical correctly "
-            "included after dual-threshold watershed]*",
-            title="Figure: Before / After Comparison",
-        )
-
-    with report.section("4.2 Risk Analysis"):
-        report.report_text(
-            "**Over-expansion risk**: If \\(\\tau_m\\) is too low, basins could "
-            "bridge inter-character gaps where the score is slightly above zero. "
-            "Mitigation: the inter-character gap in historical Chinese text "
-            "typically has CRAFT score < 0.1, well below the recommended "
-            "\\(\\tau_m = 0.3\\).\n\n"
-            "**Noise inclusion**: A lower mask threshold could include background "
-            "noise. Mitigation: seeds remain at \\(\\tau_p = 0.6\\), so no new "
-            "spurious seeds are created. Only existing basins expand.\n\n"
-            "**Adjacent character merging**: Only possible if the gap between "
-            "adjacent characters has score > \\(\\tau_m\\). For well-separated "
-            "vertical text, this is unlikely.\n\n"
-            "**Backward compatibility**: Setting ``mask_threshold: null`` in the "
-            "configuration restores the original single-threshold behavior.",
-            title="Potential Risks and Mitigations",
-            is_katex=True,
-        )
-
-    # ==================================================================
-    # Section 5: Complementary Enhancement — Link Score
-    # ==================================================================
-    with report.section("5. Complementary Enhancement: Link Score Combination"):
-        report.report_text(
-            "CRAFT's ``score_link`` output detects affinity between adjacent "
-            "text sub-components. The canonical CRAFT approach (from "
-            "``craft_utils.py:29``) combines text and link scores before "
-            "connected component extraction:\n\n"
-            "$$\\texttt{score\\_combined} = \\text{clip}\\big("
-            "\\texttt{score\\_text} + "
-            "\\mathbb{1}[\\texttt{score\\_link} > \\tau_L]"
-            ",\\; 0,\\; 1\\big)$$\n\n"
-            "where \\(\\tau_L\\) is the link threshold. This fills in the gap "
-            "between sub-components by adding 1.0 where the link score exceeds "
-            "the threshold, making the region contiguous.\n\n"
-            "**This is complementary to the dual-threshold approach**:\n"
-            "- Dual threshold works when the radical has moderate CRAFT score "
-            "(0.3–0.5)\n"
-            "- Link score works when the gap has high affinity even if the "
-            "radical itself has low text score\n\n"
-            "**Caveat**: The CRAFT model (``craft_mlt_25k.pth``) was trained on "
-            "modern multilingual text. The ``score_link`` map was designed to "
-            "connect characters within words (relevant for Latin and Korean "
-            "scripts). Its behavior on historical Chinese woodblock prints — "
-            "where each character is standalone — is uncertain. The link score "
-            "may not fire between stacked radicals, or it may over-fire between "
-            "adjacent characters in a column.\n\n"
-            "**Recommendation**: ``link_threshold`` is disabled by default "
-            "(``null``). Enable it experimentally after visual inspection of "
-            "``score_link`` on your data.",
-            title="Link Score Methodology",
-            is_katex=True,
-        )
-        report.report_text(
-            "*[Figure placeholder: score_link heatmap for a page with composite "
-            "characters — does the link score bridge the radical gap?]*",
-            title="Figure: Link Score Heatmap",
-        )
-
-    # ==================================================================
-    # Section 6: Configuration Reference
-    # ==================================================================
-    with report.section("6. Configuration Reference"):
+    with report.section("3. Configuration Reference"):
         report.report_text(
             "All parameters are set in ``confs/extraction_pipeline.yaml`` and "
             "can be overridden via Hydra command line.\n\n"
@@ -516,77 +345,11 @@ def build_report(output_dir: str = "./reports/extraction_methodology",
             "| ``similarity_metric`` | mahalanobis | Distance metric |\n"
             "| ``min_box_size`` | [30, 30] | Min character bbox [w, h] |\n"
             "| ``max_box_size`` | [150, 150] | Max character bbox [w, h] |\n"
-            "| ``max_aspect_ratio`` | 3 | Max character aspect ratio |\n"
-            "| ``max_filled_area_portion`` | 0.9 | Max fill ratio |\n"
             "| ``min_area`` | 200 | Min character filled area |\n"
             "| ``cc_filtering`` | true | Enable contour proximity filter |\n"
             "| ``cc_distance_threshold`` | 50 | Contour proximity distance |\n"
             "| ``cc_min_comp_size`` | 4000 | Min size for reference contours |",
             title="Full Parameter Table",
-        )
-
-    # ==================================================================
-    # Section 7: Alternative Approaches Considered
-    # ==================================================================
-    with report.section("7. Alternative Approaches Considered"):
-        report.report_text(
-            "**A. Bounding Box Containment with Vertical Expansion**\n\n"
-            "For each CRAFT component, expand its bounding box vertically by a "
-            "configurable factor. Assign ink CCs by checking containment in the "
-            "expanded bbox. Pro: simple and geometric. Con: axis-aligned boxes "
-            "are crude; vertical expansion factor is hard to set globally.\n\n"
-            "**B. CRAFT Label Map Pixel-Level Overlap**\n\n"
-            "Upscale the CRAFT watershed label map to image resolution and "
-            "compute pixel overlap between each ink CC and each CRAFT region. "
-            "Pro: spatially precise. Con: expensive (per-pixel mapping); does "
-            "not solve the problem when the radical area has no CRAFT label "
-            "(the root cause).\n\n"
-            "**C. Composite Similarity Score (Mahalanobis + Spatial)**\n\n"
-            "Add a bbox overlap bonus to the Mahalanobis similarity: "
-            "\\(S = S_{\\text{Maha}} + \\alpha \\cdot S_{\\text{bbox}}\\). "
-            "Pro: builds on existing code. Con: still centroid-based; adds "
-            "tuning complexity.\n\n"
-            "**D. Vertical Territory Assignment**\n\n"
-            "Define character territories using midpoints between adjacent CRAFT "
-            "bounding boxes. Pro: robust for columnar text. Con: requires column "
-            "detection at a pipeline stage where it's not yet available.\n\n"
-            "**E. Modified Mahalanobis with Vertical Bias**\n\n"
-            "Inflate the vertical component of the CRAFT inertia tensor: "
-            "\\(\\Sigma' = \\Sigma + \\text{diag}(0, \\sigma_v^2)\\). "
-            "Pro: minimal code change. Con: also extends reach in the wrong "
-            "direction (upward); hard to tune.\n\n"
-            "**Why dual-threshold watershed was chosen**: It addresses the root "
-            "cause (restrictive watershed mask) rather than patching downstream "
-            "assignment. It is model-independent, has a single interpretable "
-            "parameter (\\(\\tau_m\\)), and is fully backward-compatible.",
-            title="Evaluated Alternatives",
-            is_katex=True,
-        )
-
-    # ==================================================================
-    # Section 8: Verification
-    # ==================================================================
-    with report.section("8. Verification Plan"):
-        report.report_text(
-            "1. **Backward compatibility**: Run with ``mask_threshold: null``, "
-            "``link_threshold: null`` and verify identical output to the "
-            "unmodified pipeline.\n\n"
-            "2. **Visual inspection**: Use "
-            "``visualization.create_pipeline_summary()`` to compare CRAFT "
-            "components and similarity matching before and after on pages "
-            "containing composite characters (蒸, 烝, 黑, 煮, 熟).\n\n"
-            "3. **Score map analysis**: Visualize the CRAFT ``score_text`` "
-            "heatmap for problematic characters to confirm that the radical "
-            "area has scores in the 0.3–0.5 range (validating the "
-            "threshold approach).\n\n"
-            "4. **Threshold sweep**: Test ``mask_threshold`` in "
-            "{0.2, 0.3, 0.4, 0.5} and monitor:\n"
-            "   - Total CRAFT components per page\n"
-            "   - Total final characters per page\n"
-            "   - Radical misassignment rate (manual check)\n\n"
-            "5. **Over-merging check**: Verify that adjacent characters with "
-            "normal spacing are NOT merged at ``mask_threshold = 0.3``.",
-            title="Testing Steps",
         )
 
     # ==================================================================

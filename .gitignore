@@ -46,5 +46,4 @@ __pycache__/
 # ── Misc ──
 OCR_Pipeline_Results.pptx
 caches/hog_cache/params.json
-/codesave
 /notebooks/codesave

@@ -23,13 +23,11 @@ DELETION_COLORS = {
     # CRAFT filtering
     'area_too_small': (255, 100, 100),      # Light red
     'aspect_ratio_too_low': (255, 150, 0),   # Orange
-    'aspect_ratio_too_high': (255, 200, 0),  # Yellow-orange
-    
+
     # Image components filtering
     'high_aspect_ratio': (200, 100, 255),    # Purple
-    
+
     # Character filtering
-    'filled_area_too_high': (255, 0, 0),     # Red
     'too_small': (255, 100, 150),            # Pink
     'too_large': (150, 0, 150),              # Dark magenta
     'too_close_to_contour': (0, 150, 255),   # Blue
@@ -417,58 +415,77 @@ def visualize_contour_filtering(centroids_before: connectedComponent,
                                 reference_components: connectedComponent,
                                 distance_threshold: float,
                                 min_component_size: int):
-    """Optimized contour filtering visualization."""
-    
-    # Cache labels ONCE at the start
-    ref_labels = reference_components.labels  # Single access
-    
-    vis = np.zeros((*ref_labels.shape, 3), dtype=np.uint8)
-    
-    # Find large components using cached labels
+    """Contour proximity filter visualization.
+
+    Shows the binary image as background with large-component contours
+    highlighted.  Each character is drawn as a bounding-box rectangle:
+    green for kept, red for removed.  Removed characters additionally get
+    a dashed-style distance circle (radius = *distance_threshold*) so the
+    reader can see *why* they were filtered.
+    """
+    ref_labels = reference_components.labels
+
+    # Start from a light-gray rendering of the binary page
+    # (binary labels > 0 → ink)
+    bg = np.where(ref_labels > 0, np.uint8(200), np.uint8(245))
+    vis = cv2.cvtColor(bg, cv2.COLOR_GRAY2RGB)
+
+    # ── Large reference components: outline in yellow ──
     counts = np.bincount(ref_labels.ravel())
-    large_indices = np.where((counts > min_component_size) & (np.arange(len(counts)) != 0))[0]
-    
+    large_indices = np.where(
+        (counts > min_component_size) & (np.arange(len(counts)) != 0)
+    )[0]
+
     if len(large_indices) > 0:
-        # Create combined mask for all large components (single pass)
         large_mask = np.isin(ref_labels, large_indices)
-        
-        # Draw all large component contours at once
+        # Semi-transparent fill to distinguish large components
+        vis[large_mask] = (
+            vis[large_mask].astype(np.int16) * 6 // 10
+            + np.array([60, 50, 120], dtype=np.int16) * 4 // 10
+        ).clip(0, 255).astype(np.uint8)
         contours, _ = cv2.findContours(
-            large_mask.astype(np.uint8), 
-            cv2.RETR_EXTERNAL, 
-            cv2.CHAIN_APPROX_SIMPLE
+            large_mask.astype(np.uint8),
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
         )
-        cv2.drawContours(vis, contours, -1, (128, 128, 128), 2)
-        cv2.drawContours(vis, contours, -1, (50, 50, 50), -1)
-    
-    # Use set for O(1) lookup instead of list iteration
+        cv2.drawContours(vis, contours, -1, (180, 120, 255), 2)
+
+    # ── Classify labels ──
     after_labels = {r.label for r in centroids_after.regions}
-    
-    # Draw centroids
+
     for region in centroids_before._regions:
         cy, cx = int(region.centroid[0]), int(region.centroid[1])
-        
-        if region.label in after_labels:
-            # Kept - green circle
-            cv2.circle(vis, (cx, cy), 5, (0, 255, 0), -1)
-            cv2.circle(vis, (cx, cy), 7, (255, 255, 255), 1)
+        y0, x0, y1, x1 = region.bbox
+        kept = region.label in after_labels
+
+        if kept:
+            cv2.rectangle(vis, (x0, y0), (x1, y1), (0, 200, 0), 1)
+            cv2.circle(vis, (cx, cy), 3, (0, 200, 0), -1)
         else:
-            # Deleted - red X
-            cv2.line(vis, (cx-6, cy-6), (cx+6, cy+6), (255, 0, 0), 2)
-            cv2.line(vis, (cx-6, cy+6), (cx+6, cy-6), (255, 0, 0), 2)
-            cv2.circle(vis, (cx, cy), 8, (255, 100, 100), 1)
-    
-    # Add legend
-    legend_y = 30
-    cv2.circle(vis, (20, legend_y), 5, (0, 255, 0), -1)
-    cv2.putText(vis, "Kept", (35, legend_y + 5), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    
-    cv2.line(vis, (14, legend_y + 30), (26, legend_y + 42), (255, 0, 0), 2)
-    cv2.line(vis, (14, legend_y + 42), (26, legend_y + 30), (255, 0, 0), 2)
-    cv2.putText(vis, "Filtered", (35, legend_y + 40), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-    
+            cv2.rectangle(vis, (x0, y0), (x1, y1), (220, 0, 0), 2)
+            # Cross through the box
+            cv2.line(vis, (x0, y0), (x1, y1), (220, 0, 0), 1)
+            cv2.line(vis, (x0, y1), (x1, y0), (220, 0, 0), 1)
+            # Distance radius circle (dashed via small arcs)
+            r = int(distance_threshold)
+            for ang in range(0, 360, 12):
+                cv2.ellipse(vis, (cx, cy), (r, r), 0, ang, ang + 6,
+                            (220, 80, 80), 1, cv2.LINE_AA)
+
+    # ── Legend (top-left) ──
+    ly = 20
+    cv2.rectangle(vis, (8, ly - 6), (22, ly + 6), (0, 200, 0), 1)
+    cv2.putText(vis, "Kept", (28, ly + 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+    ly += 24
+    cv2.rectangle(vis, (8, ly - 6), (22, ly + 6), (220, 0, 0), 2)
+    cv2.putText(vis, "Filtered (too close to contour)", (28, ly + 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+    ly += 24
+    cv2.rectangle(vis, (5, ly - 2), (25, ly + 10), (180, 120, 255), 2)
+    cv2.putText(vis, f"Large component (>{min_component_size} px)", (28, ly + 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+
     return vis
 
 # ============================================================================
@@ -578,9 +595,22 @@ def create_pipeline_summary(result: PipelineOutput,
     )
     ax.imshow(char_viz)
     char_stages = extract_deletion_stages(result.characters)
-    title = f'Final Characters\n{char_stages["total_kept"]} components'
+    title = f'Final Characters\n{char_stages["total_kept"]} kept, {char_stages["total_deleted"]} deleted'
     ax.set_title(title, fontsize=11, fontweight='bold')
     ax.axis('off')
+
+    # Add deletion-reasons legend
+    if char_colors:
+        char_legend = []
+        for name, color in char_colors.items():
+            cnt = len(char_stages['deleted_by_reason'].get(name, []))
+            if name == 'kept':
+                cnt = char_stages['total_kept']
+            char_legend.append(
+                Patch(facecolor=np.array(color) / 255,
+                      label=f"{name} ({cnt})"))
+        ax.legend(handles=char_legend, loc='upper right', fontsize=7,
+                  framealpha=0.8)
     
     # ========== Row 3: Detailed Analysis ==========
     # Similarity matrix
@@ -869,11 +899,35 @@ def visualize_extraction_result(result: PipelineOutput, prefix: str,
     char_viz, char_colors = result.characters.deletion_viz(
         deleted_colors=DELETION_COLORS
     )
-    Image.fromarray(char_viz).save(dirs['characters'] / f'{prefix}_deletion.png')
-    
+    # Save raw image
+    Image.fromarray(char_viz).save(dirs['characters'] / f'{prefix}_segmentation_colors.png')
+
+    # Save deletion figure with legend via matplotlib
+    char_stages = extract_deletion_stages(result.characters)
+    fig_del, ax_del = plt.subplots(1, 1, figsize=(12, 10))
+    ax_del.imshow(char_viz)
+    ax_del.axis('off')
+    # Build legend patches for every reason present
+    legend_patches = []
+    for name, color in char_colors.items():
+        count = len(char_stages['deleted_by_reason'].get(name, []))
+        if name == 'kept':
+            count = char_stages['total_kept']
+        label = f"{name} ({count})"
+        legend_patches.append(Patch(facecolor=np.array(color) / 255, label=label))
+    ax_del.legend(handles=legend_patches, loc='upper right', fontsize=9,
+                  framealpha=0.85, title="Deletion reasons")
+    ax_del.set_title(
+        f"Character Deletion Reasons — {char_stages['total_kept']} kept, "
+        f"{char_stages['total_deleted']} deleted",
+        fontsize=12, fontweight='bold')
+    fig_del.savefig(dirs['characters'] / f'{prefix}_deletion.png',
+                    dpi=150, bbox_inches='tight')
+    plt.close(fig_del)
+
     char_segm = result.characters.segm_img
     Image.fromarray(char_segm).save(dirs['characters'] / f'{prefix}_segmentation.png')
-    
+
     # Characters with labels
     char_labeled = draw_component_labels(result.characters, char_segm)
     Image.fromarray(char_labeled).save(dirs['characters'] / f'{prefix}_labeled.png')

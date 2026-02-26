@@ -57,14 +57,12 @@ class craftComponentsParams(Updateable):
     sub-components of composite characters. Set to None to disable.
     Recommended: 0.3-0.7."""
 
+    # Watershed seed spacing (peak_local_max min_distance)
+    min_dist: float = 8.
+    """Minimum distance between watershed seeds (pixels)."""
+
     # Components filtering
     min_area: int | None = 10
-    min_aspect_ratio: float | None = .5
-    max_aspect_ratio: float | None = 2
-
-    # Components merging
-    min_dist: float | None = 8.
-    """"Blobs whose centroids are < 8 pixels away will be merged"""
 
     # Unary potential parameters
     # UNUSED AT THE MOMENT
@@ -103,10 +101,6 @@ class imageComponentsParams(Updateable):
     min_box_size: Tuple[int] = (30, 30)
     max_box_size: Tuple[int] = (250, 250)
 
-    max_aspect_ratio: float = 10
-
-    max_filled_area_portion: float = 0.9
-
     min_area: float = 700
 
     cc_filtering:          bool  = True
@@ -139,7 +133,7 @@ class PipelineOutput:
     "The connected components of the binarized image after filtering big lines"
 
     characters: connectedComponent
-    "Final character components after all filtering (proximity, size, aspect ratio, etc.)"
+    "Final character components after all filtering (proximity, size, area)"
 
     score_link: torch.Tensor = None
     "Score map output for link/affinity regions from the CRAFT model"

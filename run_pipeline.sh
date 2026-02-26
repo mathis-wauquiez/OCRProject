@@ -131,7 +131,7 @@ fi
 # ── Stage 4: Clustering ──
 if should_run "clustering"; then
     echo ">> Stage 4: Clustering + post-clustering refinement..."
-    python scripts/sweep_clustering.py
+    python scripts/run_clust_sweep.py
     echo ""
 fi
 

@@ -71,19 +71,17 @@
     \node[substage, below=0.1cm of refine.south west, anchor=north west, xshift=0.2cm]
         (hausdorff) {Hausdorff splitting};
     \node[substage, below=0.06cm of hausdorff]
-        (ocrrematch) {OCR rematching};
-    \node[substage, below=0.06cm of ocrrematch]
-        (pcarematch) {PCA z-score rematching};
+        (labelsplit) {Label-based splitting};
 
     % ── Output ──
-    \node[io, below=0.5cm of pcarematch] (output) {Vectorised character glossary};
+    \node[io, below=0.5cm of labelsplit] (output) {Vectorised character glossary};
 
     % ── Arrows ──
     \draw[arrow] (input) -- (extraction);
     \draw[arrow] (charfilter.south) -- ++(0,-0.2) -| (preproc);
     \draw[arrow] (hogcomp.south) -- ++(0,-0.2) -| (cluster);
     \draw[arrow] (leiden.south) -- ++(0,-0.2) -| (refine);
-    \draw[arrow] (pcarematch.south) -- ++(0,-0.2) -| (output);
+    \draw[arrow] (labelsplit.south) -- ++(0,-0.2) -| (output);
 
     % ── Side annotations ──
     \node[right=1.0cm of extraction, text=gray, font=\footnotesize\itshape, text width=3cm]

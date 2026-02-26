@@ -60,10 +60,10 @@ We use CRAFT~\cite{baek2019character} (\textit{Character Region Awareness for Te
 We use pre-trained weights without fine-tuning, with magnification ratio~$5.0$ (canvas size 1280\,px).
 
 Connected components are extracted via dual-threshold watershed: pixels with $S_\text{text} \ge \tau_\text{text} = 0.6$ serve as seeds, and basins expand to a lower mask threshold $\tau_\text{mask} = 0.3$.
-Nearby components (centroids $< 8$\,px apart) are merged to reconnect split radicals of composite characters.
+Components with area below 10\,px are discarded as noise (area opening).
 
 In parallel, the page is binarised (Otsu's method) and binary connected components are associated with CRAFT detections via negative Mahalanobis distance using the CRAFT region's inertia tensor.
-Filters discard components outside the expected size range ($30 \times 30$ to $150 \times 150$\,px), with extreme aspect ratios ($>3$), or insufficient area ($<200$\,px$^2$).
+Filters discard components outside the expected size range ($30 \times 30$ to $150 \times 150$\,px) or with insufficient filled area ($<200$\,px$^2$).
 
 
 % ============================================================================
@@ -77,7 +77,7 @@ A projection-based layout module identifies columns and rows.
 The reading order follows right-to-left, top-to-bottom (classical Chinese), assigning each character an integer index.
 
 \paragraph{Vectorisation via affine scale-space.}
-Binary patches are cleaned by morphological filtering (removing small holes and noise specks), then vectorised using affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}.
+Binary patches are cleaned by area opening and closing (removing foreground specks below 5\,px and background holes below 10\,px), then vectorised using affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}.
 This geometric PDE evolves each level line of the image according to its curvature:
 \begin{equation}
     \frac{\partial u}{\partial t} = |\nabla u|\, \kappa^{1/3},
@@ -100,7 +100,7 @@ Each character receives a label $\ell_i \in \mathcal{A} \cup \{\square\}$ and co
 
 % ---------- HOG ----------
 \paragraph{HOG descriptors.}
-Each character is described by a HOG descriptor~\cite{dalal2005histograms} computed on a rendered SVG image ($24 \times 24$\,px cells, 256\,DPI).
+Each character is described by a HOG descriptor~\cite{dalal2005histograms} computed on a rendered SVG image ($22 \times 22$\,px cells, 256\,DPI).
 Gradients use Gaussian derivative filters ($\sigma = 5$, kernel size~31\,px).
 Unsigned orientations are accumulated into $B = 16$ bins per cell via trilinear interpolation:
 \begin{equation}
@@ -166,20 +166,18 @@ where $e_c$ is the total edge weight within community $c$, $n_c$ its size, and $
 \label{sec:refinement}
 
 The Leiden partition may contain impure or over-fragmented clusters.
-A sequential three-stage refinement addresses these issues (Fig.~\ref{fig:refinement-pipeline}).
+A sequential two-stage refinement addresses these issues (Fig.~\ref{fig:refinement-pipeline}).
 
 \paragraph{Stage~1: Hausdorff-based splitting.}
-Large clusters ($\ge 5$ members) are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} on registered binary images.
-Registration uses multiscale inverse compositional (IC) alignment~\cite{briand2018ipol} with a Lorentzian robust error.
+Large clusters ($\ge 5$ members) are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} on binary images.
 The Hausdorff distance matrix is used to build an average-linkage dendrogram, cut at $\tau_\text{split} = 21.5$.
+The threshold is selected via a sweep evaluated by ARI on OCR-derived labels.
 
-\paragraph{Stage~2: OCR-based rematching.}
-Small clusters ($\le 3$ members) are merged into the largest cluster sharing the same dominant OCR label.
-This fast, label-driven step handles fragmented Leiden partitions.
-
-\paragraph{Stage~3: PCA z-score rematching.}
-Remaining small clusters are tested against $k=5$ nearest large clusters ($\ge 10$ members) via image-space PCA compatibility.
-The query is registered against each candidate's most central member, projected into the candidate's PCA space ($d=5$ components), and merged if $\max_j |z_j| < 3.0$.
+\paragraph{Stage~2: Label-based splitting.}
+Within each cluster, members are grouped by their known OCR label.
+Groups with $\ge 2$ members become their own sub-cluster; smaller groups are dissolved into singletons.
+Unknown-label members are assigned to the dominant sub-cluster.
+This step enforces label consistency within clusters without relying on image-space registration.
 
 \input{figures/methodology/fig_refinement_pipeline}
 
@@ -196,5 +194,6 @@ Characters with unknown ground-truth labels are excluded from all metric computa
 \subsection{Glossary Construction}
 \label{sec:glossary}
 
-The final output of the pipeline is a \emph{character glossary}: for each cluster, we select the most central member (minimising mean intra-cluster dissimilarity) as the representative, and record the dominant OCR label, cluster size, and purity.
-The glossary is sorted by frequency, producing an inventory of all distinct character forms in the book along with their vectorised outlines---the desired output of reverse typography.
+The final output of the pipeline is a \emph{character glossary}: for each OCR-predicted character, we identify the cluster containing the most occurrences and select its most central member (by degree centrality in the NFA similarity graph) as the representative.
+The glossary records the dominant OCR label, cluster size, and representative patch index, sorted by frequency.
+This produces an inventory of all distinct character forms in the book along with their vectorised outlines---the desired output of reverse typography.

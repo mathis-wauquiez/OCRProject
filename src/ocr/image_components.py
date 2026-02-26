@@ -2,9 +2,9 @@
 This file defines all the operations that are done on the image directly, including:
 - binarization
 - connected components extraction
-- filtering the connected components by aspect ratio
+- filtering the connected components by aspect ratio (line removal)
 - associate the components from the image with CRAFT's detections based on a distance metric
-- filter the characters by aspect ratio and filled area percentage
+- filter the characters by size and area
 """
 
 from skimage.filters import *
@@ -163,58 +163,46 @@ class imageComponentsPipeline:
 
     def filter_bad_characters(self, characterComponents: connectedComponent):
         """Vectorized character filtering."""
-        regions = [r for r in characterComponents.regions 
+        regions = [r for r in characterComponents.regions
                 if not characterComponents.is_deleted(r.label)]
         if not regions:
             return characterComponents
-        
+
         # Extract all properties at once (single pass through regions)
         n = len(regions)
         labels = np.empty(n, dtype=np.int32)
         bboxes = np.empty((n, 4), dtype=np.int32)
         areas_filled = np.empty(n, dtype=np.float32)
-        areas_bbox = np.empty(n, dtype=np.float32)
-        
+
         for i, r in enumerate(regions):
             labels[i] = r.label
             bboxes[i] = r.bbox
             areas_filled[i] = r.area_filled
-            areas_bbox[i] = r.area_bbox
-        
+
         # Vectorized computations
         h = bboxes[:, 2] - bboxes[:, 0]
         w = bboxes[:, 3] - bboxes[:, 1]
-        aspect_ratios = np.maximum(h / np.maximum(w, 1), w / np.maximum(h, 1))
-        filled_portions = areas_filled / np.maximum(areas_bbox, 1)
-        
+
         # Vectorized condition checks (order matters - first match wins)
         delete_mask = np.zeros(n, dtype=bool)
         reasons = np.empty(n, dtype=object)
-        
-        m = filled_portions > self.params.max_filled_area_portion
-        reasons[m & ~delete_mask] = "filled_area_too_high"
-        delete_mask |= m
-        
+
         m = (h < self.params.min_box_size[1]) | (w < self.params.min_box_size[0])
         reasons[m & ~delete_mask] = "too_small"
         delete_mask |= m
-        
+
         m = (h > self.params.max_box_size[1]) | (w > self.params.max_box_size[0])
         reasons[m & ~delete_mask] = "too_large"
         delete_mask |= m
-        
-        m = aspect_ratios > self.params.max_aspect_ratio
-        reasons[m & ~delete_mask] = "aspect_ratio_too_high"
-        delete_mask |= m
-        
+
         m = areas_filled < self.params.min_area
         reasons[m & ~delete_mask] = "area_too_small"
         delete_mask |= m
-        
+
         # delete
         for label, reason in zip(labels[delete_mask], reasons[delete_mask]):
             characterComponents.delete(int(label), reason=str(reason))
-        
+
         return characterComponents
 
     def forward(self, im_pil, craftComponents, return_intermediate=False):

@@ -66,9 +66,7 @@ imageComponentsPipelineParams:
   min_box_size: [30, 30]  # [width, height] in pixels
   max_box_size: [150, 150]
   
-  # Character shape constraints
-  max_aspect_ratio: 3  # Reject very elongated boxes
-  max_filled_area_portion: 0.9  # Reject boxes that are too filled
+  # Character area constraint
   min_area: 200
 
   cc_filtering: true
