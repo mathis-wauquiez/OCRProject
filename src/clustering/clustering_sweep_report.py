@@ -201,33 +201,52 @@ class ClusteringSweepReporter(AutoReport):
 
     def report_hog_sweep(self, results_df, hog_configs):
         """Best-per-config table, per-config pivot tables, comparison heatmaps."""
+        # Group by (hog_config, partition_type) when partition_type column exists
+        has_pt = 'partition_type' in results_df.columns
+        group_cols = ['hog_config', 'partition_type'] if has_pt else ['hog_config']
+        ignore_cols = {'hog_config', 'cell_size', 'grdt_sigma',
+                       'num_bins', 'epsilon', 'gamma', 'partition_type'}
+
         best_per_config = results_df.loc[
-            results_df.groupby('hog_config')['adjusted_rand_index'].idxmax()
+            results_df.groupby(group_cols)['adjusted_rand_index'].idxmax()
         ].sort_values('adjusted_rand_index', ascending=False)
 
         with self.section("HOG Configuration Sweep"):
             self.report_table(best_per_config,
-                               title="Best Results per HOG Configuration")
+                               title="Best Results per Configuration")
 
-            for config_name in hog_configs:
-                subset = results_df[results_df['hog_config'] == config_name]
+            # Build (config_name, partition_type) combos to iterate over
+            if has_pt:
+                combos = (
+                    results_df.groupby(group_cols).size().reset_index()[group_cols]
+                    .itertuples(index=False, name=None)
+                )
+            else:
+                combos = ((c, None) for c in hog_configs)
+
+            for config_name, pt_name in combos:
+                mask = results_df['hog_config'] == config_name
+                if pt_name is not None:
+                    mask &= results_df['partition_type'] == pt_name
+                subset = results_df[mask]
+
+                label = config_name if pt_name is None else f'{config_name} / {pt_name}'
+
                 metric_names = [
-                    c for c in subset.columns
-                    if c not in ['hog_config', 'cell_size', 'grdt_sigma',
-                                 'num_bins', 'epsilon', 'gamma']
+                    c for c in subset.columns if c not in ignore_cols
                 ]
                 for metric in metric_names:
                     pivot = subset.pivot_table(
                         values=metric, index='gamma', columns='epsilon'
                     )
                     self.report_table(
-                        pivot, title=f'{metric} (gamma × epsilon) — {config_name}'
+                        pivot, title=f'{metric} (gamma x epsilon) — {label}'
                     )
 
-                # Per-config parameter heatmaps (ε × γ grids for all metrics)
+                # Per-config parameter heatmaps
                 heatmap_subset = subset[['epsilon', 'gamma'] + metric_names]
                 fig = self.report_parameter_heatmaps(heatmap_subset)
-                self.report_figure(fig, title=f"Parameter Heatmaps — {config_name}")
+                self.report_figure(fig, title=f"Parameter Heatmaps — {label}")
 
             fig = self._hog_comparison_heatmaps(results_df)
             self.report_figure(fig, title="HOG Configuration Comparison")
@@ -235,9 +254,22 @@ class ClusteringSweepReporter(AutoReport):
     def _hog_comparison_heatmaps(self, results_df):
         import seaborn as sns
 
+        has_pt = 'partition_type' in results_df.columns
+        group_cols = ['hog_config', 'partition_type'] if has_pt else ['hog_config']
+
         best_per_config = results_df.loc[
-            results_df.groupby('hog_config')['adjusted_rand_index'].idxmax()
+            results_df.groupby(group_cols)['adjusted_rand_index'].idxmax()
         ]
+        # Build a readable label column
+        if has_pt:
+            best_per_config = best_per_config.copy()
+            best_per_config['config_label'] = (
+                best_per_config['hog_config'] + ' / ' + best_per_config['partition_type']
+            )
+        else:
+            best_per_config = best_per_config.copy()
+            best_per_config['config_label'] = best_per_config['hog_config']
+
         ari_min = results_df['adjusted_rand_index'].min()
         ari_max = results_df['adjusted_rand_index'].max()
 
@@ -246,14 +278,14 @@ class ClusteringSweepReporter(AutoReport):
         # Bar chart
         ax = axes[0, 0]
         bpc = best_per_config.sort_values('adjusted_rand_index', ascending=False)
-        ax.barh(range(len(bpc)), bpc['adjusted_rand_index'])
+        bars = ax.barh(range(len(bpc)), bpc['adjusted_rand_index'])
         ax.set_yticks(range(len(bpc)))
-        ax.set_yticklabels(bpc['hog_config'])
+        ax.set_yticklabels(bpc['config_label'], fontsize=8)
         ax.set_xlabel('Adjusted Rand Index')
-        ax.set_title('Best Performance by HOG Configuration')
+        ax.set_title('Best Performance by Configuration')
         ax.grid(axis='x', alpha=0.3)
         best_bar_pos = list(bpc.index).index(bpc['adjusted_rand_index'].idxmax())
-        ax.patches[best_bar_pos].set_color('green')
+        bars[best_bar_pos].set_color('green')
 
         # cell_size vs grdt_sigma
         pivot = best_per_config.pivot_table(
@@ -275,18 +307,32 @@ class ClusteringSweepReporter(AutoReport):
 
         # Scatter
         ax = axes[1, 1]
-        scatter = ax.scatter(
-            best_per_config['epsilon'], best_per_config['gamma'],
-            c=best_per_config['adjusted_rand_index'], s=200, cmap='RdYlGn',
-            alpha=0.6, edgecolors='black', vmin=ari_min, vmax=ari_max
-        )
+        if has_pt:
+            # Color by partition type for scatter
+            pt_names = best_per_config['partition_type'].unique()
+            colors = plt.cm.Set1(np.linspace(0, 1, max(len(pt_names), 2)))
+            pt_color_map = dict(zip(pt_names, colors))
+            for pt, grp in best_per_config.groupby('partition_type'):
+                ax.scatter(
+                    grp['epsilon'], grp['gamma'],
+                    c=[pt_color_map[pt]], s=200, alpha=0.6,
+                    edgecolors='black', label=pt,
+                )
+            ax.legend(fontsize=8)
+        else:
+            scatter = ax.scatter(
+                best_per_config['epsilon'], best_per_config['gamma'],
+                c=best_per_config['adjusted_rand_index'], s=200,
+                cmap='RdYlGn', alpha=0.6, edgecolors='black',
+                vmin=ari_min, vmax=ari_max,
+            )
+            plt.colorbar(scatter, ax=ax, label='ARI')
         for _, row in best_per_config.iterrows():
-            ax.annotate(row['hog_config'], (row['epsilon'], row['gamma']),
+            ax.annotate(row['config_label'], (row['epsilon'], row['gamma']),
                         xytext=(5, 5), textcoords='offset points',
-                        fontsize=8, alpha=0.7)
+                        fontsize=7, alpha=0.7)
         ax.set_xlabel('Epsilon'); ax.set_ylabel('Gamma')
-        ax.set_title('Best ε/γ per HOG Config (colored by ARI)')
-        plt.colorbar(scatter, ax=ax, label='ARI')
+        ax.set_title('Best params per Config (shape=partition type)')
 
         plt.tight_layout()
         return fig
