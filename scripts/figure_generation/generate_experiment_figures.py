@@ -41,6 +41,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from notebook_utils.parquet_utils import load_dataframe, load_columns
+from notebook_utils.svg_utils import render_svg_grayscale
 from src.clustering.metrics import (
     UNKNOWN_LABEL, compute_metrics,
     compute_cluster_purity, compute_label_completeness,
@@ -69,16 +70,6 @@ def _try_load_csv(path):
     if path.exists():
         return pd.read_csv(path)
     return None
-
-
-def render_svg_thumbnail(svg_obj, size=48):
-    try:
-        return svg_obj.render(
-            dpi=96, output_format='L', scale=1.0,
-            output_size=(size, size), respect_aspect_ratio=True,
-        )
-    except Exception:
-        return np.ones((size, size), dtype=np.uint8) * 255
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -406,7 +397,7 @@ def generate_cluster_gallery(
                 continue
 
             idx = members.index[col_j]
-            img = render_svg_thumbnail(dataframe.loc[idx, 'svg'], size=48)
+            img = render_svg_grayscale(dataframe.loc[idx, 'svg'], 48, 48)
             ax.imshow(img, cmap='gray', vmin=0, vmax=255)
 
             if idx == rep_idx:

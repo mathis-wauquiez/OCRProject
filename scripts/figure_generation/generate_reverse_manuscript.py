@@ -36,6 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from notebook_utils.parquet_utils import load_dataframe, load_columns
+from notebook_utils.svg_utils import render_svg_grayscale
 from src.clustering.post_clustering import build_glossary
 from src.clustering.metrics import UNKNOWN_LABEL
 
@@ -44,21 +45,6 @@ def hex_to_rgb(hex_color):
     """Convert '#RRGGBB' to (R, G, B) tuple."""
     hex_color = hex_color.lstrip('#')
     return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
-
-def render_svg_to_pil(svg_obj, target_width, target_height, dpi=96):
-    """Render an SVG to a PIL Image (grayscale), fit to target size."""
-    try:
-        rendered = svg_obj.render(
-            dpi=dpi,
-            output_format='L',
-            scale=1.0,
-            output_size=(target_width, target_height),
-            respect_aspect_ratio=True,
-        )
-        return Image.fromarray(rendered, mode='L')
-    except Exception:
-        return Image.new('L', (target_width, target_height), 255)
 
 
 def build_representative_lookup(dataframe, glossary_df):
@@ -142,7 +128,7 @@ def render_page(
 
         # Render the representative SVG at this bounding-box size
         svg_obj = dataframe.loc[rep_idx, 'svg']
-        char_img = render_svg_to_pil(svg_obj, w, h, dpi=dpi)
+        char_img = Image.fromarray(render_svg_grayscale(svg_obj, w, h, dpi=dpi), mode='L')
 
         # Convert grayscale mask to coloured RGBA
         char_arr = np.array(char_img)
