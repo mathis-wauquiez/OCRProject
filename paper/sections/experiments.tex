@@ -48,7 +48,7 @@ Characters with unknown ground-truth labels are excluded from all metric computa
 \end{table}
 
 \paragraph{Hyperparameter selection.}
-The pipeline performs a grid sweep over epsilon thresholds ($\varepsilon \in \{2.5{\times}10^{-4}, 3.8{\times}10^{-4}, 5{\times}10^{-4}\}$), Leiden resolution ($\gamma = 1.0$), and partition types (RBConfiguration, CPM).
+The pipeline performs a grid sweep over epsilon thresholds ($\varepsilon \in \{1.5{\times}10^{-4}, 2{\times}10^{-4}, 2.5{\times}10^{-4}, 3.8{\times}10^{-4}, 10^{-3}\}$), Leiden resolution ($\gamma \in \{1.0, 1.25, 1.5, 1.75, 2.0\}$), and partition types (RBConfiguration, CPM).
 The configuration maximising ARI on OCR-derived labels is selected; final metrics are reported on consensus labels.
 
 

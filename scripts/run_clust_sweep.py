@@ -57,6 +57,7 @@ def main(cfg: DictConfig):
         nums_bins=cfg.method.nums_bins,
         target_lbl=cfg.data.target_lbl,
         sweep_lbl=cfg.data.sweep_lbl,
+        partition_types=list(cfg.method.partition_types),
         edges_type=cfg.method.edges_type,
         metric=cfg.method.metric,
         keep_reciprocal=cfg.method.keep_reciprocal,
