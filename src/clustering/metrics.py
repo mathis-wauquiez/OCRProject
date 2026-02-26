@@ -277,13 +277,13 @@ def compute_cluster_purity(dataframe, membership_col, target_lbl):
             unique_labels = 0
             label_counts = pd.Series(dtype=int)
 
+        from .post_clustering import compute_representative
         label_representatives = {}
         for label in label_counts.index:
             if label == UNKNOWN_LABEL:
                 continue
             label_nodes = cluster_data[cluster_data[target_lbl] == label]
-            most_central_idx = label_nodes['degree_centrality'].idxmax()
-            label_representatives[label] = most_central_idx
+            label_representatives[label] = compute_representative(label_nodes)
         representatives[cluster] = label_representatives
 
         purity_data.append({

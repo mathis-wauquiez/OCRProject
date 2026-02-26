@@ -81,32 +81,6 @@ def main(cfg: DictConfig):
     import pickle
     pickle.dump(graph, open(output_path / 'graph.gpickle', 'wb'))
 
-    # Add "Output Files" section to the report
-    saved_files = [
-        output_path / "clustered_patches",
-        output_path / "filtered_patches",
-        output_path / "label_representatives",
-        output_path / "graph.gpickle",
-    ]
-    output_rows = []
-    for fp in saved_files:
-        # save_dataframe may append an extension — check common variants
-        actual = fp
-        for candidate in [fp, fp.with_suffix(".parquet"), fp.with_suffix(".pkl")]:
-            if candidate.exists():
-                actual = candidate
-                break
-        size_mb = actual.stat().st_size / (1024 * 1024) if actual.exists() else 0
-        output_rows.append({
-            "file": str(actual.relative_to(output_path)),
-            "size_MB": round(size_mb, 2),
-        })
-    with sweep.reporter.section("Output Files"):
-        sweep.reporter.report_table(
-            pd.DataFrame(output_rows),
-            title="Saved Artefacts",
-        )
-
     # Generate HTML report (single call, includes all sections)
     html_path = sweep.reporter.generate_html()
     logger.info(f"Report: file://{html_path.absolute()}")
