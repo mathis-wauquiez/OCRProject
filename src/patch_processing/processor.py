@@ -803,3 +803,4 @@ class PatchPreprocessing:
         folder = self.output_viz / "plt_reading_order"
         folder.mkdir(exist_ok=True)
         fig.savefig(folder / file)
+        plt.close(fig)
