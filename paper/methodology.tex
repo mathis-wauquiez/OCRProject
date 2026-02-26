@@ -22,7 +22,7 @@ Connected components are extracted via dual-threshold watershed: pixels with $S_
 Components with area below 10\,px are discarded as noise (area opening).
 
 In parallel, the page is binarised (Otsu's method) and binary connected components are associated with CRAFT detections via negative Mahalanobis distance using the CRAFT region's inertia tensor.
-Filters discard components outside the expected size range ($30 \times 30$ to $150 \times 150$\,px), with extreme aspect ratios ($>3$), or insufficient area ($<200$\,px$^2$).
+Filters discard components outside the expected size range ($30 \times 30$ to $150 \times 150$\,px) or with insufficient filled area ($<200$\,px$^2$).
 
 
 % ============================================================================
