@@ -26,7 +26,11 @@ from .clustering_sweep_report import (
     RefinementReport, ClusterQuality,
 )
 from .graph import build_graph
-from .metrics import UNKNOWN_LABEL, compute_metrics, compute_cluster_purity, compute_label_completeness
+from .metrics import (
+    UNKNOWN_LABEL, compute_metrics, compute_cluster_purity,
+    compute_label_completeness, compute_biggest_cluster_stats,
+    compute_dominance_threshold_table,
+)
 
 # HOG
 from src.patch_processing.configs import get_hog_cfg
@@ -282,6 +286,8 @@ class graphClusteringSweep:
             membership=dataframe['membership'].tolist()
         )
         label_dataframe = self._compute_label_dataframe(dataframe)
+        dominance_df = compute_biggest_cluster_stats(dataframe, self.target_lbl)
+        dominance_threshold_df = compute_dominance_threshold_table(dominance_df)
 
         pre_split_metrics = self._evaluate_membership(
             target_labels=dataframe[self.target_lbl],
@@ -310,6 +316,8 @@ class graphClusteringSweep:
             pre_representatives=pre_representatives,
             best_metrics=best_metrics,
             label_dataframe=label_dataframe,
+            dominance_df=dominance_df,
+            dominance_threshold_df=dominance_threshold_df,
         )
         return quality, pre_split_metrics, post_split_metrics, comparative_metrics
 
@@ -381,6 +389,7 @@ class graphClusteringSweep:
                 dataframe, pre_split_membership,
                 post_split_membership, did_split,
             )
+        self._last_quality = quality
 
         # ── 8. Build refinement report ──
         split_result = next(

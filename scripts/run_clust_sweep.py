@@ -100,6 +100,19 @@ def main(cfg: DictConfig):
             logger.info(f"Saved split sweep results → {output_path / 'split_sweep.csv'}")
             break
 
+    # Save biggest-cluster dominance threshold Excel (if available)
+    quality = getattr(sweep, '_last_quality', None)
+    if quality is not None and quality.dominance_df is not None:
+        xlsx_path = output_path / 'cluster_dominance_thresholds.xlsx'
+        with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
+            quality.dominance_threshold_df.to_excel(
+                writer, sheet_name='threshold_summary', index=False,
+            )
+            quality.dominance_df.to_excel(
+                writer, sheet_name='per_character', index=False,
+            )
+        logger.info(f"Saved dominance threshold table → {xlsx_path}")
+
     # Generate HTML report (single call, includes all sections)
     html_path = sweep.reporter.generate_html()
     logger.info(f"Report: file://{html_path.absolute()}")
