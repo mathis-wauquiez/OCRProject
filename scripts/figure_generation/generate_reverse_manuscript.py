@@ -109,8 +109,11 @@ def render_page(
         max_y = int((page_df['top'] + page_df['height']).max()) + 50
         canvas_w, canvas_h = max_x, max_y
 
-    # Create character overlay (RGBA, transparent)
-    char_layer = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
+    # Build two character layers:
+    #   colour_layer — coloured + semi-transparent (for with-bg version)
+    #   black_layer  — solid black, no transparency (for no-bg version)
+    colour_layer = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
+    black_layer  = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 0))
 
     for _, row in page_df.iterrows():
         left = int(row['left'])
@@ -130,32 +133,42 @@ def render_page(
         svg_obj = dataframe.loc[rep_idx, 'svg']
         char_img = Image.fromarray(render_svg_grayscale(svg_obj, w, h, dpi=dpi))
 
-        # Convert grayscale mask to coloured RGBA
         char_arr = np.array(char_img)
         # Invert: black strokes (0) → opaque, white bg (255) → transparent
-        alpha = ((255 - char_arr) * char_alpha).astype(np.uint8)
-        rgba = np.zeros((char_arr.shape[0], char_arr.shape[1], 4), dtype=np.uint8)
-        rgba[:, :, 0] = char_color[0]
-        rgba[:, :, 1] = char_color[1]
-        rgba[:, :, 2] = char_color[2]
-        rgba[:, :, 3] = alpha
+        stroke_mask = 255 - char_arr
 
-        char_rgba = Image.fromarray(rgba, mode='RGBA')
+        # Coloured version (with char_alpha transparency)
+        alpha_colour = (stroke_mask * char_alpha).astype(np.uint8)
+        rgba_colour = np.zeros((char_arr.shape[0], char_arr.shape[1], 4), dtype=np.uint8)
+        rgba_colour[:, :, 0] = char_color[0]
+        rgba_colour[:, :, 1] = char_color[1]
+        rgba_colour[:, :, 2] = char_color[2]
+        rgba_colour[:, :, 3] = alpha_colour
+        char_rgba_colour = Image.fromarray(rgba_colour, mode='RGBA')
 
-        # Paste onto the character layer, centring within the bounding box
-        paste_x = left + (w - char_rgba.width) // 2
-        paste_y = top + (h - char_rgba.height) // 2
-        char_layer.paste(char_rgba, (paste_x, paste_y), char_rgba)
+        # Black version (fully opaque strokes)
+        rgba_black = np.zeros((char_arr.shape[0], char_arr.shape[1], 4), dtype=np.uint8)
+        rgba_black[:, :, 0] = 0
+        rgba_black[:, :, 1] = 0
+        rgba_black[:, :, 2] = 0
+        rgba_black[:, :, 3] = stroke_mask
+        char_rgba_black = Image.fromarray(rgba_black, mode='RGBA')
 
-    # Version (b): characters on white background
+        # Paste onto both layers, centring within the bounding box
+        paste_x = left + (w - char_rgba_colour.width) // 2
+        paste_y = top + (h - char_rgba_colour.height) // 2
+        colour_layer.paste(char_rgba_colour, (paste_x, paste_y), char_rgba_colour)
+        black_layer.paste(char_rgba_black, (paste_x, paste_y), char_rgba_black)
+
+    # Version (b): solid black characters on white background
     white_bg = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 255))
-    img_no_bg = Image.alpha_composite(white_bg, char_layer)
+    img_no_bg = Image.alpha_composite(white_bg, black_layer)
 
-    # Version (a): characters on manuscript (full-opacity background)
+    # Version (a): coloured characters on full-opacity manuscript
     img_with_bg = None
     if page_image is not None:
         manuscript_rgba = page_image.convert('RGBA')
-        img_with_bg = Image.alpha_composite(manuscript_rgba, char_layer)
+        img_with_bg = Image.alpha_composite(manuscript_rgba, colour_layer)
 
     return img_with_bg, img_no_bg
 
