@@ -40,6 +40,12 @@ from .refinement import (
 
 from tqdm import tqdm
 
+# ── Partition type lookup ────────────────────────────────────────
+_PARTITION_TYPES = {
+    'RBConfiguration': la.RBConfigurationVertexPartition,
+    'CPM':             la.CPMVertexPartition,
+}
+
 
 class graphClusteringSweep:
     def __init__(
@@ -55,6 +61,8 @@ class graphClusteringSweep:
             metric: str = "CEMD",
             keep_reciprocal: bool = True,
             device: str = "cuda",
+
+            partition_types: None | List[str] = None,
 
             cell_sizes: None | List[int] = None,
             normalization_methods: None | List[None | str] = ['patch'],
@@ -100,6 +108,7 @@ class graphClusteringSweep:
         self.target_lbl         = target_lbl
         self.keep_reciprocal    = keep_reciprocal
         self.device             = device
+        self.partition_types    = partition_types or ['RBConfiguration']
 
         # ── Injected components ──
         self.reporter           = reporter
@@ -170,8 +179,8 @@ class graphClusteringSweep:
         target_labels = dataframe[self.target_lbl]
 
         pipeline_metrics: list[dict] = [{
-            'step': 'leiden (baseline)',
-            'n_clusters': len(np.unique(pre_split_membership)),
+            'step': f'leiden (baseline)',
+            'n_clusters': int(len(np.unique(pre_split_membership))),
             **self._evaluate_membership(target_labels, _to_list(pre_split_membership)),
         }]
 
@@ -286,13 +295,15 @@ class graphClusteringSweep:
     # ================================================================
 
     def report_graph(self, dataframe, nlfa, dissimilarities,
-                     best_epsilon, best_gamma, renderer=None):
+                     best_epsilon, best_gamma, renderer=None,
+                     partition_type='RBConfiguration'):
 
         # ── 1. Build graph & partition ──
         graph, edges = self.get_graph(nlfa, dissimilarities, best_epsilon)
         G_ig = ig.Graph.from_networkx(graph)
+        pt_class = _PARTITION_TYPES[partition_type]
         partition = la.find_partition(
-            G_ig, la.RBConfigurationVertexPartition,
+            G_ig, pt_class,
             resolution_parameter=best_gamma, n_iterations=-1, seed=42
         )
 
@@ -377,6 +388,7 @@ class graphClusteringSweep:
                 'metric': self.featureMatcher._params.metric,
                 'keep_reciprocal': self.keep_reciprocal,
                 'device': self.device,
+                'partition_type': best_overall_config['partition_type'],
                 'best_epsilon': best_epsilon,
                 'best_gamma': best_gamma,
             },
@@ -500,36 +512,42 @@ class graphClusteringSweep:
             dataframe['var_tot'] = var_tot.cpu().numpy()
 
 
-            # ==== Sweep epsilon × gamma ====
+            # ==== Sweep epsilon × gamma × partition_type ====
             config_results = []
             for epsilon in tqdm(self.epsilons, desc="Epsilon",
                                 leave=False, colour="blue"):
-                
+
                 graph, edges = self.get_graph(nlfa, dissimilarities, epsilon)
                 G_ig = ig.Graph.from_networkx(graph)
 
-                for gamma in tqdm(self.gammas, desc="Gamma",
-                                  leave=False, colour="green"):
-                    
-                    partition = la.find_partition(
-                        G_ig, la.RBConfigurationVertexPartition,
-                        resolution_parameter=gamma, n_iterations=10, seed=42
-                    )
-                    metrics = self._evaluate_membership(
-                        target_labels=dataframe[self.target_lbl],
-                        membership=partition.membership
-                    )
-                    result = {
-                        'hog_config': config_name,
-                        'cell_size': hog_cfg['cell_size'],
-                        'grdt_sigma': hog_cfg['grdt_sigma'],
-                        'num_bins': hog_cfg['num_bins'],
-                        'epsilon': epsilon,
-                        'gamma': gamma,
-                        **metrics
-                    }
-                    config_results.append(result)
-                    all_results.append(result)
+                for pt_name in self.partition_types:
+                    pt_class = _PARTITION_TYPES[pt_name]
+
+                    for gamma in tqdm(self.gammas,
+                                      desc=f"Gamma ({pt_name})",
+                                      leave=False, colour="green"):
+
+                        partition = la.find_partition(
+                            G_ig, pt_class,
+                            resolution_parameter=gamma,
+                            n_iterations=10, seed=42
+                        )
+                        metrics = self._evaluate_membership(
+                            target_labels=dataframe[self.target_lbl],
+                            membership=partition.membership
+                        )
+                        result = {
+                            'hog_config': config_name,
+                            'cell_size': hog_cfg['cell_size'],
+                            'grdt_sigma': hog_cfg['grdt_sigma'],
+                            'num_bins': hog_cfg['num_bins'],
+                            'partition_type': pt_name,
+                            'epsilon': epsilon,
+                            'gamma': gamma,
+                            **metrics
+                        }
+                        config_results.append(result)
+                        all_results.append(result)
 
             config_df = pd.DataFrame(config_results)
             best_idx = config_df['adjusted_rand_index'].idxmax()
@@ -554,6 +572,7 @@ class graphClusteringSweep:
 
         print(f"\n{'='*60}\nBEST OVERALL CONFIGURATION\n{'='*60}")
         print(f"HOG Config: {best_overall_config['config_name']}")
+        print(f"Partition: {best_overall_config['partition_type']}")
         print(f"Epsilon: {best_overall_config['epsilon']:.4f}")
         print(f"Gamma: {best_overall_config['gamma']:.4f}")
         print(f"ARI: {best_overall_config['adjusted_rand_index']:.4f}")
@@ -575,6 +594,7 @@ class graphClusteringSweep:
                 best_overall_config['epsilon'],
                 best_overall_config['gamma'],
                 renderer=best_renderer,
+                partition_type=best_overall_config['partition_type'],
             )
 
         # Annotate outputs with best config info

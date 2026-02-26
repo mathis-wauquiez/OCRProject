@@ -31,6 +31,11 @@ method:
   # grdt_sigmas: [5]       # Gradient sigma for smoothing
   # nums_bins: [8, 16]        # Number of orientation bins
 
+  # Partition types for Leiden algorithm:
+  #   "RBConfiguration" — modularity-based (null model)
+  #   "CPM"             — Constant Potts Model (absolute density)
+  partition_types: ["RBConfiguration", "CPM"]
+
   epsilons: [0.00025, 0.00038, .0005]
   # epsilons: [0.0005]
   # gammas: [1.0, 1.25]
