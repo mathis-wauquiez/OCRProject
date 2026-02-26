@@ -30,44 +30,19 @@ patch_preprocessor:
   vectorizer: ${vectorizer}
 
   # CHAT OCR model (Kraken-based column recogniser)
-  # Replaces the old Qwen / wrapper approach.
-  # Subcolumn image crops + CRAFT barycenters (centroids) are fed directly.
   chat_model:
     _target_: src.ocr.chat.ModelWrapper
     rec_model_path: models/chat/chat_rec.mlmodel
-    # device: cuda   # auto-detected if omitted
-    # pad: 16        # horizontal padding added by Kraken transform
-
-  # Old OCR Models (disabled — replaced by CHAT)
-  # ocr_model_configs:
-  #   - _target_: src.ocr.wrappers.QwenOCRSingle
-  #     _partial_: true
-  #     max_pixels: 786432  # 768 x 1024 for better single char recognition
-  #     device_map: auto
-  #   - _target_: src.ocr.wrappers.QwenOCR
-  #     _partial_: true
-  #     nrows: 1
-  #     ncols: 4
-  #     max_pixels: 1048576 # '1024 x 1024' -> we will use less in practice
-  #     device_map: auto
-  #   - _target_: src.ocr.wrappers.EasyOCRModel
-
-  # Old OCR Renderer (disabled — not needed with CHAT)
-  # ocr_renderer:
-  #   _target_: src.patch_processing.Renderer
-  #   scale: 1.0
-  #   dpi: 256
-  #   bin_thresh: 128
-  #   pad_to_multiple: null
-  #   verbose: ${verbose}
 
   # HOG Renderer
+  # pad_to_multiple must match cell_height/cell_width below (and
+  # cell_sizes in clustering.yaml for consistent features).
   hog_renderer:
     _target_: src.patch_processing.Renderer
     scale: 1.0
     dpi: 256
     bin_thresh: 128
-    pad_to_multiple: 24
+    pad_to_multiple: 22
     verbose: ${verbose}
 
   # HOG Parameters
@@ -79,8 +54,8 @@ patch_preprocessor:
     method: gaussian              # Use gaussian smoothing to compute the gradients
     grdt_sigma: 5                 # Std of the smoothing
     ksize_factor: 6               # Size of the smoothing kernel = factor * std
-    cell_height: 24               # Size of the cells to compute the histograms
-    cell_width: 24
+    cell_height: 22               # Size of the cells to compute the histograms
+    cell_width: 22
     num_bins: 16                  # Number of bins
     threshold: 0.2                # Clip the values of the descriptor
     normalize: patch              # Normalize at patch-level. SIFT uses cell-level descriptor normalization
