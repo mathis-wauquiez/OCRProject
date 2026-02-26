@@ -26,6 +26,9 @@ import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
+import matplotlib
+matplotlib.use("Agg")
+
 # Add parent directory to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))

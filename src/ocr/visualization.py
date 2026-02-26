@@ -300,7 +300,7 @@ def visualize_similarity_matrix(similarities: np.ndarray,
     axes[0].set_title('Similarity Matrix\n(brighter = better match)', fontsize=14, fontweight='bold')
     
     # Add colorbar
-    cbar = plt.colorbar(im, ax=axes[0])
+    cbar = fig.colorbar(im, ax=axes[0])
     cbar.set_label('Similarity Score', fontsize=10)
     
     # Add threshold line if provided
@@ -619,7 +619,7 @@ def create_pipeline_summary(result: PipelineOutput,
     if result.similarity_matrix is not None and result.similarity_matrix.size > 0:
         im = ax.imshow(result.similarity_matrix, cmap='hot', aspect='auto', 
                       interpolation='nearest')
-        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
         ax.set_xlabel('Image Comp.', fontsize=9)
         ax.set_ylabel('CRAFT Comp.', fontsize=9)
         ax.set_title('Similarity Matrix', fontsize=11, fontweight='bold')
