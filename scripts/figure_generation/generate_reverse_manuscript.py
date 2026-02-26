@@ -151,22 +151,11 @@ def render_page(
     white_bg = Image.new('RGBA', (canvas_w, canvas_h), (255, 255, 255, 255))
     img_no_bg = Image.alpha_composite(white_bg, char_layer)
 
-    # Version (a): characters on manuscript
+    # Version (a): characters on manuscript (full-opacity background)
     img_with_bg = None
     if page_image is not None:
-        # Fade the manuscript
         manuscript_rgba = page_image.convert('RGBA')
-        # Reduce manuscript opacity
-        ms_arr = np.array(manuscript_rgba)
-        faded = np.full_like(ms_arr, 255)
-        faded[:, :, :3] = (
-            ms_arr[:, :, :3].astype(np.float32) * bg_alpha
-            + 255 * (1 - bg_alpha)
-        ).astype(np.uint8)
-        faded[:, :, 3] = 255  # fully opaque
-        faded_bg = Image.fromarray(faded, mode='RGBA')
-
-        img_with_bg = Image.alpha_composite(faded_bg, char_layer)
+        img_with_bg = Image.alpha_composite(manuscript_rgba, char_layer)
 
     return img_with_bg, img_no_bg
 
