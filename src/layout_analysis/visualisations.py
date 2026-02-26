@@ -108,11 +108,11 @@ def show_reading_order(canvas, ordered_labels, rectangles):
                 counter += 1
                 break
 
-    # Visualize with matplotlib
-    fig = plt.figure(figsize=(16, 8))
-    plt.imshow(canvas, interpolation='none', aspect='auto')
-    plt.title(f'Reading Order ({len(ordered_labels)} elements)')
-    plt.axis('off')
+    # Visualize with matplotlib (OO API — safe in threads)
+    fig, ax = plt.subplots(figsize=(16, 8))
+    ax.imshow(canvas, interpolation='none', aspect='auto')
+    ax.set_title(f'Reading Order ({len(ordered_labels)} elements)')
+    ax.axis('off')
     return fig
 
 

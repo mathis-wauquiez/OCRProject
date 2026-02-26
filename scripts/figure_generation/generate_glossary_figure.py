@@ -32,20 +32,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from notebook_utils.parquet_utils import load_dataframe, load_columns
+from notebook_utils.svg_utils import render_svg_grayscale
 from src.clustering.post_clustering import build_glossary, compute_representative
 from src.clustering.metrics import UNKNOWN_LABEL
-
-
-def render_svg_to_array(svg_obj, target_size=64, dpi=96):
-    """Render an SVG object to a grayscale numpy array."""
-    rendered = svg_obj.render(
-        dpi=dpi,
-        output_format='L',
-        scale=1.0,
-        output_size=(target_size, target_size),
-        respect_aspect_ratio=True,
-    )
-    return rendered
 
 
 def build_glossary_from_dataframe(dataframe):
@@ -133,7 +122,7 @@ def generate_glossary_figure(
         # Render the SVG
         svg_obj = dataframe.loc[rep_idx, 'svg']
         try:
-            img = render_svg_to_array(svg_obj, target_size=render_size)
+            img = render_svg_grayscale(svg_obj, render_size, render_size)
         except Exception:
             img = np.ones((render_size, render_size), dtype=np.uint8) * 255
 
