@@ -15,6 +15,7 @@ import cv2
 import torch
 
 from .params import PipelineOutput
+from .image_components import extract_contour_lines, point_to_line_segment_distance
 from ..utils import connectedComponent, Timer
 
 
@@ -451,27 +452,82 @@ def visualize_contour_filtering(centroids_before: connectedComponent,
         )
         cv2.drawContours(vis, contours, -1, (180, 120, 255), 2)
 
-    # ── Classify labels ──
+    # ── Recompute pairing logic (mirrors filter_centroids_by_contour_proximity) ──
     after_labels = {r.label for r in centroids_after.regions}
+    active_regions = [r for r in centroids_before._regions
+                      if not centroids_before.is_deleted(r.label)]
+    active_labels = np.array([r.label for r in active_regions])
+    centroids_arr = np.array([r.centroid for r in active_regions])
 
+    # winner_labels: labels that survived because they were the closest to a
+    # large component (i.e. the "anchor" that caused competitors to be deleted)
+    winner_labels = set()
+    # deleted_to_winner: maps each deleted label → (winner_cx, winner_cy)
+    deleted_to_winner = {}
+
+    if len(large_indices) > 0 and len(active_regions) > 0:
+        centroids_t = torch.tensor(
+            centroids_arr, dtype=torch.float32
+        ).flip(-1)  # (row,col) → (x,y)
+
+        all_lines_list, component_indices = [], []
+        for idx in large_indices:
+            bin_image = (ref_labels == idx).astype(np.uint8)
+            lines = extract_contour_lines(bin_image)
+            if len(lines) > 0:
+                all_lines_list.append(lines)
+                component_indices.extend([idx] * len(lines))
+
+        if all_lines_list:
+            all_lines = np.concatenate(all_lines_list, axis=0)
+            all_lines_t = torch.tensor(all_lines, dtype=torch.float32)
+            all_distances = point_to_line_segment_distance(centroids_t, all_lines_t)
+            component_indices = np.array(component_indices)
+
+            for idx in np.unique(component_indices):
+                line_mask = component_indices == idx
+                min_dists = all_distances[:, line_mask].min(dim=1).values
+                close_mask = min_dists < distance_threshold
+                num_close = close_mask.sum().item()
+                if num_close > 1:
+                    closest_idx = min_dists.argmin().item()
+                    winner_label = active_labels[closest_idx]
+                    winner_labels.add(winner_label)
+                    w_region = active_regions[closest_idx]
+                    w_cy = int(w_region.centroid[0])
+                    w_cx = int(w_region.centroid[1])
+                    for ci in torch.where(close_mask)[0].tolist():
+                        lbl = active_labels[ci]
+                        if lbl != winner_label and lbl not in after_labels:
+                            deleted_to_winner[lbl] = (w_cx, w_cy)
+
+    # ── Draw characters ──
     for region in centroids_before._regions:
         cy, cx = int(region.centroid[0]), int(region.centroid[1])
         y0, x0, y1, x1 = region.bbox
         kept = region.label in after_labels
 
-        if kept:
+        if kept and region.label in winner_labels:
+            # Winner: kept AND was the closest to a large component
+            cv2.rectangle(vis, (x0, y0), (x1, y1), (255, 180, 0), 2)
+            cv2.circle(vis, (cx, cy), 3, (255, 180, 0), -1)
+        elif kept:
             cv2.rectangle(vis, (x0, y0), (x1, y1), (0, 200, 0), 1)
             cv2.circle(vis, (cx, cy), 3, (0, 200, 0), -1)
         else:
             cv2.rectangle(vis, (x0, y0), (x1, y1), (220, 0, 0), 2)
-            # Cross through the box
             cv2.line(vis, (x0, y0), (x1, y1), (220, 0, 0), 1)
             cv2.line(vis, (x0, y1), (x1, y0), (220, 0, 0), 1)
-            # Distance radius circle (dashed via small arcs)
+            # Dashed distance circle
             r = int(distance_threshold)
             for ang in range(0, 360, 12):
                 cv2.ellipse(vis, (cx, cy), (r, r), 0, ang, ang + 6,
                             (220, 80, 80), 1, cv2.LINE_AA)
+            # Line from deleted centroid to its winner
+            if region.label in deleted_to_winner:
+                w_cx, w_cy = deleted_to_winner[region.label]
+                cv2.line(vis, (cx, cy), (w_cx, w_cy), (255, 180, 0), 1,
+                         cv2.LINE_AA)
 
     # ── Legend (top-left) ──
     ly = 20
@@ -479,8 +535,12 @@ def visualize_contour_filtering(centroids_before: connectedComponent,
     cv2.putText(vis, "Kept", (28, ly + 5),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
     ly += 24
+    cv2.rectangle(vis, (8, ly - 6), (22, ly + 6), (255, 180, 0), 2)
+    cv2.putText(vis, "Kept (closest to large CC)", (28, ly + 5),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+    ly += 24
     cv2.rectangle(vis, (8, ly - 6), (22, ly + 6), (220, 0, 0), 2)
-    cv2.putText(vis, "Filtered (too close to contour)", (28, ly + 5),
+    cv2.putText(vis, "Filtered (fused competitor)", (28, ly + 5),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
     ly += 24
     cv2.rectangle(vis, (5, ly - 2), (25, ly + 10), (180, 120, 255), 2)
