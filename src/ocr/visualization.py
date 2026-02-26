@@ -86,12 +86,13 @@ def draw_ellipses(comps, arr, color_line=(255, 0, 0), color_point=None,
         )
         
         # Draw center point
-        if color_point is None:
+        pt_color = color_point
+        if pt_color is None:
             if hasattr(comps, 'colors') and region.label < len(comps.colors):
-                color_point = tuple(map(int, comps.colors[region.label]))
+                pt_color = tuple(map(int, comps.colors[region.label]))
             else:
-                color_point = color_line
-        cv2.circle(arr, center, radius=radius, color=color_point, thickness=-1)
+                pt_color = color_line
+        cv2.circle(arr, center, radius=radius, color=pt_color, thickness=-1)
         
         # Draw label
         if show_labels:
