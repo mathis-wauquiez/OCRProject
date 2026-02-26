@@ -39,7 +39,7 @@ method:
   # Partition types for Leiden algorithm:
   #   "RBConfiguration" — modularity-based (null model)
   #   "CPM"             — Constant Potts Model (absolute density)
-  partition_types: ["RBConfiguration", "CPM"]
+  partition_types: ["CPM"]
 
   epsilons: [0.001, 0.00015, 0.0002, 0.00025, 0.00038]
   # epsilons: [0.0005]
