@@ -12,10 +12,10 @@ Usage:
         --output     paper/figures/generated/glossary.pdf
 
     Optional:
-        --max-chars  200     Max characters to show
+        --max-chars  300     Max characters to show
         --cols       20      Number of columns in the grid
-        --cell-size  0.45    Size of each cell in inches
-        --dpi        300     Output DPI
+        --cell-size  0.55    Size of each cell in inches
+        --dpi        600     Output DPI
 """
 
 import argparse
@@ -24,12 +24,17 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from matplotlib.patches import FancyBboxPatch
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPTS_DIR.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from font_config import configure_matplotlib_fonts, CJK_FONT_NAME
+configure_matplotlib_fonts()
 
 from notebook_utils.parquet_utils import load_dataframe, load_columns
 from notebook_utils.svg_utils import render_svg_grayscale
@@ -56,11 +61,11 @@ def generate_glossary_figure(
     dataframe,
     glossary_df,
     output_path=None,
-    max_chars=200,
+    max_chars=300,
     n_cols=20,
-    cell_size=0.45,
-    dpi=300,
-    render_size=64,
+    cell_size=0.55,
+    dpi=600,
+    render_size=256,
     show_frequency=True,
 ):
     """Generate a publication-quality glossary grid figure.
@@ -83,7 +88,7 @@ def generate_glossary_figure(
     dpi : int
         Output resolution.
     render_size : int
-        Pixel size for SVG rendering.
+        Pixel size for SVG rendering (higher = sharper).
     show_frequency : bool
         If True, show occurrence count below the character label.
     """
@@ -119,14 +124,17 @@ def generate_glossary_figure(
         char_label = entry['character']
         freq = int(entry['n'])
 
-        # Render the SVG
+        # Render the SVG at high resolution for crisp output
         svg_obj = dataframe.loc[rep_idx, 'svg']
         try:
             img = render_svg_grayscale(svg_obj, render_size, render_size)
         except Exception:
             img = np.ones((render_size, render_size), dtype=np.uint8) * 255
 
-        ax.imshow(img, cmap='gray', vmin=0, vmax=255, interpolation='nearest')
+        ax.imshow(
+            img, cmap='gray', vmin=0, vmax=255,
+            interpolation='lanczos',
+        )
 
         # Character label below
         label_text = char_label if char_label != UNKNOWN_LABEL else '?'
@@ -138,11 +146,10 @@ def generate_glossary_figure(
             transform=ax.transAxes,
             ha='center', va='top',
             fontsize=5,
-            fontfamily='serif',
         )
 
     fig.suptitle(
-        'Character Glossary — Representative Vectorised Characters',
+        'Character Glossary \u2014 Representative Vectorised Characters',
         fontsize=10, fontweight='bold', y=0.995,
     )
 
@@ -171,11 +178,11 @@ def main():
         default=Path("paper/figures/generated/glossary.pdf"),
         help="Output path for the figure.",
     )
-    parser.add_argument("--max-chars", type=int, default=200)
+    parser.add_argument("--max-chars", type=int, default=300)
     parser.add_argument("--cols", type=int, default=20)
-    parser.add_argument("--cell-size", type=float, default=0.45)
-    parser.add_argument("--dpi", type=int, default=300)
-    parser.add_argument("--render-size", type=int, default=64)
+    parser.add_argument("--cell-size", type=float, default=0.55)
+    parser.add_argument("--dpi", type=int, default=600)
+    parser.add_argument("--render-size", type=int, default=256)
     args = parser.parse_args()
 
     print(f"Loading dataframe from {args.dataframe}...")

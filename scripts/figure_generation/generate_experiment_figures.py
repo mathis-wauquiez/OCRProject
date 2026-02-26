@@ -37,8 +37,13 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import networkx as nx
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SCRIPTS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPTS_DIR.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from font_config import configure_matplotlib_fonts
+configure_matplotlib_fonts()
 
 from notebook_utils.parquet_utils import load_dataframe, load_columns
 from notebook_utils.svg_utils import render_svg_grayscale
@@ -147,14 +152,77 @@ def generate_preprocessing_figure(df, output_path, n_examples=6, dpi=300):
 #  F5: HOG descriptor example
 # ════════════════════════════════════════════════════════════════════
 
+def _plot_hog_arrows(ax, img, histograms, Nh, Nw, ch, cw, Nbins,
+                     threshold=0.05, arrow_scale=0.45):
+    """Draw HOG orientation arrows overlaid on an image.
+
+    Parameters
+    ----------
+    ax : matplotlib Axes
+    img : 2-D array (H, W) — background image
+    histograms : (Nh, Nw, Nbins) — cell histograms
+    Nh, Nw : grid dimensions
+    ch, cw : cell height/width in pixels
+    Nbins : number of orientation bins
+    """
+    from matplotlib.colors import hsv_to_rgb
+
+    ax.imshow(img, cmap='gray', alpha=0.3)
+
+    bin_angles = np.linspace(0, np.pi, Nbins, endpoint=False)
+    max_magnitude = histograms.max()
+    min_threshold = threshold * max_magnitude
+
+    for cell_y in range(Nh):
+        for cell_x in range(Nw):
+            center_x = (cell_x + 0.5) * cw
+            center_y = (cell_y + 0.5) * ch
+            cell_hist = histograms[cell_y, cell_x]
+
+            for bin_idx, magnitude in enumerate(cell_hist):
+                if magnitude > min_threshold:
+                    angle = bin_angles[bin_idx]
+                    length = magnitude * min(cw, ch) * arrow_scale / max_magnitude
+                    dx = length * np.cos(angle)
+                    dy = length * np.sin(angle)
+                    color = plt.cm.hsv(angle / (2 * np.pi))
+
+                    arrow_props = {
+                        'head_width': 2.0, 'head_length': 2.0,
+                        'fc': color, 'ec': color,
+                        'alpha': 0.85, 'linewidth': 2.0,
+                    }
+                    ax.arrow(center_x, center_y, dx, dy, **arrow_props)
+                    ax.arrow(center_x, center_y, -dx, -dy, **arrow_props)
+
+    # Grid lines
+    for gy in range(Nh + 1):
+        ax.axhline(y=gy * ch - 0.5, color='cyan', linewidth=1.0, alpha=0.6)
+    for gx in range(Nw + 1):
+        ax.axvline(x=gx * cw - 0.5, color='cyan', linewidth=1.0, alpha=0.6)
+
+    ax.set_xlim(-0.5, Nw * cw - 0.5)
+    ax.set_ylim(Nh * ch - 0.5, -0.5)
+    ax.axis('off')
+
+
 def generate_hog_figure(df, output_path, dpi=300):
-    """Render one character through the full HOG pipeline."""
+    """Render one character through the full HOG pipeline.
+
+    Produces a 2x2 figure:
+      top-left:     Gradient magnitude (hot colourmap)
+      top-right:    Gradient orientation (HSV)
+      bottom-left:  HSV composite (hue=orientation, value=magnitude)
+      bottom-right: HOG histogram arrows overlaid on the magnitude map
+    """
     if 'svg' not in df.columns or 'histogram' not in df.columns:
         print("  [F5] Skipping: missing svg or histogram columns")
         return None
 
     try:
         import torch
+        from einops import rearrange
+        from matplotlib.colors import hsv_to_rgb
         from src.patch_processing.configs import get_hog_cfg
         from src.patch_processing.hog import HOG
     except ImportError as e:
@@ -192,37 +260,64 @@ def generate_hog_figure(df, output_path, dpi=300):
     rendered = canvas_img.cpu().numpy()
     magnitude = hog_output.patches_grdt_magnitude[0, 0].cpu().numpy()
     orientation = hog_output.patches_grdt_orientation[0, 0].cpu().numpy()
-    histogram = hog_output.histograms[0, 0].cpu().numpy()
 
-    fig = plt.figure(figsize=(14, 4))
-    gs = fig.add_gridspec(1, 4, width_ratios=[1, 1, 1, 1.5])
+    # Reshape histogram to spatial grid (Nh, Nw, Nbins)
+    cw = hog_params.cell_width
+    ch_cell = hog_params.cell_height
+    Nw = rendered.shape[-1] // cw
+    Nh = rendered.shape[-2] // ch_cell
 
-    ax1 = fig.add_subplot(gs[0])
-    ax1.imshow(rendered, cmap='gray')
-    ax1.set_title('Rendered character', fontsize=9)
+    histograms_raw = hog_output.histograms[0, 0].cpu()  # (N_cells, N_bins)
+    selected_histograms = rearrange(
+        histograms_raw, '(Nh Nw) Nbins -> Nh Nw Nbins', Nh=Nh, Nw=Nw,
+    ).numpy()
+
+    # ── Build figure (2x2) ─────────────────────────────────────────
+    fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+
+    # (a) Gradient magnitude
+    ax1 = axes[0, 0]
+    im1 = ax1.imshow(magnitude, cmap='hot')
+    ax1.set_title('(a) Gradient magnitude', fontsize=10, fontweight='bold')
     ax1.axis('off')
+    plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
 
-    ax2 = fig.add_subplot(gs[1])
-    ax2.imshow(magnitude, cmap='hot')
-    ax2.set_title('Gradient magnitude', fontsize=9)
+    # (b) Gradient orientation (unsigned: 0-180)
+    ax2 = axes[0, 1]
+    im2 = ax2.imshow(orientation, cmap='hsv', vmin=0, vmax=1)
+    ax2.set_title('(b) Gradient orientation (0\u2013180\u00b0)', fontsize=10, fontweight='bold')
     ax2.axis('off')
+    cbar2 = plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+    cbar2.set_label('[0,1] \u2192 [0\u00b0,180\u00b0]', rotation=270, labelpad=20)
 
-    ax3 = fig.add_subplot(gs[2])
-    ax3.imshow(orientation, cmap='hsv')
-    ax3.set_title('Gradient orientation', fontsize=9)
-    ax3.axis('off')
+    # (c) HSV composite  (hue = orientation, value = magnitude)
+    ax_hsv = axes[1, 0]
+    mag_norm = magnitude / magnitude.max() if magnitude.max() > 0 else magnitude
+    hsv_image = np.zeros((*orientation.shape, 3))
+    hsv_image[..., 0] = orientation          # H: [0,1] already
+    hsv_image[..., 1] = 1.0                  # S: full
+    hsv_image[..., 2] = mag_norm             # V: brightness = magnitude
+    rgb_image = hsv_to_rgb(hsv_image)
+    ax_hsv.imshow(rgb_image)
+    ax_hsv.set_title('(c) HSV composite\n(hue=orientation, value=magnitude)',
+                     fontsize=10, fontweight='bold')
+    ax_hsv.axis('off')
 
-    ax4 = fig.add_subplot(gs[3])
-    im = ax4.imshow(histogram, aspect='auto', cmap='viridis', interpolation='nearest')
-    ax4.set_xlabel('Orientation bin', fontsize=8)
-    ax4.set_ylabel('Cell index', fontsize=8)
-    ax4.set_title('HOG descriptor', fontsize=9)
-    plt.colorbar(im, ax=ax4, shrink=0.8)
+    # (d) HOG histogram arrows
+    ax3 = axes[1, 1]
+    _plot_hog_arrows(
+        ax3, magnitude, selected_histograms,
+        Nh, Nw, ch_cell, cw, num_bins,
+    )
+    ax3.set_title(
+        f'(d) HOG descriptor ({Nh}\u00d7{Nw} cells, {num_bins} bins)',
+        fontsize=10, fontweight='bold',
+    )
 
     char = df.loc[idx, 'char_chat'] if 'char_chat' in df.columns else ''
     fig.suptitle(
-        f'HOG descriptor computation — character "{char}"',
-        fontsize=11, fontweight='bold',
+        f'HOG descriptor computation \u2014 character \u201c{char}\u201d',
+        fontsize=12, fontweight='bold',
     )
 
     plt.tight_layout()

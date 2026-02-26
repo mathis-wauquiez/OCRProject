@@ -128,7 +128,7 @@ def render_page(
 
         # Render the representative SVG at this bounding-box size
         svg_obj = dataframe.loc[rep_idx, 'svg']
-        char_img = Image.fromarray(render_svg_grayscale(svg_obj, w, h, dpi=dpi), mode='L')
+        char_img = Image.fromarray(render_svg_grayscale(svg_obj, w, h, dpi=dpi))
 
         # Convert grayscale mask to coloured RGBA
         char_arr = np.array(char_img)
