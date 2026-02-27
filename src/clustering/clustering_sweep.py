@@ -343,6 +343,10 @@ class graphClusteringSweep:
         _to_series = lambda d: pd.Series([d[i] for i in range(N)],
                                          index=dataframe.index)
         dataframe['degree_centrality'] = _to_series(nx.degree_centrality(graph))
+        dataframe['edge_weight_sum'] = _to_series(
+            {n: sum(d.get('weight', 1.0) for d in graph[n].values())
+             for n in range(N)}
+        )
         dataframe['betweenness_centrality'] = _to_series(nx.betweenness_centrality(graph))
         dataframe['closeness_centrality'] = _to_series(nx.closeness_centrality(graph))
         try:

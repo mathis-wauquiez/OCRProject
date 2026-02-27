@@ -13,11 +13,15 @@ from .metrics import UNKNOWN_LABEL
 def compute_representative(subdf):
     """Return the dataframe index of the most representative patch.
 
-    Uses degree_centrality by default.  Change the column name below to
-    switch criterion (betweenness_centrality, closeness_centrality,
-    eigenvector_centrality, …).
+    Uses degree_centrality by default, with ties broken by
+    edge_weight_sum (total symmetrised NLFA over incident edges).
     """
-    return int(subdf['degree_centrality'].idxmax())
+    dc = subdf['degree_centrality']
+    max_dc = dc.max()
+    tied = subdf[dc == max_dc]
+    if len(tied) == 1 or 'edge_weight_sum' not in subdf.columns:
+        return int(tied.index[0])
+    return int(tied['edge_weight_sum'].idxmax())
 
 
 # ================================================================
