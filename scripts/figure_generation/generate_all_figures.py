@@ -16,6 +16,9 @@ Usage:
 
     Generate only specific figures:
     python scripts/figure_generation/generate_all_figures.py --only glossary reverse_manuscript
+
+    Generate glossary with ground-truth labels:
+    python scripts/figure_generation/generate_all_figures.py --only glossary --label-col char_consensus
 """
 
 import argparse
@@ -63,6 +66,19 @@ def main():
     )
     parser.add_argument("--dpi", type=int, default=300)
     parser.add_argument(
+        "--label-col", type=str, default="char_consensus",
+        help="Label column for glossary and experiment figures: "
+             "char_chat (OCR), char_consensus, or char_transcription.",
+    )
+    parser.add_argument(
+        "--alignment-viz-dir", type=Path, default=None,
+        help="Path to alignment_viz directory with page_NNN.png images.",
+    )
+    parser.add_argument(
+        "--alignment-page", type=int, default=None,
+        help="0-based page index for alignment visualization.",
+    )
+    parser.add_argument(
         "--only", nargs='+', default=None,
         help="Only generate these figures. Options: "
              "experiments glossary reverse_manuscript main_figure "
@@ -81,25 +97,38 @@ def main():
         return targets is None or name in targets
 
     # ─────────────────────────────────────────────────────────────
-    #  1. Experiment figures (F4-F10, LaTeX macros, ablations)
+    #  1. Experiment figures (F4-F10, LaTeX macros, ablations,
+    #     discrepancy stats, t-SNE selection, alignment viz)
     # ─────────────────────────────────────────────────────────────
     if should_run('experiments'):
         experiment_args = [
             '--clustering-dir', clust_dir,
             '--output-dir', out,
+            '--label-col', args.label_col,
             '--dpi', args.dpi,
         ]
         if preproc_dir.exists():
             experiment_args += ['--preprocessing-dir', preproc_dir]
+        if args.alignment_viz_dir is not None:
+            experiment_args += ['--alignment-viz-dir', args.alignment_viz_dir]
+        elif preproc_dir.exists():
+            # Auto-detect alignment_viz in preprocessing dir
+            candidate = preproc_dir / 'alignment_viz'
+            if candidate.exists():
+                experiment_args += ['--alignment-viz-dir', candidate]
+        if args.alignment_page is not None:
+            experiment_args += ['--alignment-page', args.alignment_page]
         run_script('generate_experiment_figures.py', experiment_args, args.dry_run)
 
     # ─────────────────────────────────────────────────────────────
-    #  2. Glossary figure
+    #  2. Glossary figures (3 pages: most frequent, least frequent,
+    #     intermediate cluster size)
     # ─────────────────────────────────────────────────────────────
     if should_run('glossary'):
         run_script('generate_glossary_figure.py', [
             '--dataframe', clust_dir / 'clustered_patches',
-            '--output', out / 'glossary.pdf',
+            '--output-dir', out,
+            '--label-col', args.label_col,
             '--dpi', args.dpi,
         ], args.dry_run)
 

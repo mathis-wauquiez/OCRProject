@@ -173,17 +173,85 @@ Figure~\ref{fig:cluster-gallery} shows example clusters.
 Pure clusters demonstrate that the pipeline reliably groups visually identical characters.
 Impure clusters reveal failure modes: typically characters with very similar stroke structures that differ in a single stroke.
 
-% ── Glossary ──
+% ── Glossary (most frequent) ──
 \begin{figure*}[t]
     \centering
     \includegraphics[width=\textwidth]{figures/generated/glossary.pdf}
-    \caption{Character glossary produced by the pipeline, showing the \nGlossaryEntries{} most frequent characters sorted by occurrence count.
-    Each cell displays the vectorised representative of one cluster along with the OCR-predicted label and count.}
+    \caption{Character glossary --- most frequent characters, sorted by occurrence count.
+    Each cell displays the vectorised representative of one cluster along with the predicted label and count.}
     \label{fig:glossary}
 \end{figure*}
 
-The final glossary (Fig.~\ref{fig:glossary}) provides a comprehensive inventory of all distinct character forms found in the book.
-% TODO: Comment on the quality, discuss Zipfian frequency distribution.
+The final glossary (Fig.~\ref{fig:glossary}) provides a comprehensive inventory of the most frequent character forms found in the book.
+The frequency distribution follows a Zipfian law: a small number of characters account for the majority of occurrences.
+
+% ── Glossary (least frequent) ──
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/generated/glossary_least_frequent.pdf}
+    \caption{Character glossary --- least frequent characters, sorted by ascending occurrence count.
+    These rare characters are the most challenging for clustering: with few examples, the pipeline has limited evidence for grouping.}
+    \label{fig:glossary-least-frequent}
+\end{figure*}
+
+Figure~\ref{fig:glossary-least-frequent} displays the least frequent characters.
+These are particularly challenging because the clustering pipeline has very few instances to form reliable groups, and many correspond to rare or specialised vocabulary.
+
+% ── Glossary (intermediate cluster size) ──
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/generated/glossary_intermediate.pdf}
+    \caption{Character glossary --- characters whose main cluster has exactly two members.
+    These intermediate-size clusters reveal borderline cases where the pipeline found a small but non-trivial grouping.}
+    \label{fig:glossary-intermediate}
+\end{figure*}
+
+Figure~\ref{fig:glossary-intermediate} shows characters whose main cluster contains exactly two members.
+These intermediate clusters are informative: they indicate cases where the pipeline found sufficient visual similarity to group two instances, but not enough evidence to attract additional members.
+
+% ── Discrepancy statistics ──
+\paragraph{Discrepancy analysis.}
+% Uncomment once generated:
+% \input{figures/generated/discrepancy_table}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/generated/discrepancy.pdf}
+    \caption{Discrepancy between OCR predictions and ground-truth labels.
+    \emph{Left:} distribution of patches across match categories.
+    \emph{Right:} the most frequently confused character pairs (OCR prediction $\to$ ground truth).}
+    \label{fig:discrepancy}
+\end{figure}
+
+Figure~\ref{fig:discrepancy} analyses the discrepancy between OCR predictions ($\ell_\text{chat}$) and ground-truth labels ($\ell_\text{consensus}$).
+The confused-pairs chart reveals systematic OCR errors, typically between visually similar characters that differ in a single stroke.
+
+% ── t-SNE cluster visualizations ──
+\paragraph{Cluster structure (t-SNE).}
+Selected clusters are visualised using t-SNE projections of their HOG descriptors in the supplementary materials.
+These plots reveal the internal structure of clusters: pure clusters form tight, unimodal groups, while impure clusters often show distinct sub-populations that could be separated with finer resolution.
+% To include specific t-SNE plots:
+% \begin{figure}[t]
+%     \centering
+%     \includegraphics[width=0.8\linewidth]{figures/generated/tsne_clusters/tsne_cluster_<ID>_<tag>.pdf}
+%     \caption{t-SNE layout of cluster <ID>.}
+% \end{figure}
+
+% ── Alignment visualization ──
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/generated/alignment_viz.pdf}
+    \caption{Transcription alignment visualisation for a sample page.
+    Each patch is annotated with its OCR prediction and aligned transcription label.
+    Colour coding: \textcolor{green!70!black}{green} = match,
+    \textcolor{orange}{orange} = OCR mismatch (corrected by transcription),
+    \textcolor{red}{red} = deleted (no transcription counterpart),
+    \textcolor{gray}{grey} = unknown OCR prediction.}
+    \label{fig:alignment-viz}
+\end{figure*}
+
+Figure~\ref{fig:alignment-viz} illustrates the Levenshtein-based alignment between OCR predictions and the external transcription for a representative page.
+The colour coding highlights where the OCR model succeeded or failed, providing insight into the quality of the labelling process.
 
 % ── Reverse manuscript ──
 \begin{figure*}[t]

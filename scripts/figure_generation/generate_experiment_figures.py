@@ -823,6 +823,332 @@ def export_ablation_tables(sweep_df, output_dir, dpi=300):
 
 
 # ════════════════════════════════════════════════════════════════════
+#  Discrepancy statistics
+# ════════════════════════════════════════════════════════════════════
+
+def generate_discrepancy_figure(
+    dataframe, label_col='char_consensus', output_path=None, dpi=300,
+):
+    """Generate discrepancy statistics between OCR and ground-truth labels.
+
+    Produces a two-panel figure:
+      Left:  bar chart of per-category discrepancy counts
+             (match / mismatch / OCR-only / GT-only).
+      Right: top-N most confused character pairs
+             (OCR predicted X but GT says Y).
+
+    Parameters
+    ----------
+    dataframe : pd.DataFrame
+        Must have ``char_chat`` and *label_col* columns.
+    label_col : str
+        Ground-truth label column.
+    output_path : Path or None
+    dpi : int
+    """
+    if 'char_chat' not in dataframe.columns or label_col not in dataframe.columns:
+        print(f"  [Discrepancy] Skipping: missing char_chat or {label_col}")
+        return None
+
+    ocr = dataframe['char_chat'].fillna(UNKNOWN_LABEL)
+    gt = dataframe[label_col].fillna(UNKNOWN_LABEL)
+
+    # Classify each patch
+    both_known = (ocr != UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
+    ocr_only = (ocr != UNKNOWN_LABEL) & (gt == UNKNOWN_LABEL)
+    gt_only = (ocr == UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
+    both_unknown = (ocr == UNKNOWN_LABEL) & (gt == UNKNOWN_LABEL)
+
+    match = both_known & (ocr == gt)
+    mismatch = both_known & (ocr != gt)
+
+    counts = {
+        'Match': int(match.sum()),
+        'Mismatch': int(mismatch.sum()),
+        'OCR only': int(ocr_only.sum()),
+        'GT only': int(gt_only.sum()),
+        'Both unknown': int(both_unknown.sum()),
+    }
+    total = len(dataframe)
+
+    # Build confusion pairs for mismatches
+    confusion = {}
+    mismatch_idx = dataframe.index[mismatch]
+    for idx in mismatch_idx:
+        pair = (ocr.loc[idx], gt.loc[idx])
+        confusion[pair] = confusion.get(pair, 0) + 1
+    top_confused = sorted(confusion.items(), key=lambda x: x[1], reverse=True)[:20]
+
+    # ── Figure ─────────────────────────────────────────────────────
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+    # Left: category bar chart
+    cats = list(counts.keys())
+    vals = list(counts.values())
+    colors = ['#2ecc71', '#e74c3c', '#3498db', '#f39c12', '#95a5a6']
+    bars = ax1.bar(cats, vals, color=colors, edgecolor='white', linewidth=0.5)
+    for bar, v in zip(bars, vals):
+        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + total * 0.005,
+                 f'{v}\n({v / total * 100:.1f}%)',
+                 ha='center', va='bottom', fontsize=8)
+    ax1.set_ylabel('Number of patches', fontsize=10)
+    ax1.set_title(f'OCR vs Ground Truth Discrepancy (n={total})', fontsize=11)
+    ax1.grid(axis='y', alpha=0.3)
+
+    # Right: top confused pairs
+    if top_confused:
+        pair_labels = [f'{ocr_c}\u2192{gt_c}' for (ocr_c, gt_c), _ in top_confused]
+        pair_counts = [c for _, c in top_confused]
+        y_pos = np.arange(len(pair_labels))
+        ax2.barh(y_pos, pair_counts, color='#e74c3c', alpha=0.7, edgecolor='white')
+        ax2.set_yticks(y_pos)
+        ax2.set_yticklabels(pair_labels, fontsize=8)
+        ax2.invert_yaxis()
+        ax2.set_xlabel('Count', fontsize=10)
+        ax2.set_title('Top Confused Pairs (OCR\u2192GT)', fontsize=11)
+        ax2.grid(axis='x', alpha=0.3)
+        for i, c in enumerate(pair_counts):
+            ax2.text(c + max(pair_counts) * 0.01, i, str(c), va='center', fontsize=7)
+    else:
+        ax2.text(0.5, 0.5, 'No mismatches found', ha='center', va='center',
+                 transform=ax2.transAxes, fontsize=12)
+        ax2.set_title('Top Confused Pairs', fontsize=11)
+
+    plt.tight_layout()
+
+    if output_path:
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
+        plt.close(fig)
+        print(f"  [Discrepancy] Saved: {output_path}")
+    return fig
+
+
+def generate_discrepancy_table(
+    dataframe, label_col='char_consensus', output_path=None,
+):
+    """Generate a LaTeX table summarising discrepancy statistics.
+
+    Returns the table string and optionally writes it to a .tex file.
+    """
+    if 'char_chat' not in dataframe.columns or label_col not in dataframe.columns:
+        print(f"  [Discrepancy table] Skipping: missing columns")
+        return None
+
+    ocr = dataframe['char_chat'].fillna(UNKNOWN_LABEL)
+    gt = dataframe[label_col].fillna(UNKNOWN_LABEL)
+
+    both_known = (ocr != UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
+    match = both_known & (ocr == gt)
+    mismatch = both_known & (ocr != gt)
+    ocr_only = (ocr != UNKNOWN_LABEL) & (gt == UNKNOWN_LABEL)
+    gt_only = (ocr == UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
+
+    n = len(dataframe)
+    n_both = int(both_known.sum())
+    n_match = int(match.sum())
+    n_mismatch = int(mismatch.sum())
+    n_ocr_only = int(ocr_only.sum())
+    n_gt_only = int(gt_only.sum())
+
+    accuracy = n_match / n_both * 100 if n_both > 0 else 0
+
+    lines = [
+        '% Auto-generated discrepancy statistics',
+        r'\begin{table}[t]',
+        r'    \centering\small',
+        r'    \caption{Discrepancy between OCR predictions and ground-truth labels.}',
+        r'    \label{tab:discrepancy}',
+        r'    \begin{tabular}{@{}lr@{}}',
+        r'        \toprule',
+        r'        \textbf{Category} & \textbf{Count (\%)} \\',
+        r'        \midrule',
+        f'        Total patches & {n:,} \\\\',
+        f'        Both labels known & {n_both:,} ({n_both/n*100:.1f}\\%) \\\\',
+        f'        \\quad Match (OCR = GT) & {n_match:,} ({n_match/n*100:.1f}\\%) \\\\',
+        f'        \\quad Mismatch (OCR $\\neq$ GT) & {n_mismatch:,} ({n_mismatch/n*100:.1f}\\%) \\\\',
+        f'        OCR known, GT unknown & {n_ocr_only:,} ({n_ocr_only/n*100:.1f}\\%) \\\\',
+        f'        GT known, OCR unknown & {n_gt_only:,} ({n_gt_only/n*100:.1f}\\%) \\\\',
+        r'        \midrule',
+        f'        OCR accuracy (where both known) & {accuracy:.1f}\\% \\\\',
+        r'        \bottomrule',
+        r'    \end{tabular}',
+        r'\end{table}',
+    ]
+    content = '\n'.join(lines) + '\n'
+
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content)
+        print(f"  [Discrepancy table] Saved: {output_path}")
+    return content
+
+
+# ════════════════════════════════════════════════════════════════════
+#  t-SNE cluster visualizations (selected clusters)
+# ════════════════════════════════════════════════════════════════════
+
+def generate_tsne_selection(
+    dataframe, graph, label_col='char_consensus',
+    n_pure=2, n_impure=2, n_large=1,
+    output_dir=None, dpi=200,
+):
+    """Generate t-SNE visualizations for a selection of representative clusters.
+
+    Selects:
+      - ``n_pure`` highly pure clusters (purity >= 0.95, size >= 10)
+      - ``n_impure`` impure clusters (purity < 0.8, size >= 10)
+      - ``n_large`` largest clusters
+
+    Parameters
+    ----------
+    dataframe : pd.DataFrame
+    graph : networkx.Graph
+    label_col : str
+    n_pure, n_impure, n_large : int
+    output_dir : Path or None
+    dpi : int
+    """
+    if graph is None or 'membership' not in dataframe.columns:
+        print("  [t-SNE] Skipping: missing graph or membership column")
+        return None
+
+    from src.clustering.tsne_plot import plot_community_tsne
+
+    purity_df, _ = compute_cluster_purity(dataframe, 'membership', label_col)
+    purity_df = purity_df.dropna(subset=['Purity'])
+
+    selected = set()
+
+    # Pure clusters (high purity, decent size)
+    pure = (purity_df[(purity_df['Purity'] >= 0.95) & (purity_df['Size'] >= 10)]
+            .sort_values('Size', ascending=False))
+    for cid in pure.head(n_pure).index:
+        selected.add(('pure', cid))
+
+    # Impure clusters
+    impure = (purity_df[(purity_df['Purity'] < 0.8) & (purity_df['Size'] >= 10)]
+              .sort_values('Size', ascending=False))
+    for cid in impure.head(n_impure).index:
+        selected.add(('impure', cid))
+
+    # Largest clusters
+    largest = purity_df.sort_values('Size', ascending=False)
+    for cid in largest.head(n_large).index:
+        selected.add(('large', cid))
+
+    if not selected:
+        print("  [t-SNE] No suitable clusters found")
+        return None
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    saved = []
+    for tag, cid in sorted(selected, key=lambda x: x[1]):
+        size = purity_df.loc[cid, 'Size']
+        purity = purity_df.loc[cid, 'Purity']
+
+        # Adapt figsize to cluster size
+        if size < 30:
+            figsize = (10, 8)
+        elif size < 100:
+            figsize = (16, 13)
+        else:
+            figsize = (22, 18)
+
+        try:
+            fig = plot_community_tsne(
+                cluster_id=cid,
+                dataframe=dataframe,
+                graph=graph,
+                target_lbl=label_col,
+                figsize=figsize,
+                dpi=dpi,
+            )
+            fname = f'tsne_cluster_{cid}_{tag}.pdf'
+            fig.savefig(
+                output_dir / fname, dpi=dpi,
+                bbox_inches='tight', facecolor='white',
+            )
+            plt.close(fig)
+            saved.append(fname)
+            print(f"  [t-SNE] Saved: {fname}  (size={size}, purity={purity:.2f})")
+        except Exception as e:
+            print(f"  [t-SNE] Failed cluster {cid}: {e}")
+
+    print(f"  [t-SNE] Generated {len(saved)} t-SNE figures in {output_dir}")
+    return saved
+
+
+# ════════════════════════════════════════════════════════════════════
+#  Alignment visualization for paper
+# ════════════════════════════════════════════════════════════════════
+
+def copy_alignment_viz(
+    alignment_viz_dir, output_dir, page_idx=None, dpi=150,
+):
+    """Copy/convert alignment visualization images for the paper.
+
+    If *page_idx* is None, picks the first available page.
+
+    Parameters
+    ----------
+    alignment_viz_dir : Path
+        Directory containing ``page_NNN.png`` images.
+    output_dir : Path
+        Paper figures output directory.
+    page_idx : int or None
+        0-based page index.  If None, auto-selects the first available.
+    dpi : int
+    """
+    alignment_viz_dir = Path(alignment_viz_dir)
+    if not alignment_viz_dir.exists():
+        print(f"  [Alignment] Skipping: {alignment_viz_dir} does not exist")
+        return None
+
+    pages = sorted(alignment_viz_dir.glob('page_*.png'))
+    if not pages:
+        print(f"  [Alignment] Skipping: no page images in {alignment_viz_dir}")
+        return None
+
+    # Select page
+    if page_idx is not None:
+        target = alignment_viz_dir / f'page_{page_idx:03d}.png'
+        if not target.exists():
+            print(f"  [Alignment] page_{page_idx:03d}.png not found, using first available")
+            target = pages[0]
+    else:
+        target = pages[0]
+
+    # Read and re-save as PDF for LaTeX inclusion
+    from PIL import Image as PILImage
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    img = PILImage.open(target)
+    img_w, img_h = img.size
+    fig_w = 16
+    fig_h = fig_w * img_h / img_w
+
+    fig, ax = plt.subplots(1, 1, figsize=(fig_w, fig_h))
+    ax.imshow(np.array(img))
+    ax.set_axis_off()
+    ax.set_title(f'Alignment Visualization \u2014 {target.stem}',
+                 fontsize=12, fontweight='bold')
+    plt.tight_layout()
+
+    out_path = output_dir / 'alignment_viz.pdf'
+    fig.savefig(out_path, dpi=dpi, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+
+    print(f"  [Alignment] Saved: {out_path}  (source: {target.name})")
+    print(f"  [Alignment] Available pages: {[p.stem for p in pages]}")
+    return out_path
+
+
+# ════════════════════════════════════════════════════════════════════
 #  Main
 # ════════════════════════════════════════════════════════════════════
 
@@ -844,6 +1170,14 @@ def main():
     )
     parser.add_argument("--label-col", type=str, default="char_consensus")
     parser.add_argument("--dpi", type=int, default=300)
+    parser.add_argument(
+        "--alignment-viz-dir", type=Path, default=None,
+        help="Path to alignment_viz directory with page_NNN.png images.",
+    )
+    parser.add_argument(
+        "--alignment-page", type=int, default=None,
+        help="0-based page index for alignment visualization.",
+    )
     args = parser.parse_args()
 
     out = args.output_dir
@@ -898,6 +1232,40 @@ def main():
     generate_split_threshold_figure(
         split_sweep_df, out / "split_threshold.pdf", dpi=args.dpi,
     )
+
+    # Discrepancy statistics
+    generate_discrepancy_figure(
+        clust_df, label_col=args.label_col,
+        output_path=out / "discrepancy.pdf", dpi=args.dpi,
+    )
+    generate_discrepancy_table(
+        clust_df, label_col=args.label_col,
+        output_path=out / "discrepancy_table.tex",
+    )
+
+    # t-SNE cluster visualizations (selected)
+    if graph is not None:
+        generate_tsne_selection(
+            clust_df, graph, label_col=args.label_col,
+            output_dir=out / "tsne_clusters", dpi=args.dpi,
+        )
+
+    # Alignment visualization
+    viz_dir = args.alignment_viz_dir
+    if viz_dir is None:
+        # Try default locations
+        for candidate in [
+            clust_dir.parent / 'preprocessing' / clust_dir.name / 'alignment_viz',
+            args.preprocessing_dir / 'alignment_viz' if args.preprocessing_dir else None,
+        ]:
+            if candidate and candidate.exists():
+                viz_dir = candidate
+                break
+    if viz_dir is not None:
+        copy_alignment_viz(
+            viz_dir, out,
+            page_idx=args.alignment_page, dpi=args.dpi,
+        )
 
     # LaTeX macros
     if graph is not None:
