@@ -837,21 +837,27 @@ def generate_discrepancy_figure(
       Right: top-N most confused character pairs
              (OCR predicted X but GT says Y).
 
+    The ground-truth column is always ``char_transcription`` (the external
+    transcription), *not* ``char_consensus``, which is derived from the
+    agreement of OCR and transcription and would therefore never produce
+    mismatches or GT-only entries when compared against ``char_chat``.
+
     Parameters
     ----------
     dataframe : pd.DataFrame
-        Must have ``char_chat`` and *label_col* columns.
+        Must have ``char_chat`` and ``char_transcription`` columns.
     label_col : str
-        Ground-truth label column.
+        Ignored for this figure (kept for call-signature compatibility).
     output_path : Path or None
     dpi : int
     """
-    if 'char_chat' not in dataframe.columns or label_col not in dataframe.columns:
-        print(f"  [Discrepancy] Skipping: missing char_chat or {label_col}")
+    gt_col = 'char_transcription'
+    if 'char_chat' not in dataframe.columns or gt_col not in dataframe.columns:
+        print(f"  [Discrepancy] Skipping: missing char_chat or {gt_col}")
         return None
 
     ocr = dataframe['char_chat'].fillna(UNKNOWN_LABEL)
-    gt = dataframe[label_col].fillna(UNKNOWN_LABEL)
+    gt = dataframe[gt_col].fillna(UNKNOWN_LABEL)
 
     # Classify each patch
     both_known = (ocr != UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
@@ -929,14 +935,18 @@ def generate_discrepancy_table(
 ):
     """Generate a LaTeX table summarising discrepancy statistics.
 
+    Uses ``char_transcription`` as ground truth (see
+    :func:`generate_discrepancy_figure` for the rationale).
+
     Returns the table string and optionally writes it to a .tex file.
     """
-    if 'char_chat' not in dataframe.columns or label_col not in dataframe.columns:
+    gt_col = 'char_transcription'
+    if 'char_chat' not in dataframe.columns or gt_col not in dataframe.columns:
         print(f"  [Discrepancy table] Skipping: missing columns")
         return None
 
     ocr = dataframe['char_chat'].fillna(UNKNOWN_LABEL)
-    gt = dataframe[label_col].fillna(UNKNOWN_LABEL)
+    gt = dataframe[gt_col].fillna(UNKNOWN_LABEL)
 
     both_known = (ocr != UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
     match = both_known & (ocr == gt)
