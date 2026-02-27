@@ -6,11 +6,14 @@
 \label{sec:methodology}
 
 Our goal is to produce, from a collection of scanned historical document pages, a vectorised glossary of the distinct character forms they contain—together with the ability to reprint any page from that glossary alone.
-Achieving this requires solving four successive problems.
+The key observation behind the pipeline is that a printed book contains many copies of each character, and that the printing defects affecting each copy are essentially random: ink may spread, paper may be locally damaged, or the woodblock may have worn unevenly, but these artefacts vary from one occurrence to the next.
+By comparing all instances of the same character, the \emph{cleanest} copy—the one closest to the intended form—can be identified as the one that best matches all the others, since it is statistically unlikely for the same defect to appear in every copy.
+
+Turning this observation into a working system requires solving four successive problems.
 First, individual characters must be located on each page and tentatively identified (\S\ref{sec:extraction}).
 The resulting raster patches, however, differ in resolution, skew, and noise level, so a normalisation step converts them into a representation suitable for geometric comparison (\S\ref{sec:preprocessing}).
 With comparable representations in hand, a statistical framework decides which characters depict the same glyph and groups them accordingly (\S\ref{sec:acontrario}).
-Finally, a refinement stage corrects errors in that grouping, selects a representative for each character type, and reconstructs pages from the recovered models (\S\ref{sec:refinement}).
+Finally, a refinement stage corrects errors in that grouping, selects the cleanest representative for each character type, and reconstructs pages from the recovered models (\S\ref{sec:refinement}).
 Figure~\ref{fig:pipeline-overview} gives an overview.
 
 \input{figures/methodology/fig_pipeline_overview}
@@ -26,6 +29,7 @@ This stage takes a scanned page image and returns, for each detected character, 
 % ── (a) CRAFT-based character detection ──
 \paragraph{Character detection.}
 Character regions are detected with CRAFT~\cite{baek2019character} (\textit{Character Region Awareness for Text Detection}), a fully convolutional network that produces per-pixel text score maps $S_\text{text}(x, y) \in [0,1]$.
+Unlike word-level detectors, CRAFT localises individual characters, which is essential for CJK scripts where each character is a self-contained unit without inter-character ligatures.
 We use pre-trained weights without fine-tuning, at magnification ratio~$5.0$ (canvas size 1280\,px).
 
 Individual character regions are extracted via dual-threshold watershed: pixels with $S_\text{text} \ge \tau_\text{text} = 0.6$ serve as seeds, and basins expand until $S_\text{text}$ drops below $\tau_\text{mask} = 0.3$.
@@ -33,9 +37,11 @@ Components whose area falls below 10\,px are discarded as noise.
 
 % ── (b) Binarisation and component association ──
 \paragraph{Binarisation and component association.}
-In parallel, the page is binarised with Otsu's method.
-The resulting binary connected components must then be associated with CRAFT detections: each component is assigned to the CRAFT region whose elliptic distance, measured via negative Mahalanobis distance from the region's inertia tensor, is smallest.
-This yields character candidates that carry both a binary image and a precise bounding box.
+CRAFT produces soft, fuzzy score maps; we need crisp binary masks.
+The page is therefore binarised in parallel with Otsu's method, yielding sharp connected components.
+These components must then be matched to CRAFT detections: each binary component is assigned to the CRAFT region whose elliptic distance, measured via negative Mahalanobis distance from the region's inertia tensor, is smallest.
+The Mahalanobis distance accounts for the elongated shape of some character regions (e.g.\ horizontal or vertical strokes) that a simple Euclidean distance would misjudge.
+The result is a set of character candidates that carry both a binary image and a precise bounding box.
 Candidates whose bounding box falls outside the expected range ($30 \times 30$ to $250 \times 250$\,px) or whose filled area is too small ($<700$\,px$^2$) are filtered out.
 
 % ── M1.1: Extraction segmentation figure ──
@@ -98,7 +104,9 @@ When an external transcription is available, it is aligned to the OCR output via
 \label{sec:preprocessing}
 
 The raster patches produced by extraction are not yet comparable: they differ in skew, noise level, and resolution.
-This stage normalises them into resolution-independent SVG outlines that faithfully preserve the original calligraphy while enabling robust geometric comparison downstream.
+More fundamentally, pixel-level comparison conflates true shape differences with irrelevant imaging artefacts.
+What we need is a representation that captures the geometric form of each character—its strokes, their relative positions and orientations—while discarding noise and resolution dependence.
+This stage achieves that by correcting rotation, cleaning the binary mask, and converting the result into a smooth vector outline.
 Figure~\ref{fig:preprocessing} illustrates the three steps on representative examples.
 
 % ── M2.1: Preprocessing before/after figure ──
@@ -114,8 +122,8 @@ Figure~\ref{fig:preprocessing} illustrates the three steps on representative exa
 
 % ── (a) Rotation correction ──
 \paragraph{Rotation correction.}
-Document skew is estimated with LSD~\cite{von2010lsd} (\textit{Line Segment Detector}).
-Dominant line-segment orientations are aggregated via a length-weighted circular mean:
+Scanned pages are rarely perfectly aligned, and the skew angle may vary from one scan to the next.
+We estimate it with LSD~\cite{von2010lsd} (\textit{Line Segment Detector}), aggregating dominant line-segment orientations via a length-weighted circular mean:
 \begin{equation}
     \theta = \tfrac{1}{2}\arg\!\left(\textstyle\sum_i w_i \, e^{2\mathrm{i}\alpha_i}\right),
     \label{eq:skew}
@@ -136,7 +144,9 @@ The cleaned patches are vectorised using affine scale-space smoothing~\cite{alva
     \label{eq:gass}
 \end{equation}
 where $\kappa$ denotes the curvature of the level line through each point.
-The $1/3$ exponent makes the evolution affine-invariant: the smoothed shape does not depend on the viewing angle, a property essential for comparing characters printed under varying conditions.
+The $1/3$ exponent makes the evolution affine-invariant: the smoothed shape does not depend on the viewing angle.
+This property is particularly relevant for woodblock-printed documents, where the printing pressure, paper curvature, and ink spread introduce local affine distortions that differ from one copy to the next.
+Ordinary Gaussian smoothing would reduce noise but also blur sharp stroke endings; affine scale-space smoothing instead removes small-scale irregularities while preserving the large-scale calligraphic structure.
 The resulting smooth contours are converted to SVG outlines, giving each character a resolution-independent, calligraphy-faithful representation.
 
 
@@ -146,11 +156,13 @@ The resulting smooth contours are converted to SVG outlines, giving each charact
 
 With all characters represented as comparable vector outlines, the central question becomes:
 which of them depict the same glyph?
-This stage answers it in three steps—describing each character, scoring pairwise similarity within a principled statistical framework, and partitioning the resulting similarity graph.
+This stage answers it in three steps—describing each character with a shape descriptor, scoring pairwise similarity within a principled statistical framework, and partitioning the resulting similarity graph into clusters.
 
 % ── (a) HOG descriptors ──
 \paragraph{HOG descriptors.}
 Each character outline is described by a Histogram of Oriented Gradients (HOG) descriptor~\cite{dalal2005histograms}.
+HOG is a natural choice for Chinese characters, whose identity is largely determined by the number, orientation, and spatial arrangement of their strokes: two characters that differ by a single stroke will produce measurably different orientation histograms, while two copies of the same character will agree on the dominant orientations despite local noise.
+
 The SVG is rasterised at a fixed resolution into a grid of $C \times C$ cells.
 Gradients are computed with Gaussian derivative filters (smoothing parameter~$\sigma$) and accumulated into $B$ unsigned orientation bins per cell via trilinear interpolation:
 \begin{equation}
@@ -173,6 +185,8 @@ The full descriptor is normalised with L2-clip-L2 (clipping threshold~$t$); spec
 % ── (b) Dissimilarity metric ──
 \paragraph{Dissimilarity metric.}
 Pairs of HOG descriptors $\mathbf{h}^A, \mathbf{h}^B$ (each with $K$ cells of $B$ bins) are compared using the Circular Earth Mover's Distance (CEMD) per cell.
+Because orientation bins are arranged on a circle, a naive bin-to-bin distance such as L2 would treat adjacent bins as independent and penalise small angular shifts disproportionately.
+CEMD instead measures the minimum amount of ``work'' needed to transform one histogram into the other along the circular axis.
 With cumulative difference $X_j = \sum_{i=1}^{j} h^A_{k,i} - \sum_{i=1}^{j} h^B_{k,i}$, the per-cell cost is:
 \begin{equation}
     \text{CEMD}(h^A_k, h^B_k) = \min_{s \in \{0,\ldots,B{-}2\}} \frac{1}{B}\sum_{j=1}^{B} |X_j - X_s|.
@@ -182,8 +196,9 @@ The total dissimilarity between two characters is $D(\mathbf{h}^A, \mathbf{h}^B)
 
 % ── (c) Number of False Alarms ──
 \paragraph{Number of False Alarms.}
-Raw dissimilarities are not directly comparable across characters—a rare, intricate glyph will have a different baseline distance distribution than a frequent, simple one.
-We therefore assess similarity through an \textit{a contrario} framework~\cite{desolneux2000meaningful}, which provides a statistically grounded, per-character matching threshold.
+Raw dissimilarities are not directly comparable across characters: a rare, intricate glyph with many strokes will have a higher baseline distance to anything else than a simple, frequent one.
+A fixed threshold would therefore be too strict for complex characters and too lax for simple ones.
+The \textit{a contrario} framework~\cite{desolneux2000meaningful} resolves this by normalising each dissimilarity relative to the distribution observed for that specific character.
 
 Under the null model (random pairing), $D$ is approximately Gaussian with character-specific moments $(\mu_A, \sigma_A^2)$ estimated from all pairwise comparisons involving character~$A$.
 The Number of False Alarms is:
@@ -194,6 +209,14 @@ The Number of False Alarms is:
 where $\Phi$ is the standard normal CDF and $N$ the number of tokens.
 Two characters are deemed \emph{meaningfully} similar when $\text{NFA} \le \varepsilon$.
 In practice we store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \mu_A}{\sigma_A}\bigr)$.
+
+Beyond deciding which characters match, the \textit{a contrario} framework provides a natural criterion for selecting the best representative of each character type.
+Each printed occurrence of a character can be thought of as the ideal glyph corrupted by random defects—ink spread, paper damage, uneven woodblock wear.
+Because these defects are essentially random, the probability that the same artefact appears in every copy is negligible.
+The cleanest copy, the one closest to the ideal form, will therefore be meaningfully similar to the most other copies: its NFA scores will be low (i.e.\ its NLFA scores high) against a large number of partners, giving it the highest degree in the similarity graph.
+Copies with severe defects, by contrast, will fail the NFA test against many partners, because their distortions push them away from the shared ideal.
+This means that, once clustering is done, the most central node in each cluster—the one connected to the most neighbours—is also the one most likely to be defect-free.
+We exploit this property directly in glossary construction (\S\ref{sec:refinement}).
 
 % ── M3.2: A contrario distribution figure ──
 \begin{figure}[t]
@@ -214,7 +237,9 @@ An edge $(i,j)$ is created when both directions pass the significance threshold 
     (i,j) \in E \iff \text{NLFA}(i,j) \ge \tau_\text{NFA} \;\wedge\; \text{NLFA}(j,i) \ge \tau_\text{NFA}.
     \label{eq:reciprocal}
 \end{equation}
-The reciprocal condition ensures that similarity is mutual, discarding asymmetric matches.
+The reciprocal condition is important: similarity in the NFA sense is directional, because each character has its own null distribution.
+Character~$A$ may find~$B$ surprisingly close (relative to $A$'s own distribution), while $B$ does not find~$A$ surprising (relative to $B$'s distribution).
+Requiring both directions ensures that only mutually confirmed similarities produce edges, filtering out spurious one-sided matches.
 Edge weights are the symmetrised NLFA: $w_{ij} = \tfrac{1}{2}[\text{NLFA}(i,j) + \text{NLFA}(j,i)]$.
 
 % ── (e) Correlation clustering ──
@@ -264,7 +289,8 @@ A two-stage refinement corrects these errors before the glossary is assembled (F
 
 % ── (a) Hausdorff-based splitting ──
 \paragraph{Stage~1: Hausdorff-based splitting.}
-Clusters with five or more members are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} computed on registered binary images.
+The HOG-based NFA graph captures overall shape similarity at the level of stroke orientations, but it may not distinguish characters that share the same gross structure yet differ in fine details.
+To catch such cases, clusters with five or more members are re-examined using pairwise Hausdorff distances~\cite{rony2025hausdorff} computed on registered binary images.
 Registration relies on multiscale inverse compositional alignment~\cite{briand2018ipol}, which compensates for residual positional and scale differences between patches.
 An average-linkage dendrogram is built from the Hausdorff distance matrix and cut at threshold~$\tau_\text{split}$, selected via an ARI-based sweep on OCR-derived labels (Section~\ref{sec:sensitivity}).
 
@@ -282,6 +308,7 @@ After both stages, every refined cluster is pure with respect to OCR labels and 
 \paragraph{Glossary construction.}
 The refined clusters are consolidated into a \emph{character glossary}.
 For each OCR-predicted character, the cluster containing the most occurrences is identified, and its most central member—by degree centrality in the NFA similarity graph—is chosen as the representative.
+As argued in Section~\ref{sec:acontrario}, the most central member is also the one most likely to be free of printing defects: it is the copy that best matches all others, and therefore the closest approximation to the intended glyph.
 Ties between equally sized clusters are broken by mean intra-cluster dissimilarity, favouring the more cohesive group.
 The glossary records the dominant label, cluster size, and representative index for every distinct character form, sorted by frequency.
 
@@ -289,4 +316,4 @@ The glossary records the dominant label, cluster size, and representative index 
 \paragraph{Reverse printing.}
 Given the glossary, any page can be reconstructed as a vector document.
 For each character detection on a page, the glossary representative of its cluster is looked up and its SVG outline is rendered at the corresponding bounding-box position and scale.
-The result is a faithful vector reproduction of the original page layout, assembled entirely from the recovered character models.
+Because the representative was selected as the cleanest copy, the reconstructed page is not merely a reproduction of the original—it is a \emph{restored} version, in which printing defects have been replaced by the best available exemplar of each character.
