@@ -6,7 +6,7 @@
 % ============================================================================
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=\textwidth]{figures/generated/main_pipeline.pdf}
+    \includegraphics[width=\textwidth]{\figMainPipeline}
     \caption{End-to-end pipeline demonstration on a page from the
     \emph{Ying huan zhi lue} (1848).
     \textbf{(a)}~Input scan.
@@ -14,7 +14,8 @@
     binarisation, Mahalanobis assignment, and post-filtering yield individual
     character bounding boxes.
     \textbf{(c)}~Layout analysis identifies text columns (coloured overlays)
-    and assigns a right-to-left, top-to-bottom reading order.
+    and sub-columns (dashed red lines), then assigns a right-to-left,
+    top-to-bottom reading order.
     \textbf{(d)}~Subcolumn crops are fed to the Kraken OCR model; predictions
     are matched to CRAFT detections via the Hungarian algorithm on vertical
     distances.

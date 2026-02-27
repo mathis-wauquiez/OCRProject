@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
 """
-Generate the character glossary figure for the paper.
+Generate character glossary figures for the paper.
 
-Produces a grid of representative vectorised characters, sorted by
-frequency, with their OCR label printed below each cell.
-This is the main output of the reverse typography pipeline.
+Produces three glossary pages:
+  1. Most frequent characters (sorted by descending occurrence count)
+  2. Least frequent characters (sorted by ascending occurrence count)
+  3. Intermediate-size clusters (characters whose main cluster has exactly
+     ``--intermediate-size`` members, default 2)
+
+Each page is a grid of representative vectorised characters with their
+label and count printed below.
+
+Supports switching between OCR labels (``char_chat``) and ground-truth
+labels (``char_consensus`` or ``char_transcription``) via ``--label-col``.
 
 Usage:
     python scripts/figure_generation/generate_glossary_figure.py \
         --dataframe results/clustering/book1/clustered_patches \
-        --output     paper/figures/generated/glossary.pdf
+        --output-dir paper/figures/generated
 
     Optional:
-        --max-chars  300     Max characters to show
-        --cols       20      Number of columns in the grid
-        --cell-size  0.55    Size of each cell in inches
-        --dpi        600     Output DPI
+        --label-col  char_consensus   Use ground-truth labels
+        --max-chars  300              Max characters per page
+        --cols       20               Grid columns
+        --cell-size  0.55             Cell size in inches
+        --dpi        600              Output DPI
+        --intermediate-size 2         Cluster size for intermediate page
 """
 
 import argparse
@@ -26,7 +36,6 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPTS_DIR.parent.parent
@@ -42,20 +51,53 @@ from src.clustering.post_clustering import build_glossary, compute_representativ
 from src.clustering.metrics import UNKNOWN_LABEL
 
 
-def build_glossary_from_dataframe(dataframe):
+# ════════════════════════════════════════════════════════════════════
+#  Glossary building helpers
+# ════════════════════════════════════════════════════════════════════
+
+def build_glossary_from_dataframe(dataframe, label_col='char_chat'):
     """Build a glossary dataframe from the clustering output.
 
-    If the glossary was not saved, rebuild it from the membership and
-    label columns.
+    Parameters
+    ----------
+    dataframe : pd.DataFrame
+        Clustered dataframe with ``label_col``, ``membership``, and
+        ``degree_centrality`` columns.
+    label_col : str
+        Which label column to use for character identity.
+        ``'char_chat'`` = OCR predictions (default),
+        ``'char_consensus'`` or ``'char_transcription'`` = ground truth.
+
+    Returns
+    -------
+    pd.DataFrame
+        Glossary with columns: character, n, n_chars_c, n_c, cluster_id,
+        representative_idx.  Sorted by ``n`` descending.
     """
-    # Need char_chat, membership, degree_centrality at minimum
-    required = ['char_chat', 'membership', 'degree_centrality']
+    required = [label_col, 'membership', 'degree_centrality']
     for col in required:
         if col not in dataframe.columns:
             raise ValueError(f"Missing required column: {col}")
 
-    return build_glossary(dataframe)
+    # Temporarily swap the label column to char_chat so build_glossary
+    # picks it up (build_glossary hard-codes 'char_chat').
+    if label_col != 'char_chat':
+        tmp = dataframe['char_chat'].copy() if 'char_chat' in dataframe.columns else None
+        dataframe['char_chat'] = dataframe[label_col]
+        glossary = build_glossary(dataframe)
+        if tmp is not None:
+            dataframe['char_chat'] = tmp
+        else:
+            dataframe.drop(columns='char_chat', inplace=True)
+    else:
+        glossary = build_glossary(dataframe)
 
+    return glossary
+
+
+# ════════════════════════════════════════════════════════════════════
+#  Single-page glossary figure
+# ════════════════════════════════════════════════════════════════════
 
 def generate_glossary_figure(
     dataframe,
@@ -67,6 +109,7 @@ def generate_glossary_figure(
     dpi=600,
     render_size=256,
     show_frequency=True,
+    title='Character Glossary \u2014 Representative Vectorised Characters',
 ):
     """Generate a publication-quality glossary grid figure.
 
@@ -75,7 +118,7 @@ def generate_glossary_figure(
     dataframe : pd.DataFrame
         Full clustered dataframe with 'svg' column.
     glossary_df : pd.DataFrame
-        One row per character, sorted by frequency (descending).
+        One row per character, pre-sorted and pre-filtered.
         Must have 'character', 'n', 'representative_idx'.
     output_path : Path or None
         Where to save; if None, show interactively.
@@ -91,13 +134,19 @@ def generate_glossary_figure(
         Pixel size for SVG rendering (higher = sharper).
     show_frequency : bool
         If True, show occurrence count below the character label.
+    title : str
+        Figure super-title.
     """
     glossary_df = glossary_df.head(max_chars).reset_index(drop=True)
     n_chars = len(glossary_df)
+    if n_chars == 0:
+        print(f"  [glossary] Skipping {output_path}: no entries")
+        return None
+
     n_rows = int(np.ceil(n_chars / n_cols))
 
-    fig_w = n_cols * cell_size + 0.4  # small margin
-    fig_h = n_rows * cell_size * 1.35 + 0.6  # extra for labels
+    fig_w = n_cols * cell_size + 0.4
+    fig_h = n_rows * cell_size * 1.35 + 0.6
 
     fig, axes = plt.subplots(
         n_rows, n_cols,
@@ -124,7 +173,6 @@ def generate_glossary_figure(
         char_label = entry['character']
         freq = int(entry['n'])
 
-        # Render the SVG at high resolution for crisp output
         svg_obj = dataframe.loc[rep_idx, 'svg']
         try:
             img = render_svg_grayscale(svg_obj, render_size, render_size)
@@ -136,7 +184,6 @@ def generate_glossary_figure(
             interpolation='lanczos',
         )
 
-        # Character label below
         label_text = char_label if char_label != UNKNOWN_LABEL else '?'
         if show_frequency:
             label_text += f'\n({freq})'
@@ -148,61 +195,174 @@ def generate_glossary_figure(
             fontsize=5,
         )
 
-    fig.suptitle(
-        'Character Glossary \u2014 Representative Vectorised Characters',
-        fontsize=10, fontweight='bold', y=0.995,
-    )
+    fig.suptitle(title, fontsize=10, fontweight='bold', y=0.995)
 
     if output_path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=dpi, bbox_inches='tight', facecolor='white')
         plt.close(fig)
-        print(f"Glossary figure saved to {output_path}")
+        print(f"  [glossary] Saved: {output_path}")
     else:
         plt.show()
 
     return fig
 
 
+# ════════════════════════════════════════════════════════════════════
+#  Multi-page generation
+# ════════════════════════════════════════════════════════════════════
+
+def generate_all_glossary_pages(
+    dataframe,
+    glossary_df,
+    output_dir,
+    label_col='char_chat',
+    max_chars=300,
+    n_cols=20,
+    cell_size=0.55,
+    dpi=600,
+    render_size=256,
+    intermediate_size=2,
+):
+    """Generate all three glossary pages.
+
+    Parameters
+    ----------
+    dataframe : pd.DataFrame
+        Full clustered dataframe.
+    glossary_df : pd.DataFrame
+        Full glossary (sorted descending by ``n``).
+    output_dir : Path
+        Directory for output PDFs.
+    label_col : str
+        Label column used (for titles).
+    max_chars : int
+        Max entries per page.
+    intermediate_size : int
+        Target main-cluster size for the intermediate page.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    label_tag = 'ground truth' if label_col != 'char_chat' else 'OCR'
+    common_kw = dict(
+        dataframe=dataframe, max_chars=max_chars, n_cols=n_cols,
+        cell_size=cell_size, dpi=dpi, render_size=render_size,
+    )
+
+    # ── Page 1: most frequent characters ────────────────────────────
+    most_freq = glossary_df.head(max_chars)
+    generate_glossary_figure(
+        glossary_df=most_freq,
+        output_path=output_dir / 'glossary.pdf',
+        title=f'Character Glossary \u2014 Most Frequent ({label_tag} labels)',
+        **common_kw,
+    )
+
+    # ── Page 2: least frequent characters ───────────────────────────
+    least_freq = (glossary_df
+                  .sort_values('n', ascending=True)
+                  .head(max_chars)
+                  .reset_index(drop=True))
+    generate_glossary_figure(
+        glossary_df=least_freq,
+        output_path=output_dir / 'glossary_least_frequent.pdf',
+        title=f'Character Glossary \u2014 Least Frequent ({label_tag} labels)',
+        **common_kw,
+    )
+
+    # ── Page 3: intermediate cluster size ───────────────────────────
+    # Characters whose main cluster has exactly ``intermediate_size`` members.
+    intermediate_df = (glossary_df[glossary_df['n_c'] == intermediate_size]
+                       .sort_values('n', ascending=False)
+                       .reset_index(drop=True))
+    generate_glossary_figure(
+        glossary_df=intermediate_df,
+        output_path=output_dir / 'glossary_intermediate.pdf',
+        title=(f'Character Glossary \u2014 '
+               f'Main Cluster Size = {intermediate_size} ({label_tag} labels)'),
+        **common_kw,
+    )
+
+    print(f"  [glossary] Generated 3 glossary pages in {output_dir}")
+    return {
+        'most_frequent': most_freq,
+        'least_frequent': least_freq,
+        'intermediate': intermediate_df,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════
+#  CLI
+# ════════════════════════════════════════════════════════════════════
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate the character glossary figure for the paper."
+        description="Generate character glossary figures for the paper.",
     )
     parser.add_argument(
         "--dataframe", required=True, type=Path,
         help="Path to the clustered_patches dataframe directory.",
     )
     parser.add_argument(
-        "--output", type=Path,
-        default=Path("paper/figures/generated/glossary.pdf"),
-        help="Output path for the figure.",
+        "--output", type=Path, default=None,
+        help="Single-page output path (backward compatible). "
+             "Mutually exclusive with --output-dir.",
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=None,
+        help="Directory for multi-page glossary output.",
+    )
+    parser.add_argument(
+        "--label-col", type=str, default="char_chat",
+        help="Label column to use: char_chat (OCR), char_consensus, "
+             "or char_transcription (ground truth).",
     )
     parser.add_argument("--max-chars", type=int, default=300)
     parser.add_argument("--cols", type=int, default=20)
     parser.add_argument("--cell-size", type=float, default=0.55)
     parser.add_argument("--dpi", type=int, default=600)
     parser.add_argument("--render-size", type=int, default=256)
+    parser.add_argument(
+        "--intermediate-size", type=int, default=2,
+        help="Main cluster size for the intermediate glossary page.",
+    )
     args = parser.parse_args()
 
     print(f"Loading dataframe from {args.dataframe}...")
     dataframe = load_dataframe(args.dataframe)
     print(f"Loaded {len(dataframe)} patches")
 
-    print("Building glossary...")
-    glossary_df = build_glossary_from_dataframe(dataframe)
+    print(f"Building glossary (label_col={args.label_col})...")
+    glossary_df = build_glossary_from_dataframe(dataframe, label_col=args.label_col)
     print(f"Glossary has {len(glossary_df)} character entries")
 
-    generate_glossary_figure(
-        dataframe,
-        glossary_df,
-        output_path=args.output,
-        max_chars=args.max_chars,
-        n_cols=args.cols,
-        cell_size=args.cell_size,
-        dpi=args.dpi,
-        render_size=args.render_size,
-    )
+    if args.output_dir is not None:
+        # Multi-page mode
+        generate_all_glossary_pages(
+            dataframe, glossary_df,
+            output_dir=args.output_dir,
+            label_col=args.label_col,
+            max_chars=args.max_chars,
+            n_cols=args.cols,
+            cell_size=args.cell_size,
+            dpi=args.dpi,
+            render_size=args.render_size,
+            intermediate_size=args.intermediate_size,
+        )
+    else:
+        # Single-page mode (backward compatible)
+        output = args.output or Path("paper/figures/generated/glossary.pdf")
+        generate_glossary_figure(
+            dataframe, glossary_df,
+            output_path=output,
+            max_chars=args.max_chars,
+            n_cols=args.cols,
+            cell_size=args.cell_size,
+            dpi=args.dpi,
+            render_size=args.render_size,
+        )
 
 
 if __name__ == "__main__":

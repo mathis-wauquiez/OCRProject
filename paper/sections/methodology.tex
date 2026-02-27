@@ -5,38 +5,99 @@
 \section{Methodology}
 \label{sec:methodology}
 
-Our pipeline processes scanned historical document images to produce a vectorised character glossary through four stages: (1)~character extraction, (2)~preprocessing including vectorisation, OCR, and feature computation, (3)~\textit{a contrario} matching and graph-based clustering, and (4)~post-clustering refinement and glossary construction.
+Our pipeline processes scanned historical document images to produce a vectorised character glossary through four stages: (1)~character extraction and recognition, (2)~preprocessing, (3)~\textit{a contrario} matching and graph-based clustering, and (4)~cluster refinement, glossary construction, and reverse printing.
 Figure~\ref{fig:pipeline-overview} presents an overview.
 
 \input{figures/methodology/fig_pipeline_overview}
 
 
 % ============================================================================
-\subsection{Character Extraction}
+\subsection{Character Extraction and Recognition}
 \label{sec:extraction}
 
+This stage takes a scanned page image and produces, for each detected character, a binary image, a bounding box, and an OCR-predicted label.
+
+% ── (a) CRAFT-based character detection ──
+\paragraph{CRAFT-based character detection.}
 We use CRAFT~\cite{baek2019character} (\textit{Character Region Awareness for Text Detection}), a fully convolutional network producing per-pixel text score maps $S_\text{text}(x, y) \in [0,1]$.
 We use pre-trained weights without fine-tuning, with magnification ratio~$5.0$ (canvas size 1280\,px).
 
 Connected components are extracted via dual-threshold watershed: pixels with $S_\text{text} \ge \tau_\text{text} = 0.6$ serve as seeds, and basins expand to a lower mask threshold $\tau_\text{mask} = 0.3$.
 Components with area below 10\,px are discarded as noise (area opening).
 
+% ── (b) Binarisation and component association ──
+\paragraph{Binarisation and component association.}
 In parallel, the page is binarised (Otsu's method) and binary connected components are associated with CRAFT detections via negative Mahalanobis distance using each CRAFT region's inertia tensor.
 Each binary component is assigned to the CRAFT detection whose elliptic distance is smallest, yielding a set of character candidates with both a binary image and a precise bounding box.
 Filters discard components outside the expected bounding-box range ($30 \times 30$ to $250 \times 250$\,px) or with insufficient filled area ($<700$\,px$^2$).
+
+% ── M1.1: Extraction segmentation figure ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{\figExtractionSeg}
+    \caption{Character extraction result on a representative page.
+    Bounding boxes show the final character candidates after CRAFT detection,
+    watershed segmentation, Mahalanobis association, and post-filtering.
+    Colour coding indicates deletion reasons for discarded components.}
+    \label{fig:extraction-segmentation}
+\end{figure}
+
+% ── M1.3: CRAFT deletion reasons figure ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{\figCraftDeletion}
+    \caption{CRAFT detection with deletion-reason overlay.
+    Components that pass all filters are shown in green; discarded
+    components are colour-coded by rejection criterion (red~=~area too
+    small, orange~=~aspect ratio too low, purple~=~high aspect ratio,
+    pink~=~box too small, magenta~=~box too large, blue~=~too close to
+    page contour).}
+    \label{fig:craft-deletion}
+\end{figure}
+
+% ── (c) Optical character recognition ──
+\paragraph{Layout analysis and reading order.}
+A projection-based layout module identifies columns and sub-columns from vertical ink-density profiles.
+Columns are detected by computing horizontal projections on the binarised image and thresholding the resulting profile.
+Within each column, rows are segmented using vertical projections, and further subdivision into sub-columns handles cases where multiple text lanes coexist within a single column.
+The reading order follows the right-to-left, top-to-bottom convention of classical Chinese, assigning each character an integer index.
+Figure~\ref{fig:layout-analysis} illustrates the column and sub-column detection on a representative page.
+
+% ── M1.4: Layout analysis figure ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{\figLayoutAnalysis}
+    \caption{Layout analysis result showing column and sub-column detection.
+    \emph{Top:} horizontal ink-density projection with detected column
+    boundaries.
+    \emph{Bottom:} page image with column overlays (distinct colours) and
+    sub-column boundaries (dashed lines within each column).
+    The reading order proceeds right-to-left across columns and
+    top-to-bottom within each sub-column.}
+    \label{fig:layout-analysis}
+\end{figure}
+
+\paragraph{Character recognition.}
+Characters are labelled using a Kraken-based~\cite{kiessling2019kraken} model trained on similar historical Chinese documents, operating at the sub-column level.
+A baseline is extracted by taking the median of the $x$-barycenters of the characters within each sub-column.
+Predicted character sequences are spatially matched to CRAFT detections via the Hungarian algorithm on vertical distances.
+When no detection can be matched, the character is assigned an unknown token~$\square$.
+Each character receives a label $\ell_i \in \mathcal{A} \cup \{\square\}$.
+
+When an external transcription is available, it is aligned to the OCR predictions using Levenshtein edit distance, yielding a ground-truth label for each patch (Section~\ref{sec:eval-protocol}).
 
 
 % ============================================================================
 \subsection{Preprocessing}
 \label{sec:preprocessing}
 
-Each extracted character undergoes preprocessing to produce a vectorised representation, an OCR label, and a HOG descriptor.
+Each extracted character patch undergoes rotation correction, morphological cleaning, and vectorisation to produce a resolution-independent SVG outline faithful to the original calligraphy.
 Figure~\ref{fig:preprocessing} illustrates the three stages on representative examples.
 
-% ── Generated figure: preprocessing before/after ──
+% ── M2.1: Preprocessing before/after figure ──
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/generated/preprocessing.pdf}
+    \includegraphics[width=\linewidth]{\figPreprocessing}
     \caption{Preprocessing pipeline for individual character patches.
     \emph{Top row:} raw image patches extracted by CRAFT.
     \emph{Middle row:} binarised patches after Otsu thresholding and morphological cleaning.
@@ -44,12 +105,24 @@ Figure~\ref{fig:preprocessing} illustrates the three stages on representative ex
     \label{fig:preprocessing}
 \end{figure}
 
-\paragraph{Layout analysis and reading order.}
-A projection-based layout module identifies columns and sub-columns from vertical ink-density profiles.
-Within each sub-column, the reading order follows right-to-left, top-to-bottom (classical Chinese), assigning each character an integer index.
+% ── (a) Rotation correction ──
+\paragraph{Rotation correction.}
+Document skew is estimated using LSD~\cite{von2010lsd} (\textit{Line Segment Detector}).
+Dominant line segment orientations are aggregated via a length-weighted circular mean:
+\begin{equation}
+    \theta = \tfrac{1}{2}\arg\!\left(\textstyle\sum_i w_i \, e^{2\mathrm{i}\alpha_i}\right),
+    \label{eq:skew}
+\end{equation}
+where $w_i$ and $\alpha_i$ are the length and orientation of each detected line segment.
+The estimated angle $\theta$ is applied as a global rotation correction to each character patch.
 
+% ── (b) Ink filter ──
+\paragraph{Ink filter.}
+Binary patches are cleaned by area opening and area closing (removing foreground specks below 5\,px and background holes below 10\,px), producing a crisp binary image suitable for vectorisation.
+
+% ── (c) Vectorisation via affine scale-space ──
 \paragraph{Vectorisation via affine scale-space.}
-Binary patches are cleaned by area opening and closing (removing foreground specks below 5\,px and background holes below 10\,px), then vectorised using affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}.
+Cleaned binary patches are vectorised using affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}.
 This geometric PDE evolves each level line of the image according to its curvature:
 \begin{equation}
     \frac{\partial u}{\partial t} = |\nabla u|\, \kappa^{1/3},
@@ -57,50 +130,39 @@ This geometric PDE evolves each level line of the image according to its curvatu
 \end{equation}
 where $\kappa$ denotes the curvature of the level line through each point.
 The $1/3$ exponent makes this evolution affine-invariant: the smoothed shape is independent of the viewing angle, which is essential for comparing characters printed under different conditions.
-The resulting smooth level lines are converted to SVG vector outlines.
-Document skew is estimated using LSD~\cite{von2010lsd} and corrected via the length-weighted circular mean of line segment orientations:
-\begin{equation}
-    \theta = \tfrac{1}{2}\arg\!\left(\textstyle\sum_i w_i \, e^{2\mathrm{i}\alpha_i}\right).
-    \label{eq:skew}
-\end{equation}
-
-\paragraph{Character recognition (CHAT).}
-Characters are labelled using a Kraken-based~\cite{kiessling2019kraken} model trained on similar historical Chinese documents, operating at the sub-column level.
-A baseline is extracted by taking the median of the $x$-barycenters of the characters within each sub-column.
-Predicted character sequences are spatially matched to CRAFT detections via the Hungarian algorithm on vertical distances.
-When no detection can be matched, the character is assigned an unknown token~$\square$.
-Each character receives a label $\ell_i \in \mathcal{A} \cup \{\square\}$.
+The resulting smooth level lines are converted to SVG vector outlines, yielding a calligraphy-faithful, resolution-independent representation of each character.
 
 
-% ---------- HOG ----------
+% ============================================================================
+\subsection{A Contrario Matching and Clustering}
+\label{sec:acontrario}
+
+This stage computes a visual descriptor for each character, assesses pairwise similarity using a statistical framework, and partitions the characters into clusters.
+
+% ── (a) HOG descriptors ──
 \paragraph{HOG descriptors.}
-Each character is described by a HOG descriptor~\cite{dalal2005histograms} computed on a rendered SVG image ($24 \times 24$\,px cells, 256\,DPI).
-Gradients use Gaussian derivative filters ($\sigma = 5$, kernel size~31\,px).
-Unsigned orientations are accumulated into $B = 16$ bins per cell via trilinear interpolation:
+Each character is described by a Histogram of Oriented Gradients (HOG) descriptor~\cite{dalal2005histograms} computed on a rendered SVG image.
+The character is rasterised at a fixed resolution into a grid of $C \times C$ cells.
+Gradients are computed using Gaussian derivative filters with smoothing parameter~$\sigma$ and accumulated into $B$ unsigned orientation bins per cell via trilinear interpolation:
 \begin{equation}
     h_b = \sum_{(x,y) \in \text{cell}} m(x,y) \cdot \bigl[(1 - \alpha)\,\delta_{b, \lfloor \hat\theta \rfloor} + \alpha\,\delta_{b, (\lfloor \hat\theta \rfloor + 1) \bmod B}\bigr],
 \end{equation}
 where $\hat\theta = \theta \cdot B$ and $\alpha = \hat\theta - \lfloor\hat\theta\rfloor$.
-The descriptor is normalised via L2-clip-L2 with clipping threshold $t = 0.2$.
+The descriptor is normalised via L2-clip-L2 with clipping threshold~$t$.
+Specific parameter values are reported in Section~\ref{sec:experiments}.
 
 \input{figures/methodology/fig_hog_descriptor}
 
-% ── Generated figure: HOG descriptor example ──
+% ── M3.1: HOG descriptor example figure ──
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/generated/hog_descriptor.pdf}
+    \includegraphics[width=\linewidth]{\figHogDescriptor}
     \caption{HOG descriptor computation on a representative character.
     From left to right: rendered SVG, gradient magnitude, gradient orientation, and the resulting HOG descriptor (orientation bins $\times$ cell index).}
     \label{fig:hog-example}
 \end{figure}
 
-
-% ============================================================================
-\subsection{A Contrario Feature Matching}
-\label{sec:acontrario}
-
-Character similarity is assessed using an \textit{a contrario} framework~\cite{desolneux2000meaningful} that provides a statistically grounded matching threshold.
-
+% ── (b) Dissimilarity metric ──
 \paragraph{Dissimilarity metric.}
 Given two HOG descriptors $\mathbf{h}^A, \mathbf{h}^B$ with $K$ cells of $B$ bins each, we compute the Circular Earth Mover's Distance (CEMD) per cell.
 For cumulative difference $X_j = \sum_{i=1}^{j} h^A_{k,i} - \sum_{i=1}^{j} h^B_{k,i}$:
@@ -110,21 +172,23 @@ For cumulative difference $X_j = \sum_{i=1}^{j} h^A_{k,i} - \sum_{i=1}^{j} h^B_{
 \end{equation}
 The total dissimilarity is $D(\mathbf{h}^A, \mathbf{h}^B) = \sum_{k=1}^{K} \text{CEMD}(h^A_k, h^B_k)$.
 
+% ── (c) Number of False Alarms ──
 \paragraph{Number of False Alarms.}
-Under the \textit{a contrario} null model, $D$ is approximately Gaussian with character-specific moments $(\mu_A, \sigma_A^2)$ estimated from all pairwise comparisons.
+Character similarity is assessed using an \textit{a contrario} framework~\cite{desolneux2000meaningful} that provides a statistically grounded matching threshold.
+Under the null model, $D$ is approximately Gaussian with character-specific moments $(\mu_A, \sigma_A^2)$ estimated from all pairwise comparisons.
 The NFA is:
 \begin{equation}
     \text{NFA}(A,B) = N^2 \cdot \Phi\!\left(\frac{D(\mathbf{h}^A, \mathbf{h}^B) - \mu_A}{\sigma_A}\right),
     \label{eq:nfa}
 \end{equation}
 where $\Phi$ is the standard normal CDF.
-Two characters are meaningfully similar when $\text{NFA} \le \varepsilon = 5 \times 10^{-4}$.
+Two characters are meaningfully similar when $\text{NFA} \le \varepsilon$.
 We store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \mu_A}{\sigma_A}\bigr)$.
 
-% ── Generated figure: a contrario distribution ──
+% ── M3.2: A contrario distribution figure ──
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/generated/a_contrario.pdf}
+    \includegraphics[width=\linewidth]{\figAContrario}
     \caption{A contrario null-hypothesis test.
     \emph{Left:} histogram of pairwise dissimilarities for a query character and the fitted Gaussian null model $\mathcal{N}(\mu_A, \sigma_A^2)$.
     Characters with dissimilarity in the far left tail are \emph{meaningful} matches.
@@ -132,17 +196,7 @@ We store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \m
     \label{fig:a-contrario}
 \end{figure}
 
-
-% ============================================================================
-\subsection{Graph Construction and Correlation Clustering}
-\label{sec:graph-clustering}
-
-\paragraph{Problem formulation.}
-We seek a partition of the $N$ character tokens into clusters, one per distinct character.
-The NFA scores $p_{ij}$ are ordinal---they rank pairs by similarity but are not calibrated probabilities---the number of distinct characters is unknown (though a lower bound is available from the OCR vocabulary), and the cluster size distribution is expected to follow a Zipf law: a few high-frequency characters and many rare ones.
-
-We cast this as a \emph{correlation clustering} problem~\cite{bansal2004correlation}: given a graph where tokens are nodes and edges encode pairwise similarity, find a partition minimising the total \emph{disagreement}---the cost of placing dissimilar tokens together plus the cost of separating similar tokens.
-
+% ── (d) Graph construction ──
 \paragraph{Similarity graph.}
 A graph $G = (V, E, w)$ is built with one vertex per character token.
 An edge $(i,j)$ is created when both NLFA values exceed threshold $\tau_\text{NFA} = -\log\varepsilon + 2\log N$:
@@ -152,6 +206,13 @@ An edge $(i,j)$ is created when both NLFA values exceed threshold $\tau_\text{NF
 \end{equation}
 The reciprocal condition discards asymmetric similarities.
 Edge weights are the symmetrised NLFA: $w_{ij} = \tfrac{1}{2}[\text{NLFA}(i,j) + \text{NLFA}(j,i)]$.
+
+% ── (e) Correlation clustering ──
+\paragraph{Problem formulation.}
+We seek a partition of the $N$ character tokens into clusters, one per distinct character.
+The NFA scores $p_{ij}$ are ordinal---they rank pairs by similarity but are not calibrated probabilities---the number of distinct characters is unknown (though a lower bound is available from the OCR vocabulary), and the cluster size distribution is expected to follow a Zipf law: a few high-frequency characters and many rare ones.
+
+We cast this as a \emph{correlation clustering} problem~\cite{bansal2004correlation}: given a graph where tokens are nodes and edges encode pairwise similarity, find a partition minimising the total \emph{disagreement}---the cost of placing dissimilar tokens together plus the cost of separating similar tokens.
 
 \paragraph{CPM objective.}
 For an unweighted-node correlation clustering problem with resolution $\gamma \in (0,1)$, the \emph{LambdaCC} disagreement objective~\cite{veldt2018correlation} is:
@@ -185,34 +246,38 @@ We sweep over both $\varepsilon$ and $\gamma$, selecting the configuration maxim
 
 
 % ============================================================================
-\subsection{Cluster Refinement}
+\subsection{Cluster Refinement, Glossary Construction, and Reverse Printing}
 \label{sec:refinement}
 
 The Leiden partition may contain impure or over-fragmented clusters.
 A sequential two-stage refinement addresses these issues (Fig.~\ref{fig:refinement-pipeline}).
 
+% ── (a) Hausdorff-based splitting ──
 \paragraph{Stage~1: Hausdorff-based splitting.}
 Large clusters ($\ge 5$ members) are inspected using pairwise Hausdorff distances~\cite{rony2025hausdorff} computed on registered binary images.
 Registration is performed via multiscale inverse compositional alignment~\cite{briand2018ipol}, which compensates for positional and scale differences between character patches.
-The Hausdorff distance matrix is used to build an average-linkage dendrogram, cut at $\tau_\text{split} = 21.5$.
-The threshold is selected via a sweep evaluated by ARI on OCR-derived labels.
+The Hausdorff distance matrix is used to build an average-linkage dendrogram, cut at threshold~$\tau_\text{split}$.
+The threshold is selected via a sweep evaluated by ARI on OCR-derived labels (Section~\ref{sec:sensitivity}).
 
+% ── (b) Label-based splitting ──
 \paragraph{Stage~2: Label-based splitting.}
 Within each cluster, members are grouped by their known OCR label.
 Groups with $\ge 2$ members become their own sub-cluster; smaller groups are dissolved into singletons.
 Unknown-label members are assigned to the dominant sub-cluster.
 
 After both stages, the refined clusters satisfy two guarantees: (i)~they are pure with respect to OCR labels, and (ii)~they are more compact in Hausdorff distance than the original Leiden clusters (average-linkage cut at $\tau_\text{split}$).
-Consequently, the most representative member of the largest cluster for a given character is a reliable glossary candidate.
 
 \input{figures/methodology/fig_refinement_pipeline}
 
-
-% ============================================================================
-\subsection{Glossary Construction}
-\label{sec:glossary}
-
+% ── Glossary construction ──
+\paragraph{Glossary construction.}
 The final output of the pipeline is a \emph{character glossary}: for each OCR-predicted character, we identify the cluster containing the most occurrences and select its most central member (by degree centrality in the NFA similarity graph) as the representative.
 When two clusters contain equally many instances of a character, we use the mean intra-cluster NFA as a tie-breaker, selecting the cluster with the lowest mean dissimilarity (highest total NFA).
 The glossary records the dominant OCR label, cluster size, and representative patch index, sorted by frequency.
-This produces an inventory of all distinct character forms in the book along with their vectorised outlines---the desired output of reverse typography.
+This produces an inventory of all distinct character forms in the book along with their vectorised outlines.
+
+% ── Reverse printing ──
+\paragraph{Reverse printing.}
+Given the glossary, the pipeline can reconstruct any page as a vector document.
+For each character detection on a page, the glossary representative of its cluster is looked up and its vectorised SVG outline is rendered at the corresponding bounding-box position and scale.
+The resulting overlay places clean vector outlines at the original character positions, producing a faithful reconstruction of the full page layout from the recovered character models.

@@ -9,12 +9,12 @@
         node distance=0.4cm and 1.0cm,
         stage/.style={
             rectangle, rounded corners=4pt, draw=black!70, thick,
-            fill=blue!8, minimum width=3.8cm, minimum height=0.9cm,
+            fill=blue!8, minimum width=4.2cm, minimum height=0.9cm,
             text centered, font=\small\bfseries
         },
         substage/.style={
             rectangle, rounded corners=2pt, draw=black!50,
-            fill=white, minimum width=3.4cm, minimum height=0.55cm,
+            fill=white, minimum width=3.8cm, minimum height=0.55cm,
             text centered, font=\footnotesize
         },
         io/.style={
@@ -33,8 +33,8 @@
     % ── Input ──
     \node[io] (input) {Scanned page images};
 
-    % ── Stage 1: Extraction ──
-    \node[stage, below=0.5cm of input] (extraction) {Stage 1: Extraction};
+    % ── Stage 1: Extraction and Recognition ──
+    \node[stage, below=0.5cm of input] (extraction) {Stage 1: Extraction \& Recognition};
     \node[substage, below=0.1cm of extraction.south west, anchor=north west, xshift=0.2cm]
         (craft) {CRAFT detection};
     \node[substage, below=0.06cm of craft]
@@ -43,23 +43,25 @@
         (binarise) {Binarisation + association};
     \node[substage, below=0.06cm of binarise]
         (charfilter) {Character filtering};
-
-    % ── Stage 2: Preprocessing ──
-    \node[stage, below=0.6cm of charfilter] (preproc) {Stage 2: Preprocessing};
-    \node[substage, below=0.1cm of preproc.south west, anchor=north west, xshift=0.2cm]
+    \node[substage, below=0.06cm of charfilter]
         (layout) {Layout analysis};
     \node[substage, below=0.06cm of layout]
-        (skew) {Skew estimation};
-    \node[substage, below=0.06cm of skew]
-        (inkfilt) {Ink filter + vectorisation};
-    \node[substage, below=0.06cm of inkfilt]
-        (chatocr) {CHAT OCR};
-    \node[substage, below=0.06cm of chatocr]
-        (hogcomp) {HOG computation};
+        (chatocr) {CHAT OCR + matching};
 
-    % ── Stage 3: Clustering ──
-    \node[stage, below=0.6cm of hogcomp] (cluster) {Stage 3: Clustering};
+    % ── Stage 2: Preprocessing ──
+    \node[stage, below=0.6cm of chatocr] (preproc) {Stage 2: Preprocessing};
+    \node[substage, below=0.1cm of preproc.south west, anchor=north west, xshift=0.2cm]
+        (skew) {Rotation correction (LSD)};
+    \node[substage, below=0.06cm of skew]
+        (inkfilt) {Ink filter};
+    \node[substage, below=0.06cm of inkfilt]
+        (vect) {Vectorisation (GASS)};
+
+    % ── Stage 3: Matching and Clustering ──
+    \node[stage, below=0.6cm of vect] (cluster) {Stage 3: Matching \& Clustering};
     \node[substage, below=0.1cm of cluster.south west, anchor=north west, xshift=0.2cm]
+        (hogcomp) {HOG computation};
+    \node[substage, below=0.06cm of hogcomp]
         (acontrario) {\textit{A contrario} matching};
     \node[substage, below=0.06cm of acontrario]
         (graph) {Graph construction};
@@ -67,27 +69,29 @@
         (leiden) {Leiden community detection};
 
     % ── Stage 4: Refinement ──
-    \node[stage, below=0.6cm of leiden] (refine) {Stage 4: Refinement};
+    \node[stage, below=0.6cm of leiden] (refine) {Stage 4: Refinement \& Glossary};
     \node[substage, below=0.1cm of refine.south west, anchor=north west, xshift=0.2cm]
         (hausdorff) {Hausdorff splitting};
     \node[substage, below=0.06cm of hausdorff]
         (labelsplit) {Label-based splitting};
+    \node[substage, below=0.06cm of labelsplit]
+        (glossary) {Glossary construction};
 
     % ── Output ──
-    \node[io, below=0.5cm of labelsplit] (output) {Vectorised character glossary};
+    \node[io, below=0.5cm of glossary] (output) {Vectorised character glossary};
 
     % ── Arrows ──
     \draw[arrow] (input) -- (extraction);
-    \draw[arrow] (charfilter.south) -- ++(0,-0.2) -| (preproc);
-    \draw[arrow] (hogcomp.south) -- ++(0,-0.2) -| (cluster);
+    \draw[arrow] (chatocr.south) -- ++(0,-0.2) -| (preproc);
+    \draw[arrow] (vect.south) -- ++(0,-0.2) -| (cluster);
     \draw[arrow] (leiden.south) -- ++(0,-0.2) -| (refine);
-    \draw[arrow] (labelsplit.south) -- ++(0,-0.2) -| (output);
+    \draw[arrow] (glossary.south) -- ++(0,-0.2) -| (output);
 
     % ── Side annotations ──
     \node[right=1.0cm of extraction, text=gray, font=\footnotesize\itshape, text width=3cm]
         {Per page\\GPU (CRAFT)};
     \node[right=1.0cm of preproc, text=gray, font=\footnotesize\itshape, text width=3cm]
-        {Per page\\CPU + GPU};
+        {Per patch\\CPU};
     \node[right=1.0cm of cluster, text=gray, font=\footnotesize\itshape, text width=3cm]
         {All pages\\GPU (matching)};
     \node[right=1.0cm of refine, text=gray, font=\footnotesize\itshape, text width=3cm]
@@ -97,6 +101,6 @@
     }
     \caption{Overview of the reverse typography pipeline.
     Scanned page images are processed through four sequential stages to produce a vectorised character glossary.
-    Stages are annotated with their computational scope (per-page vs.\ global) and primary hardware usage.}
+    Stages are annotated with their computational scope (per-page, per-patch, or global) and primary hardware usage.}
     \label{fig:pipeline-overview}
 \end{figure}
