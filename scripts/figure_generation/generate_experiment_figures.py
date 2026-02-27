@@ -89,19 +89,26 @@ def generate_preprocessing_figure(df, output_path, n_examples=6, dpi=300):
         print(f"  [F4] Skipping: missing columns {missing}")
         return None
 
-    # Pick diverse examples (different characters)
-    indices = []
+    # Pick diverse examples (different characters) with a fixed seed
+    # for reproducibility.
+    rng = np.random.RandomState(42)
     if 'char_chat' in df.columns:
-        seen = set()
-        for idx in df.index:
-            char = df.loc[idx, 'char_chat']
-            if char not in seen and len(indices) < n_examples:
-                indices.append(idx)
-                seen.add(char)
-    if len(indices) < n_examples:
-        for idx in df.index:
-            if idx not in indices and len(indices) < n_examples:
-                indices.append(idx)
+        # Group by character, sample one index per unique character,
+        # then draw n_examples uniformly from that pool.
+        char_groups = df.groupby('char_chat').apply(
+            lambda g: g.index[rng.randint(len(g))]
+        )
+        # Exclude unknown labels
+        char_groups = char_groups[char_groups.index != UNKNOWN_LABEL]
+        if len(char_groups) > n_examples:
+            chosen = rng.choice(char_groups.values, n_examples, replace=False)
+        else:
+            chosen = char_groups.values
+        indices = list(chosen)
+    else:
+        pool = df.index.tolist()
+        indices = list(rng.choice(pool, min(n_examples, len(pool)),
+                                  replace=False))
 
     n = len(indices)
     fig, axes = plt.subplots(3, n, figsize=(n * 1.8, 3 * 1.8))
