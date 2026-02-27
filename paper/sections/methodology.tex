@@ -5,15 +5,17 @@
 \section{Methodology}
 \label{sec:methodology}
 
-Our goal is to produce, from a collection of scanned historical document pages, a vectorised glossary of the distinct character forms they contain—together with the ability to reprint any page from that glossary alone.
-The key observation behind the pipeline is that a printed book contains many copies of each character, and that the printing defects affecting each copy are essentially random: ink may spread, paper may be locally damaged, or the woodblock may have worn unevenly, but these artefacts vary from one occurrence to the next.
-By comparing all instances of the same character, the \emph{cleanest} copy—the one closest to the intended form—can be identified as the one that best matches all the others, since it is statistically unlikely for the same defect to appear in every copy.
+Our goal is to produce, from a collection of scanned historical document pages, a vectorised, clean glossary of the distinct character forms they contain—together with the ability to reprint any page from that glossary alone.
+The approach rests on a simple observation: each character type appears many times throughout a printed book, yet the defects affecting each occurrence—ink spread, paper damage, uneven woodblock wear—are essentially random and independent.
+The cleanest copy of a character, the one closest to the intended form, is therefore the one that best matches all the others: since it is unlikely that every printed instance would share the same artefact, defects can only reduce similarity, never increase it.
 
-Turning this observation into a working system requires solving four successive problems.
-First, individual characters must be located on each page and tentatively identified (\S\ref{sec:extraction}).
-The resulting raster patches, however, differ in resolution, skew, and noise level, so a normalisation step converts them into a representation suitable for geometric comparison (\S\ref{sec:preprocessing}).
-With comparable representations in hand, a statistical framework decides which characters depict the same glyph and groups them accordingly (\S\ref{sec:acontrario}).
-Finally, a refinement stage corrects errors in that grouping, selects the cleanest representative for each character type, and reconstructs pages from the recovered models (\S\ref{sec:refinement}).
+Exploiting this requires four steps:
+\begin{enumerate*}[label=(\roman*)]
+\item extracting individual characters from each page and attaching provisional OCR labels (\S\ref{sec:extraction}),
+\item converting the resulting raster patches into clean, vectorised glyphs (\S\ref{sec:preprocessing}),
+\item grouping characters into clusters within a principled statistical framework that naturally surfaces the cleanest representative of each type (\S\ref{sec:acontrario}), and
+\item refining these clusters and assembling the final glossary (\S\ref{sec:refinement}).
+\end{enumerate*}
 Figure~\ref{fig:pipeline-overview} gives an overview.
 
 \input{figures/methodology/fig_pipeline_overview}
