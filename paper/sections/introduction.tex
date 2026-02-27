@@ -1,7 +1,27 @@
 \section{Introduction}
 \label{sec:introduction}
 
-% TODO: Write full introduction text.  The structure below is a scaffold.
+% TODO: Write full introduction text.
+
+% a. Historical context: Chinese printing history, woodblock and movable type, character variation, calligraphy models.
+%      Some statistics & information on Chinese characters could be included 
+%      -> Characters are complex, with many strokes and intricate details, making them challenging for OCR and clustering.
+%      -> This problem is especially pronounced in historical prints, where degradation and variation are common.
+%      -> Character distribution is heavy-tailed, with a few common characters and many rare ones, complicating clustering and glossary construction.
+%      -> The problem of reconstructing character models from historical prints is important for digital preservation, palaeographic study, font reconstruction, and cross-document comparison of printing traditions.
+% b. Problem statement: Given a historical printed book, reconstruct faithful vectorised versions of the character models used to produce it, and assemble them into a character glossary.
+% c. Contribution / claims
+%       -> We formulate reverse typography as the problem of reconstructing a vectorised character glossary from historical prints
+%       -> We show that combining a contrario statistical matching on HOG descriptors + correlation clustering (CPM/Leiden) works well, and have ablations to prove some claims
+%       -> Affine scale-space vectorisation produces calligraphy-faithful beautiful SVGs
+%       -> Demonstration on a challenging historical book with unique character occurrences.
+%       -> We show how to use this method for when there's no ground truth bboxes / labels, by combining CRAFT+Kraken
+%       -> And that, moreover, our method is resilient to OCR errors
+
+% Note: this introduction is too long
+
+
+% The structure below is a scaffold.
 
 The history of Chinese printing spans more than twelve centuries.
 Woodblock printing appeared in the 8th century: entire pages were carved in reverse on wood planks, inked, and pressed onto paper.
@@ -15,16 +35,6 @@ Such a glossary enables digital preservation, palaeographic study of printing wo
 
 % ── Main figure: end-to-end pipeline demonstration ──
 \input{figures/fig_main_example}
-
-Modern OCR systems adapt poorly to historical prints due to degraded ink, irregular spacing, archaic character variants, and the absence of labelled training data.
-A fully unsupervised approach is therefore required.
-Our pipeline combines three key techniques:
-\begin{enumerate}[nosep]
-    \item \textbf{CRAFT}~\cite{baek2019character}, a learned text detector providing reliable character-level extraction without fine-tuning;
-    \item \textbf{Affine scale-space vectorisation}~\cite{alvarez1993axioms,ciomaga2017curvature}, an affine-invariant geometric PDE that smooths character boundaries into clean vector outlines;
-    \item \textbf{A contrario matching}~\cite{desolneux2000meaningful}, a statistical framework providing a principled, adaptive test for whether two character images depict the same glyph.
-\end{enumerate}
-Characters deemed similar are connected in a graph partitioned by the Leiden community detection algorithm~\cite{traag2019louvain}, and a two-stage refinement pipeline fusing visual registration and linguistic signals produces the final clusters from which the glossary is assembled.
 
 We demonstrate the method on the \emph{Ying huan zhi lue} (Brief Records of the World, 1848), a Chinese book printed from individually carved woodblocks in which every character occurrence was uniquely engraved---a maximally challenging scenario for clustering.
 The pipeline processes \nPages{} page images into approximately \nPatches{} character patches and produces a glossary of \nGlossaryEntries{} distinct character forms.

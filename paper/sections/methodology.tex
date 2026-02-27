@@ -2,6 +2,108 @@
 %  Methodology Section — Historical Document Character Clustering Pipeline
 % ============================================================================
 
+
+
+% Stage I - Character extraction and recognition
+% 
+% a. CRAFT-based character detection, with dual-threshold watershed to extract connected components.
+%
+% b. Binarisation and association of connected components to CRAFT detections.
+%
+% c. Optical Character Recogntion
+%    i) Layout analysis to determine columns, sub-columns and reading order
+%    ii) Sub-column level OCR using a Kraken-based model trained on similar historical Chinese documents
+%    iii) Spatial matching of OCR tokens to CRAFT detections via the Hungarian algorithm on vertical distances, to assign OCR labels to character patches. When no match is found, assign an unknown token.
+
+%
+% | Stage content:
+%   - M1.1 / One page with the extracted character patches (example: outputs/extraction/book1/visualizations/characters/wdl_13516_033_segmentation.png)
+%   - M1.2 / A zoom on one patch with connected components too large -> Cannot be used as a model (manual plot, should not be generated)
+%   - M1.3 / CRAFT detection blobs, filtered by area, to show the points of the layout being falsely detected as characters (examplel: outputs/extraction/book1/visualizations/craft/wdl_13516_033_deletion.png)
+%   - M1.4 / Layout analysis result, showing the detected columns and sub-columns
+%   - M1.5 / OCR result, showing the predicted character sequence for one sub-column, and the spatial matching to CRAFT detections (plots that are in preprocessing_report.html)
+%   - M1.6 / Alignment of the OCR results to the optional transcription (figure outputs/preprocessing/alignment_viz)
+%
+% Stage II - Preprocessing
+%
+% a. Rotation correction via LSD and length-weighted circular mean of line segment orientations
+% b. Ink filter: area opening and closing to remove small holes and noise specks
+% c. Vectorisation via affine scale-space smoothing, producing calligraphy-faithful SVG outlines
+%
+% | Stage content:
+%   - M2.1 / Figure with (a) raw image patch, (b) binarised patch, and (c) clean, vectorised SVG outline with super resolution. This plot must show the recognized character as well.
+%   - M2.2 / (perhaps the LSD result?)
+% 
+%
+%
+% Stage III - A contrario matching and graph-based clustering
+%
+% a. HOG descriptors computed on the vectorised character images (list all the parameters without specific values, which can be given in the experiments section)
+% b. Pairwise dissimilarities computed using the Circular Earth Mover's Distance (CEMD) on the HOG descriptors
+% c. A contrario framework to determine a statistically grounded matching threshold, computing the probability of a false alarm (NFA) for each pair of characters under a null model where dissimilarities are Gaussian
+% d. Graph construction: vertices are character tokens, edges are created when both NLFA values exceed the threshold, and weighted by the symmetrised NLFA
+% e. Correlation clustering via the Leiden algorithm to maximise the CPM quality function, sweeping over the NFA threshold and the resolution parameter to find the best clustering according to the Adjusted Rand Index. Prove the equivalence between CPM and LambdaCC, and justify the choice of CPM over modularity.
+%
+% | Stage content:
+%   - M3.1 / Figure with (a) rendered vectorised character, (b) gradient magnitude, (c) gradient orientation, and (d) the resulting HOG descriptor (orientation bins $\times$ cell index).
+%   - M3.2 / Figure with (a) histogram of pairwise dissimilarities for a query character and the fitted Gaussian null model, showing meaningful matches in the left tail; and (b) per-character null-model parameters across the corpus, with the query character marked.
+%   - M3.3 / Examples of cluster before refinement (tsne_plot.py)
+%
+% Stage IV - Cluster refinement and glossary construction
+%
+% a. Cluster refinement via Hausdorff-based splitting
+% b. Cluster refinement via OCR label splitting
+%
+% | Stage content:
+%   - M4.1 / Character catalogue examples (manually generated)
+%   - M4.2 / Glossary (old fig. 13, split in three parts: 4 rows for the most frequent clusters, 4 rows for the characters whose max cluster size is two, 4 rows for the least)
+%   - M4.3 / Reverse printed manuscript (already generated)
+%
+% | Also:
+%   - ARI etc. vs Hausdorff threshold
+%   - Discrepancy statistics
+%   - ...
+
+
+% 3. Character vectorisation
+%   We use affine scale-space smoothing, an affine-invariant geometric PDE that evolves each level line according to its curvature, producing smooth vector outlines.
+%   Document skew is estimated using LSD and corrected via the length-weighted circular mean of line segment orientations.
+%   Additionally, we apply a small filter (what is it's name already?) to clean the binary patches before vectorisation, removing small holes and noise specks.
+% 4. Glyph extraction
+%   So far, we have:
+%   - a set of (possibly noisy) vectorized character images
+%   - an OCR label
+%   We wish to get the best possible character image for each character in the book.
+%   Intuitively, this character should be the most similar to the other instances of the same character.
+%
+%   Steps for the extraction:
+%    a. Compute HOG descriptors on the vectorised character images (rendered at 256 DPI, 24x24 px cells, 16 bins per cell, Gaussian derivative filters with sigma=5 and kernel size=31 px, L2-clip-L2 normalisation with clipping threshold t=0.2).
+%    b. Compute pairwise dissimilarities using the Circular Earth Mover's Distance (CEMD) on the HOG descriptors.
+%    c. Use an a contrario framework to determine a statistically grounded matching threshold, computing the probability of a false alarm (NFA) for each pair of characters under a null model where dissimilarities are Gaussian
+%    d. Construct a graph weighted by the NFA scores and partition it using the Leiden algorithm, to minimise the correlation clustering disagreement objective (x).
+%       We sweep over the NFA threshold and the resolution parameter of the Leiden algorithm to find the best clustering according to the Adjusted Rand Index (ARI) with respect to the OCR labels.
+%    e. Refine the clusters via a three-stage process:
+%       1. Large clusters (>=5 members) are split using hierarchical clustering on pairwise Hausdorff distances computed on registered binary images (registration via multiscale inverse compositional alignment
+%       2. Split the clusters by OCR label
+%    The new clusters are:
+%       1. Guaranteed to be pure according to the OCR
+%       2. Guaranteed to be more compact in terms of Hausdorff distance (criterion: average linkage dendrogram cut at tau_split=21.5)
+%    Therefore, in the biggest cluster, the most representative character is likely to be a good candidate for the glossary.
+%    When the two biggest clusters have the same size, we use the intra NFA as a tie-breaker, selecting the cluster with the lowest mean intra-cluster NFA.
+%    Criterions for the representative:
+%       a - the character that minimises the mean intra-cluster dissimilarity.
+%       b - the most central according to the degree or weighted degree in the similarity graph.
+%       c - ...
+
+
+% Figures:
+% - Overview of character extraction, layout analysis, OCR transcription, transcription matching and OCR/transcription match.
+% - Preprocessing result - ie. why vectorisation and ink filter are necessary, showing the raw binary patch and the resulting vector outline with super resolution
+% - An example of the HOG descriptor, showing the rendered character, the gradient field and the resulting histogram.
+% - Distribution test for the a contrario model, showing the histogram of dissimilarities and the fitted Gaussian.
+% - One cluster, before and after refinement
+% - The final glossary, showing the representative character for each cluster along with its frequency and OCR label.
+
 \section{Methodology}
 \label{sec:methodology}
 

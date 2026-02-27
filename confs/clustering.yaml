@@ -52,11 +52,11 @@ method:
   # higher values for RBConfiguration.
   partition_types: ["CPM", "RBConfiguration"]
 
-  # Sorted ascending; added 0.0006 to fill the gap between 0.00038 and 0.001.
-  epsilons: [0.00015, 0.0002, 0.00025, 0.00038, 0.0006, 0.001]
+  epsilons: [.00015, 0.0002, 0.00025, 0.0005, 0.001, 0.002, 0.005]
+  # epsilons: [0.0005]
+  # gammas: [1.0, 1.25]
+  gammas: [0.025, 0.06, 0.1, 0.25, 0.5, 1.0, 2.0]
 
-  # Wide range covering both CPM (needs low gamma) and RBConfiguration.
-  gammas: [0.025, 0.06, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0]
 
   cell_sizes: [22]                   # Cell size for HOG computation
   normalization_methods: ['patch']   # patch >> all

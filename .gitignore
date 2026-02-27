@@ -55,3 +55,13 @@ __pycache__/
 OCR_Pipeline_Results.pptx
 caches/hog_cache/params.json
 /notebooks/codesave
+*.svg
+/.hydra_results
+*.html
+/paper/figures/generated/reverse_manuscript
+results/clustering/book1/clustered_patches/bin_patch.npz
+/results/clustering/book1/clustered_patches
+/results/clustering/book1/filtered_patches
+/results/clustering/book1/label_representatives
+/results/extraction/book1
+/save

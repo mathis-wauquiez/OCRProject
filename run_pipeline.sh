@@ -19,10 +19,10 @@ cd "$SCRIPT_DIR"
 
 # ── Defaults ──
 BOOK="book1"
-SKIP_BUILD=false
+SKIP_BUILD=true
 ONLY=""
 FROM=""
-WORKERS=1
+WORKERS=2
 EXTRACTION_CONFIG="extraction_pipeline"
 PREPROCESSING_CONFIG="preprocessing"
 

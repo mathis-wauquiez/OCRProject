@@ -67,6 +67,10 @@ class ModelWrapper:
         Horizontal blank padding added to each side of the line image.
     """
 
+    CHARACTER_MAPPING = {
+        '為' : '爲'
+    }
+
     def __init__(
         self,
         rec_model_path: str | None = None,
@@ -193,5 +197,6 @@ class ModelWrapper:
         preds = self.net.predict(tensor.unsqueeze(0))[0]
 
         chars = [char for char, _, _, _ in preds]
+        chars = [self.CHARACTER_MAPPING.get(char, char) for char in chars]
         confs = [float(conf) for _, _, _, conf in preds]
         return chars, confs
