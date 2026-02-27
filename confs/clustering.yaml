@@ -22,6 +22,10 @@ data:
   output_path: "results/clustering/book1"
 
 
+# ── Shared anchors ──────────────────────────────────────────────
+_split_thresholds: &split_thresholds [10, 14, 17, 19, 21, 21.5, 22, 24, 28, 35]
+
+
 # Clustering method
 method:
   feature: "histogram"
@@ -41,22 +45,23 @@ method:
   # nums_bins: [8, 16]
 
   # Partition types for Leiden algorithm (A2):
-  #   "RBConfiguration" — modularity-based (null model)
-  #   "CPM"             — Constant Potts Model (absolute density)
-  # Set to ["CPM", "RBConfiguration"] to compare both.
+  #   "RBConfiguration" — modularity-based (null model); gamma ≈ 1.0 is standard
+  #   "CPM"             — Constant Potts Model (absolute density); needs much
+  #                        smaller gamma (0.01–0.5) for sparse graphs
+  # The gamma range below covers both regimes: low values for CPM,
+  # higher values for RBConfiguration.
   partition_types: ["CPM", "RBConfiguration"]
 
-  epsilons: [0.001, 0.00015, 0.0002, 0.00025, 0.00038]
-  # epsilons: [0.0005]
-  # gammas: [1.0, 1.25]
-  gammas: [1.0, 1.25, 1.5, 1.75, 2.0]
+  # Sorted ascending; added 0.0006 to fill the gap between 0.00038 and 0.001.
+  epsilons: [0.00015, 0.0002, 0.00025, 0.00038, 0.0006, 0.001]
 
-  cell_sizes: [22]  # Cell size for HOG computation
-  # cell_sizes: [48]  # Cell size for HOG computation
-  normalization_methods : ['patch'] # patch >> all
-  grdt_sigmas: [5]       # Gradient sigma for smoothing
-  nums_bins: [16]        # Number of orientation bins
+  # Wide range covering both CPM (needs low gamma) and RBConfiguration.
+  gammas: [0.025, 0.06, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0]
 
+  cell_sizes: [22]                   # Cell size for HOG computation
+  normalization_methods: ['patch']   # patch >> all
+  grdt_sigmas: [5]                   # Gradient sigma for smoothing
+  nums_bins: [16]                    # Number of orientation bins
 
   enable_glossary: true              # generate character glossary
 
@@ -66,7 +71,7 @@ reporter:
   _target_: src.clustering.clustering_sweep_report.ClusteringSweepReporter
   target_lbl: ${data.target_lbl}
   split_linkage_method: "average"
-  split_thresholds: [10, 14, 17, 19, 21, 21.5, 22, 24, 28, 35]
+  split_thresholds: *split_thresholds
   embed_images: true
   image_dpi: 75
   use_jpeg: false
@@ -75,9 +80,9 @@ reporter:
 # Refinement pipeline (injected into graphClusteringSweep)
 refinement_steps:
   - _target_: src.clustering.refinement.HausdorffSplitStep
-    thresholds: [10, 14, 17, 19, 21, 21.5, 22, 24, 28, 35]
+    thresholds: *split_thresholds
     linkage_method: "average"
-    min_cluster_size: 5
+    min_cluster_size: 3
     batch_size: 256
 
   - _target_: src.clustering.refinement.LabelSplitStep

@@ -60,6 +60,8 @@ class ClusterQuality:
     pre_representatives: dict
     best_metrics: Dict[str, Any]
     label_dataframe: pd.DataFrame
+    dominance_df: Optional[pd.DataFrame] = None
+    dominance_threshold_df: Optional[pd.DataFrame] = None
 
 
 class ClusteringSweepReporter(AutoReport):

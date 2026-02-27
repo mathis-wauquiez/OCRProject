@@ -303,6 +303,77 @@ def compute_cluster_purity(dataframe, membership_col, target_lbl):
     return purity_df, representatives
 
 
+def compute_biggest_cluster_stats(dataframe, target_lbl):
+    """Per-label biggest-cluster size and occurrence count.
+
+    For each known label, compute the size of the cluster that contains the
+    most instances of that label (i.e. the "biggest cluster" for that char)
+    and the total number of occurrences of the label.
+
+    Parameters
+    ----------
+    dataframe : pd.DataFrame
+        Must contain ``'membership'`` and *target_lbl* columns.
+    target_lbl : str
+        Column holding ground-truth labels.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``Label``, ``biggest_cluster_size``, ``occurrences``.
+    """
+    known_df = dataframe[
+        dataframe[target_lbl].fillna(UNKNOWN_LABEL) != UNKNOWN_LABEL
+    ]
+    rows = []
+    for label, grp in known_df.groupby(target_lbl):
+        cluster_counts = grp['membership'].value_counts()
+        rows.append({
+            'Label': label,
+            'biggest_cluster_size': int(cluster_counts.iloc[0]),
+            'occurrences': len(grp),
+        })
+    return pd.DataFrame(rows)
+
+
+def compute_dominance_threshold_table(dominance_df, thresholds=None):
+    """Build a threshold table from per-label biggest-cluster stats.
+
+    For each threshold *t*, compute:
+    * ``prop_chars`` – fraction of unique characters whose biggest cluster
+      size is >= *t*.
+    * ``prop_freq`` – fraction of total character occurrences accounted for
+      by characters whose biggest cluster size is >= *t*.
+
+    Parameters
+    ----------
+    dominance_df : pd.DataFrame
+        As returned by :func:`compute_biggest_cluster_stats`.
+    thresholds : list[int] | None
+        Thresholds to evaluate.  Defaults to ``[1, 2, 3, 5, 10, 15, 20]``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``threshold``, ``prop_chars``, ``prop_freq``.
+    """
+    if thresholds is None:
+        thresholds = [1, 2, 3, 5, 10, 15, 20]
+
+    n_chars = len(dominance_df)
+    total_occ = dominance_df['occurrences'].sum()
+    rows = []
+    for t in thresholds:
+        mask = dominance_df['biggest_cluster_size'] >= t
+        rows.append({
+            'threshold': t,
+            'prop_chars': mask.sum() / n_chars if n_chars else 0.0,
+            'prop_freq': (dominance_df.loc[mask, 'occurrences'].sum()
+                          / total_occ if total_occ else 0.0),
+        })
+    return pd.DataFrame(rows)
+
+
 def compute_label_completeness(dataframe, target_lbl):
     """Per-label spread across clusters.
 
