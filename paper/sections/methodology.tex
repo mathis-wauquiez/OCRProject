@@ -191,14 +191,27 @@ The full descriptor is normalised with L2-clip-L2 (clipping threshold~$t$); spec
 
 % ── (b) Dissimilarity metric ──
 \paragraph{Dissimilarity metric.}
-We compare pairs of HOG descriptors $\mathbf{h}^A, \mathbf{h}^B$ (each with $K$ cells of $B$ bins) using the Circular Earth Mover's Distance (CEMD) per cell.
-Because orientation bins are arranged on a circle, a naive bin-to-bin distance such as L2 would treat adjacent bins as independent and penalise small angular shifts disproportionately.
-CEMD instead measures the minimum amount of ``work'' needed to transform one histogram into the other along the circular axis.
-With cumulative difference $X_j = \sum_{i=1}^{j} h^A_{k,i} - \sum_{i=1}^{j} h^B_{k,i}$, the per-cell cost is:
+We compare pairs of HOG descriptors $\mathbf{h}^A, \mathbf{h}^B$ (each with $K$ cells of $B$ bins) using the Circular Earth Mover's Distance (CEMD)~\cite{rabin2008cemd,delon2011transportation} per cell.
+Because orientation bins are arranged on a circle, a naive bin-to-bin distance such as L2 treats neighbouring bins as independent and penalises small angular shifts disproportionately: a one-bin rotation that moves all mass from bin~$B$ to bin~$1$ would incur the same L2 cost as moving it to a distant bin, despite the angular proximity.
+
+CEMD avoids this by defining a proper optimal-transport distance on the circular domain.
+On the real line, the Earth Mover's Distance (Wasserstein-1) between two unit-mass histograms reduces to the L1 norm of their cumulative differences: $\text{EMD}(f,g) = \sum_{j} |F_j - G_j|$, where $F$ and $G$ are cumulative histograms.
+On a circle, there is no canonical starting point for the cumulation.
+Delon et al.~\cite{delon2011transportation} prove that the Wasserstein-1 distance on the circle can be reduced to its linear counterpart by finding the optimal \emph{cut point}---the position at which the circle should be cut open and unrolled into a line so that the resulting linear EMD is minimised.
+For discrete histograms with $B$ bins, this amounts to trying each bin as the starting point.
+
+Concretely, let $X_j = \sum_{i=1}^{j}(h^A_{k,i} - h^B_{k,i})$ denote the cumulative difference after $j$ bins, with $X_0 = 0$.
+The per-cell CEMD is:
 \begin{equation}
-    \text{CEMD}(h^A_k, h^B_k) = \min_{s \in \{0,\ldots,B{-}2\}} \frac{1}{B}\sum_{j=1}^{B} |X_j - X_s|.
+    \text{CEMD}(h^A_k, h^B_k)
+        = \min_{s \in \{0,\ldots,B{-}1\}}
+          \frac{1}{B}\sum_{j=1}^{B} \lvert X_j - X_s \rvert,
     \label{eq:cemd}
 \end{equation}
+where each candidate $s$ corresponds to cutting the circle at bin~$s$ and computing the linear EMD on the resulting line.
+When both histograms are normalised to equal mass, $X_B = 0 = X_0$, so $B$ distinct cuts remain.
+The optimum is attained when $X_s$ equals the median of $\{X_j\}$, yielding $O(B)$ complexity per cell; we use the equivalent $O(B^2)$ enumeration, which is negligible at our bin count ($B = 8$).
+
 The total dissimilarity between two characters is $D(\mathbf{h}^A, \mathbf{h}^B) = \sum_{k=1}^{K} \text{CEMD}(h^A_k, h^B_k)$.
 
 % ── (c) Number of False Alarms ──
