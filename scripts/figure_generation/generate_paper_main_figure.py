@@ -233,10 +233,11 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
         ax.axis("off")
         return
 
-    # Display crops + OCR text
+    # Display crops + OCR text (rendered via PIL for CJK support)
     ax.axis("off")
 
-    total_w = sum(c.shape[1] for c, _ in col_images) + 40 * len(col_images)
+    text_col_w = 40  # px reserved for the OCR label column
+    total_w = sum(c.shape[1] for c, _ in col_images) + text_col_w * len(col_images)
     max_h = max(c.shape[0] for c, _ in col_images)
 
     composite = np.ones((max_h, total_w, 3), dtype=np.uint8) * 255
@@ -245,17 +246,30 @@ def panel_ocr_matching(ax, image, page_df, n_show=3):
         h, w = crop.shape
         crop_rgb = cv2.cvtColor(crop, cv2.COLOR_GRAY2RGB)
         composite[:h, x_offset:x_offset + w] = crop_rgb
+        x_offset += w + text_col_w
+
+    # Render CJK labels with PIL (cv2.putText cannot handle CJK glyphs)
+    pil_comp = Image.fromarray(composite)
+    draw = ImageDraw.Draw(pil_comp)
+    ocr_font_size = 16
+    try:
+        ocr_font = ImageFont.truetype(CJK_FONT_PATH, ocr_font_size) if CJK_FONT_PATH else ImageFont.load_default()
+    except Exception:
+        ocr_font = ImageFont.load_default()
+
+    x_offset = 0
+    for crop, chars in col_images:
+        h, w = crop.shape
         text_x = x_offset + w + 3
-        text_y = 15
+        text_y = 2
         for ch in chars:
             if ch and ch != "\u25af":
-                cv2.putText(composite, ch, (text_x, text_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 120, 0), 1,
-                            cv2.LINE_AA)
+                draw.text((text_x, text_y), ch, font=ocr_font,
+                          fill=(0, 120, 0))
             text_y += 18
-        x_offset += w + 40
+        x_offset += w + text_col_w
 
-    ax.imshow(composite)
+    ax.imshow(np.array(pil_comp))
     ax.set_title("(d) OCR line extraction", fontsize=9, fontweight="bold")
 
 
@@ -281,13 +295,6 @@ def panel_final_alignment(ax, image, page_df):
         from src.ocr.wrappers import is_chinese_character
     except ImportError:
         is_chinese_character = lambda ch: True  # noqa: E731
-
-    # Try to load a CJK-capable font for PIL text
-    font_size = 28
-    try:
-        pil_font = ImageFont.truetype(CJK_FONT_PATH, font_size) if CJK_FONT_PATH else ImageFont.load_default()
-    except Exception:
-        pil_font = ImageFont.load_default()
 
     # Sort by reading order if available
     if 'reading_order' in page_df.columns:
@@ -317,42 +324,6 @@ def panel_final_alignment(ax, image, page_df):
 
         cv2.rectangle(canvas, (left, top), (left + w, top + h), color, 2)
 
-    # Add CJK labels via PIL (cv2 cannot render CJK glyphs)
-    pil_img = Image.fromarray(canvas)
-    draw = ImageDraw.Draw(pil_img)
-
-    for _, row in page_df.iterrows():
-        left, top = int(row["left"]), int(row["top"])
-        w, h = int(row["width"]), int(row["height"])
-
-        ocr_ch = row.get("char_chat", "\u25af")
-        trans_ch = row.get("char_transcription", None)
-
-        is_placeholder = (ocr_ch is None or ocr_ch == "\u25af"
-                          or not is_chinese_character(str(ocr_ch)))
-
-        if has_transcription and trans_ch is not None and trans_ch != "\u25af":
-            if is_placeholder:
-                color, label = _GREY, f"?|{trans_ch}"
-            elif ocr_ch == trans_ch:
-                color, label = _GREEN, str(trans_ch)
-            else:
-                color, label = _ORANGE, f"{ocr_ch}|{trans_ch}"
-        elif not is_placeholder:
-            color, label = _BLUE, str(ocr_ch)
-        else:
-            continue  # nothing useful to label
-
-        tx = left + w + 2
-        ty = top
-        try:
-            bbox = draw.textbbox((tx, ty), label, font=pil_font)
-            draw.rectangle(bbox, fill=(255, 255, 255, 200))
-            draw.text((tx, ty), label, font=pil_font, fill=color)
-        except Exception:
-            pass
-
-    canvas = np.array(pil_img)
     ax.imshow(canvas)
 
     # Legend
@@ -517,19 +488,28 @@ def main():
             cols.remove("char_transcription")
             df = load_columns(args.dataframe, cols)
 
-        if args.page is not None:
-            if "file" in df.columns:
-                df["_page"] = df["file"].apply(
-                    lambda x: int(x.split("_")[-1].split(".")[0])
-                )
-                page_df = df[df["_page"] == args.page].copy()
-                page_df.drop(columns=["_page"], inplace=True)
+        # Determine which page to show.  When --page is given we use it
+        # directly; otherwise we infer it from the --image filename so
+        # that only patches belonging to the displayed page are drawn.
+        page_num = args.page
+        if page_num is None and "file" in df.columns:
+            image_basename = args.image.name
+            page_df = df[df["file"] == image_basename].copy()
+        if page_df is None:
+            if page_num is not None:
+                if "file" in df.columns:
+                    df["_page"] = df["file"].apply(
+                        lambda x: int(x.split("_")[-1].split(".")[0])
+                    )
+                    page_df = df[df["_page"] == page_num].copy()
+                    page_df.drop(columns=["_page"], inplace=True)
+                else:
+                    page_df = df[df["page"] == page_num].copy()
             else:
-                page_df = df[df["page"] == args.page].copy()
-        else:
-            page_df = df
+                page_df = df
 
-        print(f"Loaded dataframe: {len(page_df)} rows for page {args.page}")
+        print(f"Loaded dataframe: {len(page_df)} rows for page"
+              f" {page_num or '(auto-detected from image filename)'}")
 
     build_figure(image, components, page_df, args.output)
 

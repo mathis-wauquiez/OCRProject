@@ -89,19 +89,26 @@ def generate_preprocessing_figure(df, output_path, n_examples=6, dpi=300):
         print(f"  [F4] Skipping: missing columns {missing}")
         return None
 
-    # Pick diverse examples (different characters)
-    indices = []
+    # Pick diverse examples (different characters) with a fixed seed
+    # for reproducibility.
+    rng = np.random.RandomState(42)
     if 'char_chat' in df.columns:
-        seen = set()
-        for idx in df.index:
-            char = df.loc[idx, 'char_chat']
-            if char not in seen and len(indices) < n_examples:
-                indices.append(idx)
-                seen.add(char)
-    if len(indices) < n_examples:
-        for idx in df.index:
-            if idx not in indices and len(indices) < n_examples:
-                indices.append(idx)
+        # Group by character, sample one index per unique character,
+        # then draw n_examples uniformly from that pool.
+        char_groups = df.groupby('char_chat').apply(
+            lambda g: g.index[rng.randint(len(g))]
+        )
+        # Exclude unknown labels
+        char_groups = char_groups[char_groups.index != UNKNOWN_LABEL]
+        if len(char_groups) > n_examples:
+            chosen = rng.choice(char_groups.values, n_examples, replace=False)
+        else:
+            chosen = char_groups.values
+        indices = list(chosen)
+    else:
+        pool = df.index.tolist()
+        indices = list(rng.choice(pool, min(n_examples, len(pool)),
+                                  replace=False))
 
     n = len(indices)
     fig, axes = plt.subplots(3, n, figsize=(n * 1.8, 3 * 1.8))
@@ -837,21 +844,27 @@ def generate_discrepancy_figure(
       Right: top-N most confused character pairs
              (OCR predicted X but GT says Y).
 
+    The ground-truth column is always ``char_transcription`` (the external
+    transcription), *not* ``char_consensus``, which is derived from the
+    agreement of OCR and transcription and would therefore never produce
+    mismatches or GT-only entries when compared against ``char_chat``.
+
     Parameters
     ----------
     dataframe : pd.DataFrame
-        Must have ``char_chat`` and *label_col* columns.
+        Must have ``char_chat`` and ``char_transcription`` columns.
     label_col : str
-        Ground-truth label column.
+        Ignored for this figure (kept for call-signature compatibility).
     output_path : Path or None
     dpi : int
     """
-    if 'char_chat' not in dataframe.columns or label_col not in dataframe.columns:
-        print(f"  [Discrepancy] Skipping: missing char_chat or {label_col}")
+    gt_col = 'char_transcription'
+    if 'char_chat' not in dataframe.columns or gt_col not in dataframe.columns:
+        print(f"  [Discrepancy] Skipping: missing char_chat or {gt_col}")
         return None
 
     ocr = dataframe['char_chat'].fillna(UNKNOWN_LABEL)
-    gt = dataframe[label_col].fillna(UNKNOWN_LABEL)
+    gt = dataframe[gt_col].fillna(UNKNOWN_LABEL)
 
     # Classify each patch
     both_known = (ocr != UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
@@ -929,14 +942,18 @@ def generate_discrepancy_table(
 ):
     """Generate a LaTeX table summarising discrepancy statistics.
 
+    Uses ``char_transcription`` as ground truth (see
+    :func:`generate_discrepancy_figure` for the rationale).
+
     Returns the table string and optionally writes it to a .tex file.
     """
-    if 'char_chat' not in dataframe.columns or label_col not in dataframe.columns:
+    gt_col = 'char_transcription'
+    if 'char_chat' not in dataframe.columns or gt_col not in dataframe.columns:
         print(f"  [Discrepancy table] Skipping: missing columns")
         return None
 
     ocr = dataframe['char_chat'].fillna(UNKNOWN_LABEL)
-    gt = dataframe[label_col].fillna(UNKNOWN_LABEL)
+    gt = dataframe[gt_col].fillna(UNKNOWN_LABEL)
 
     both_known = (ocr != UNKNOWN_LABEL) & (gt != UNKNOWN_LABEL)
     match = both_known & (ocr == gt)

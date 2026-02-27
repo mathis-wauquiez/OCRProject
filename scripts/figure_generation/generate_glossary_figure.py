@@ -109,7 +109,7 @@ def generate_glossary_figure(
     dpi=600,
     render_size=256,
     show_frequency=True,
-    title='Character Glossary \u2014 Representative Vectorised Characters',
+    title=None,
 ):
     """Generate a publication-quality glossary grid figure.
 
@@ -195,7 +195,8 @@ def generate_glossary_figure(
             fontsize=5,
         )
 
-    fig.suptitle(title, fontsize=10, fontweight='bold', y=0.995)
+    if title:
+        fig.suptitle(title, fontsize=10, fontweight='bold', y=0.995)
 
     if output_path:
         output_path = Path(output_path)
@@ -245,7 +246,6 @@ def generate_all_glossary_pages(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    label_tag = 'ground truth' if label_col != 'char_chat' else 'OCR'
     common_kw = dict(
         dataframe=dataframe, max_chars=max_chars, n_cols=n_cols,
         cell_size=cell_size, dpi=dpi, render_size=render_size,
@@ -256,7 +256,7 @@ def generate_all_glossary_pages(
     generate_glossary_figure(
         glossary_df=most_freq,
         output_path=output_dir / 'glossary.pdf',
-        title=f'Character Glossary \u2014 Most Frequent ({label_tag} labels)',
+        title=None,
         **common_kw,
     )
 
@@ -268,7 +268,7 @@ def generate_all_glossary_pages(
     generate_glossary_figure(
         glossary_df=least_freq,
         output_path=output_dir / 'glossary_least_frequent.pdf',
-        title=f'Character Glossary \u2014 Least Frequent ({label_tag} labels)',
+        title=None,
         **common_kw,
     )
 
@@ -280,8 +280,7 @@ def generate_all_glossary_pages(
     generate_glossary_figure(
         glossary_df=intermediate_df,
         output_path=output_dir / 'glossary_intermediate.pdf',
-        title=(f'Character Glossary \u2014 '
-               f'Main Cluster Size = {intermediate_size} ({label_tag} labels)'),
+        title=None,
         **common_kw,
     )
 
