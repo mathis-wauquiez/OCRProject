@@ -82,6 +82,7 @@ def main():
         "--only", nargs='+', default=None,
         help="Only generate these figures. Options: "
              "experiments glossary reverse_manuscript main_figure "
+             "layout_figure character_catalogue "
              "extraction_report post_clustering_report",
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -173,7 +174,52 @@ def main():
             print("\n  [main_figure] Skipping: no images found")
 
     # ─────────────────────────────────────────────────────────────
-    #  5. Extraction methodology report
+    #  5. Layout analysis figure
+    # ─────────────────────────────────────────────────────────────
+    if should_run('layout_figure'):
+        example_image = None
+        if images_dir.exists():
+            for ext in ['*.jpg', '*.png', '*.tif']:
+                matches = sorted(images_dir.glob(ext))
+                if matches:
+                    example_image = matches[0]
+                    break
+        if example_image is not None:
+            basename = example_image.name
+            comps_dir = Path(f"results/extraction/{images_dir.name}")
+            comps_file = comps_dir / "components" / f"{basename}.npz"
+            if comps_file.exists():
+                run_script('generate_layout_figure.py', [
+                    '--image', example_image,
+                    '--components', comps_file,
+                    '--output', out / 'layout_analysis.pdf',
+                    '--dpi', args.dpi,
+                ], args.dry_run)
+            else:
+                print("\n  [layout_figure] Skipping: no components file found")
+        else:
+            print("\n  [layout_figure] Skipping: no images found")
+
+    # ─────────────────────────────────────────────────────────────
+    #  6. Character catalogue figure
+    # ─────────────────────────────────────────────────────────────
+    if should_run('character_catalogue'):
+        run_script('generate_character_catalogue_figure.py', [
+            '--dataframe', clust_dir / 'clustered_patches',
+            '--label-col', args.label_col,
+            '--output', out / 'character_catalogue.pdf',
+            '--dpi', args.dpi,
+            '--list-characters',
+        ], args.dry_run)
+        print("  NOTE: character_catalogue requires --characters flag. "
+              "Run manually with specific characters, e.g.:")
+        print("    python scripts/figure_generation/"
+              "generate_character_catalogue_figure.py \\")
+        print("      --dataframe results/clustering/book1/clustered_patches \\")
+        print("      --characters '之' '國' '不' '大'")
+
+    # ─────────────────────────────────────────────────────────────
+    #  7. Extraction methodology report
     # ─────────────────────────────────────────────────────────────
     if should_run('extraction_report'):
         extraction_dir = Path(f"results/extraction/{images_dir.name}")
@@ -184,7 +230,7 @@ def main():
         run_script('generate_extraction_report.py', report_args, args.dry_run)
 
     # ─────────────────────────────────────────────────────────────
-    #  6. Post-clustering methodology report
+    #  8. Post-clustering methodology report
     # ─────────────────────────────────────────────────────────────
     if should_run('post_clustering_report'):
         run_script('generate_post_clustering_report.py', [

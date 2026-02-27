@@ -25,6 +25,30 @@ In parallel, the page is binarised (Otsu's method) and binary connected componen
 Each binary component is assigned to the CRAFT detection whose elliptic distance is smallest, yielding a set of character candidates with both a binary image and a precise bounding box.
 Filters discard components outside the expected bounding-box range ($30 \times 30$ to $250 \times 250$\,px) or with insufficient filled area ($<700$\,px$^2$).
 
+% ── Generated figure: extraction result (character segmentation) ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{\figExtractionSeg}
+    \caption{Character extraction result on a representative page.
+    Bounding boxes show the final character candidates after CRAFT detection,
+    watershed segmentation, Mahalanobis association, and post-filtering.
+    Colour coding indicates deletion reasons for discarded components.}
+    \label{fig:extraction-segmentation}
+\end{figure}
+
+% ── Generated figure: CRAFT deletion reasons ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{\figCraftDeletion}
+    \caption{CRAFT detection with deletion-reason overlay.
+    Components that pass all filters are shown in green; discarded
+    components are colour-coded by rejection criterion (red~=~area too
+    small, orange~=~aspect ratio too low, purple~=~high aspect ratio,
+    pink~=~box too small, magenta~=~box too large, blue~=~too close to
+    page contour).}
+    \label{fig:craft-deletion}
+\end{figure}
+
 
 % ============================================================================
 \subsection{Preprocessing}
@@ -36,7 +60,7 @@ Figure~\ref{fig:preprocessing} illustrates the three stages on representative ex
 % ── Generated figure: preprocessing before/after ──
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/generated/preprocessing.pdf}
+    \includegraphics[width=\linewidth]{\figPreprocessing}
     \caption{Preprocessing pipeline for individual character patches.
     \emph{Top row:} raw image patches extracted by CRAFT.
     \emph{Middle row:} binarised patches after Otsu thresholding and morphological cleaning.
@@ -47,6 +71,21 @@ Figure~\ref{fig:preprocessing} illustrates the three stages on representative ex
 \paragraph{Layout analysis and reading order.}
 A projection-based layout module identifies columns and sub-columns from vertical ink-density profiles.
 Within each sub-column, the reading order follows right-to-left, top-to-bottom (classical Chinese), assigning each character an integer index.
+Figure~\ref{fig:layout-analysis} illustrates the column and sub-column detection on a representative page.
+
+% ── Generated figure: layout analysis (columns + sub-columns) ──
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{\figLayoutAnalysis}
+    \caption{Layout analysis result showing column and sub-column detection.
+    \emph{Top:} horizontal ink-density projection with detected column
+    boundaries.
+    \emph{Bottom:} page image with column overlays (distinct colours) and
+    sub-column boundaries (dashed lines within each column).
+    The reading order proceeds right-to-left across columns and
+    top-to-bottom within each sub-column.}
+    \label{fig:layout-analysis}
+\end{figure}
 
 \paragraph{Vectorisation via affine scale-space.}
 Binary patches are cleaned by area opening and closing (removing foreground specks below 5\,px and background holes below 10\,px), then vectorised using affine scale-space smoothing~\cite{alvarez1993axioms,ciomaga2017curvature}.
@@ -88,7 +127,7 @@ The descriptor is normalised via L2-clip-L2 with clipping threshold $t = 0.2$.
 % ── Generated figure: HOG descriptor example ──
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/generated/hog_descriptor.pdf}
+    \includegraphics[width=\linewidth]{\figHogDescriptor}
     \caption{HOG descriptor computation on a representative character.
     From left to right: rendered SVG, gradient magnitude, gradient orientation, and the resulting HOG descriptor (orientation bins $\times$ cell index).}
     \label{fig:hog-example}
@@ -124,7 +163,7 @@ We store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \m
 % ── Generated figure: a contrario distribution ──
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/generated/a_contrario.pdf}
+    \includegraphics[width=\linewidth]{\figAContrario}
     \caption{A contrario null-hypothesis test.
     \emph{Left:} histogram of pairwise dissimilarities for a query character and the fitted Gaussian null model $\mathcal{N}(\mu_A, \sigma_A^2)$.
     Characters with dissimilarity in the far left tail are \emph{meaningful} matches.

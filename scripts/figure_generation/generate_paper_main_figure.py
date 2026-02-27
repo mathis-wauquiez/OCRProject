@@ -109,6 +109,23 @@ def panel_reading_order(ax, image, components, page_df=None):
         cv2.addWeighted(overlay, 0.15, canvas, 0.85, 0, canvas)
         cv2.rectangle(canvas, (int(l), 0), (int(r), h_img), color_bgr, 3)
 
+    # -- Draw sub-column boundaries (dashed red lines) ------------------
+    for _, rect in rectangles.iterrows():
+        left_c, top_r, right_c, bottom_r = rect['bbox']
+        n_subcols = len(rect['labels'])
+        if n_subcols <= 1:
+            continue
+        col_width = right_c - left_c
+        subcol_width = col_width / n_subcols
+        for sc in range(1, n_subcols):
+            x = int(left_c + sc * subcol_width)
+            dash_len, gap_len = 8, 6
+            y = top_r
+            while y < bottom_r:
+                y_end = min(y + dash_len, bottom_r)
+                cv2.line(canvas, (x, y), (x, y_end), (200, 60, 60), 2)
+                y = y_end + gap_len
+
     # -- Draw reading-order numbers ------------------------------------
     if page_df is not None and 'reading_order' in page_df.columns:
         # Use the dataframe bounding boxes (more accurate)
@@ -136,7 +153,7 @@ def panel_reading_order(ax, image, components, page_df=None):
 
     ax.imshow(canvas)
     ax.set_title(
-        f"(c) Columns ({len(left_cols)}) + reading order",
+        f"(c) Columns ({len(left_cols)}) + sub-columns + reading order",
         fontsize=9, fontweight="bold",
     )
     ax.axis("off")
