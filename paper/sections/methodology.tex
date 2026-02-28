@@ -216,11 +216,14 @@ The total dissimilarity between two characters is $D(\mathbf{h}^A, \mathbf{h}^B)
 
 % ── (c) Number of False Alarms ──
 \paragraph{Number of False Alarms.}
-Raw dissimilarities are not directly comparable across characters: a rare, intricate glyph with many strokes will have a higher baseline distance to anything else than a simple, frequent one.
-A fixed threshold would therefore be too strict for complex characters and too lax for simple ones.
-The \textit{a contrario} framework~\cite{desolneux2000meaningful} resolves this by normalising each dissimilarity relative to the distribution observed for that specific character.
+Raw dissimilarities are not directly comparable across characters.
+A geometrically complex glyph---one with many strokes or fine spatial structure---will systematically produce larger CEMD values against any comparand, simply because there is more oriented mass to misalign.
+A fixed threshold would therefore be simultaneously too strict for complex glyphs and too permissive for simple ones, conflating geometric complexity with visual dissimilarity.
 
-Under the null model (random pairing), $D$ is approximately Gaussian with character-specific moments $(\mu_A, \sigma_A^2)$ estimated from all pairwise comparisons involving character~$A$.
+The \textit{a contrario} framework~\cite{desolneux2000meaningful} resolves this by asking not whether $D(A,B)$ is small in absolute terms, but whether it is surprisingly small relative to what would be expected if $B$ were a random, unrelated character.
+Formally, character~$A$ defines a null distribution over~$D$ by treating all $N - 1$ characters it is compared with as random draws.
+Since $D(\mathbf{h}^A, \mathbf{h}^B) = \sum_{k=1}^{K} \text{CEMD}(h^A_k, h^B_k)$ is a sum of $K$ per-cell terms that are weakly dependent under the null, the Central Limit Theorem guarantees that $D$ converges to a Gaussian as $K$ grows.
+We therefore model the null distribution as $\mathcal{N}(\mu_A, \sigma_A^2)$, with moments estimated empirically from all pairwise comparisons involving~$A$.
 The Number of False Alarms is:
 \begin{equation}
     \text{NFA}(A,B) = N^2 \cdot \Phi\!\left(\frac{D(\mathbf{h}^A, \mathbf{h}^B) - \mu_A}{\sigma_A}\right),
@@ -230,12 +233,11 @@ where $\Phi$ is the standard normal CDF and $N$ the number of tokens.
 Two characters are deemed \emph{meaningfully} similar when $\text{NFA} \le \varepsilon$.
 In practice we store the negative log-NFA: $\text{NLFA}(A,B) = -\log\Phi\!\bigl(\frac{D - \mu_A}{\sigma_A}\bigr)$.
 
-This framework does more than decide which characters match—it also realises the observation from the introduction.
-Recall that printing defects are random and independent across occurrences.
-The cleanest copy of a character, the one closest to the ideal form, will pass the NFA test against many partners, because its shape is close to the shared template that all copies approximate.
-A defective copy, by contrast, will fail the test against most partners, because its distortions push it away from that template.
-As a result, the cleanest copy naturally acquires the highest degree in the similarity graph.
-We exploit this directly when selecting glossary representatives (\S\ref{sec:refinement}).
+This framework does more than decide which characters match---it also realises the observation from the introduction.
+Each printed occurrence can be modelled as the ideal form plus random, independent defects.
+The cleanest copy, the one closest to the ideal, will pass the NFA test against many partners, because its shape approximates the shared template.
+A defective copy, by contrast, will fail the test against most, because its distortions push it away from that template.
+As a result, the cleanest copy naturally acquires the highest degree in the similarity graph---we exploit this directly when selecting glossary representatives (\S\ref{sec:refinement}).
 
 % ── M3.2: A contrario distribution figure ──
 \begin{figure}[t]
