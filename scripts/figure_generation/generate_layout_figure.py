@@ -7,8 +7,8 @@ projection + boundaries) and sub-column splitting within each column.
 
 Usage:
     python scripts/figure_generation/generate_layout_figure.py \
-        --image       data/datasets/book1/wdl_13516_005.jpg \
-        --components  results/extraction/book1/components/wdl_13516_005.jpg.npz \
+        --image       data/datasets/book1/wdl_13516_045.jpg \
+        --components  results/extraction/book1/components/wdl_13516_045.jpg.npz \
         --output      paper/figures/generated/layout_analysis.pdf
 """
 

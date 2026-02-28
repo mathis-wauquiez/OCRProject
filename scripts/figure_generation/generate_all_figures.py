@@ -178,7 +178,10 @@ def main():
     # ─────────────────────────────────────────────────────────────
     if should_run('layout_figure'):
         example_image = None
-        if images_dir.exists():
+        preferred = images_dir / 'wdl_13516_045.jpg'
+        if preferred.exists():
+            example_image = preferred
+        elif images_dir.exists():
             for ext in ['*.jpg', '*.png', '*.tif']:
                 matches = sorted(images_dir.glob(ext))
                 if matches:
