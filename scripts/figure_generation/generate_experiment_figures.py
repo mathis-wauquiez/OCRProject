@@ -125,7 +125,8 @@ def generate_preprocessing_figure(df, output_path, n_examples=6, dpi=300):
         axes[0, col_i].axis('off')
 
         bimg = np.array(row['bin_patch'])
-        axes[1, col_i].imshow(bimg, cmap='gray')
+        bimg = 1.0 - (bimg > 0.5).astype(np.float32)
+        axes[1, col_i].imshow(bimg, cmap='gray', vmin=0, vmax=1)
         axes[1, col_i].axis('off')
 
         svg_obj = row['svg']

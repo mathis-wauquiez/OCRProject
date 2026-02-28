@@ -4,7 +4,7 @@ Generate the "reverse-printed manuscript" visualization.
 
 For each detected character in the document, overlay the representative
 vectorised character (from the glossary) at its position, rendered in
-light blue.  Two versions are produced:
+red.  Two versions are produced:
 
   (a) With the original manuscript as background
   (b) On a blank white background (characters only)
@@ -18,7 +18,7 @@ Usage:
     Optional:
         --page         5        Single page index to render (default: all)
         --dpi          300      Output DPI
-        --char-color   "#4a90d9"  Colour for overlaid characters (hex)
+        --char-color   "#d94a4a"  Colour for overlaid characters (hex)
         --char-alpha   0.65     Opacity of overlaid characters
         --bg-alpha     0.25     Opacity of manuscript background (version a)
 """
@@ -68,7 +68,7 @@ def render_page(
     dataframe,
     rep_lookup,
     page_image=None,
-    char_color=(74, 144, 217),
+    char_color=(217, 74, 74),
     char_alpha=0.65,
     bg_alpha=0.25,
     dpi=96,
@@ -208,7 +208,7 @@ def main():
     parser.add_argument("--page", type=int, default=None,
                         help="Render only this page index.")
     parser.add_argument("--dpi", type=int, default=300)
-    parser.add_argument("--char-color", type=str, default="#4a90d9",
+    parser.add_argument("--char-color", type=str, default="#d94a4a",
                         help="Hex colour for overlaid characters.")
     parser.add_argument("--char-alpha", type=float, default=0.65)
     parser.add_argument("--bg-alpha", type=float, default=0.25)
