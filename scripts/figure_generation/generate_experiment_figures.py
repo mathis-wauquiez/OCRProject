@@ -124,7 +124,7 @@ def generate_preprocessing_figure(df, output_path, n_examples=6, dpi=300):
         axes[0, col_i].imshow(img, cmap='gray')
         axes[0, col_i].axis('off')
 
-        bimg = np.array(row['bin_patch'])
+        bimg = 255 - np.array(row['bin_patch'])
         axes[1, col_i].imshow(bimg, cmap='gray')
         axes[1, col_i].axis('off')
 
